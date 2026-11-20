@@ -264,4 +264,303 @@ describe("createGuroMateEngine", () => {
       "https://fail.example/v1/chat/completions",
     ]);
   });
+
+  it("lists and filters Grades 7-10 MATATAG TLE Curriculum Guide competencies across components, quarters, sectors, and search queries", async () => {
+    const dataDir = await makeTempDir();
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    const all = await engine.listCurriculum();
+    expect(all.length).toBeGreaterThanOrEqual(400);
+
+    const g7Ict = await engine.listCurriculum({
+      gradeLevel: 7,
+      quarter: 1,
+      component: "ICT",
+    });
+    expect(g7Ict).toHaveLength(9);
+    expect(g7Ict[0]).toMatchObject({
+      source: "built-in",
+      component: "ICT",
+      sector: null,
+      quarterLabel: "Quarter I",
+      contentTopic: "Sectors of ICT and Its Career and Business Opportunities",
+    });
+    expect(g7Ict[0]?.contentStandard).toContain("ICT sectors");
+    expect(g7Ict[0]?.performanceStandard).toContain(
+      "convert number systems in practical scenarios",
+    );
+
+    const g8Afa = await engine.listCurriculum({
+      gradeLevel: 8,
+      quarter: 2,
+      component: "AFA",
+    });
+    expect(g8Afa.length).toBeGreaterThan(0);
+    expect(g8Afa.every((item) => item.gradeLevels.includes(8))).toBe(true);
+
+    const g9_10 = await engine.listCurriculum({ gradeLevel: 9 });
+    const g10 = await engine.listCurriculum({ gradeLevel: 10 });
+    expect(g9_10.length).toBe(g10.length);
+    const sectors = new Set(
+      g9_10.map((item) => item.sector).filter((s): s is string => Boolean(s)),
+    );
+    expect(sectors.size).toBe(23);
+    expect(sectors).toEqual(
+      new Set([
+        "COMPUTER PROGRAMMING",
+        "TELECOMMUNICATIONS",
+        "COMPUTER SYSTEMS SERVICING",
+        "VISUAL ARTS",
+        "ANIMAL PRODUCTION",
+        "AQUACULTURE (FISH CULTURE)",
+        "AGRICULTURAL CROP PRODUCTION",
+        "FISH CAPTURE",
+        "FOOD AND BEVERAGE PROCESSING",
+        "BEAUTY CARE SERVICES",
+        "FOOD SERVICE",
+        "GARMENTS",
+        "HEALTH AND WELLNESS MASSAGE",
+        "FOOD PREPARATION",
+        "HOTEL SERVICES",
+        "HANDICRAFTS",
+        "TOURISM SERVICES",
+        "AUTOMOTIVE AND SMALL ENGINE SERVICING",
+        "ELECTRICAL AND ELECTRONICS SERVICING",
+        "RESIDENTIAL CARPENTRY",
+        "RESIDENTIAL MASONRY AND TILE SETTING",
+        "RESIDENTIAL PLUMBING",
+        "SHIELDED METAL ARC WELDING (SMAW)",
+      ]),
+    );
+
+    const programmingQ3 = await engine.listCurriculum({
+      gradeLevel: 10,
+      quarter: 3,
+      component: "ICT",
+      sector: "COMPUTER PROGRAMMING",
+      query: "HTML",
+    });
+    expect(programmingQ3.length).toBeGreaterThanOrEqual(2);
+    expect(
+      programmingQ3.every(
+        (item) =>
+          item.sector === "COMPUTER PROGRAMMING" &&
+          item.quarters.includes(3),
+      ),
+    ).toBe(true);
+  });
+
+  it("enriches all Grade 7 Learning Competencies with Budget of Work week ranges, Suggested Activities, and Suggested Performance Tasks", async () => {
+    const dataDir = await makeTempDir();
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    const grade7 = await engine.listCurriculum({ gradeLevel: 7 });
+    expect(grade7).toHaveLength(43);
+    for (const item of grade7) {
+      expect(item.budgetOfWork).toBeDefined();
+      expect(item.budgetOfWork?.term).toBeTruthy();
+      expect(item.budgetOfWork?.weekRange).toBeTruthy();
+      expect(item.budgetOfWork?.suggestedActivities).toBeTruthy();
+      expect(item.budgetOfWork?.suggestedPerformanceTasks).toBeTruthy();
+    }
+
+    const ictFirst = grade7.find(
+      (i) => i.component === "ICT" && i.competencyNumber === 1,
+    );
+    expect(ictFirst?.budgetOfWork).toMatchObject({
+      term: "First Term",
+      weekRange: "1 to 3",
+    });
+    expect(ictFirst?.budgetOfWork?.suggestedActivities).toContain(
+      "ICT Sector Research Map",
+    );
+    expect(ictFirst?.budgetOfWork?.suggestedPerformanceTasks).toContain(
+      "Binary to Decimal Conversion Challenge",
+    );
+
+    const g7IctSecondTerm = await engine.listCurriculum({
+      gradeLevel: 7,
+      component: "ICT",
+      term: "Second Term",
+    });
+    expect(g7IctSecondTerm).toHaveLength(3);
+    expect(
+      g7IctSecondTerm.every(
+        (i) => i.budgetOfWork?.term === "Second Term",
+      ),
+    ).toBe(true);
+
+    const afaFirst = grade7.find(
+      (i) => i.component === "AFA" && i.competencyNumber === 1,
+    );
+    expect(afaFirst?.budgetOfWork?.weekRange).toBe("1");
+    expect(afaFirst?.budgetOfWork?.suggestedActivities).toContain(
+      "Agriculture Career Spotlight",
+    );
+    expect(afaFirst?.budgetOfWork?.suggestedPerformanceTasks).toContain(
+      "Personal Crop Bed Planting",
+    );
+
+    const fcsNapkin = grade7.find(
+      (i) =>
+        i.component === "FCS" &&
+        i.learningCompetency.toLowerCase().includes("napkin"),
+    );
+    expect(fcsNapkin?.budgetOfWork?.weekRange).toBe("8");
+    expect(fcsNapkin?.budgetOfWork?.suggestedActivities).toContain(
+      "Napkin Folding",
+    );
+
+    const iaMeasure = grade7.find(
+      (i) =>
+        i.component === "IA" &&
+        i.learningCompetency.toLowerCase().includes("measuring instruments"),
+    );
+    expect(iaMeasure?.budgetOfWork?.weekRange).toBe("6 to 8");
+    expect(iaMeasure?.budgetOfWork?.suggestedActivities).toContain(
+      "Measuring Instrument Observation",
+    );
+    expect(iaMeasure?.budgetOfWork?.suggestedPerformanceTasks).toContain(
+      "Personal Measurement Exercise",
+    );
+  });
+
+  it("creates, updates, persists, and deletes custom Learning Competencies with validation", async () => {
+    const dataDir = await makeTempDir();
+    const engine1 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    await expect(
+      engine1.saveCustomCompetency({
+        gradeLevels: [7],
+        quarters: [1],
+        component: "ICT",
+        contentTopic: "Local Web Basics",
+        contentStandard: "The learners demonstrate understanding of HTML.",
+        performanceStandard: "The learners create a webpage.",
+        learningCompetency: "   ",
+      }),
+    ).rejects.toThrow(/learning competency/i);
+
+    const created = await engine1.saveCustomCompetency({
+      gradeLevels: [7],
+      quarters: [1],
+      component: "ICT",
+      contentTopic: "Local Web Basics",
+      contentSubTopics: ["semantic HTML", "accessibility"],
+      contentStandard: "The learners demonstrate understanding of HTML.",
+      performanceStandard: "The learners create an accessible webpage.",
+      learningCompetency: "build a personal portfolio page using semantic HTML",
+      budgetOfWork: {
+        term: "Third Term",
+        weekRange: "9 to 10",
+        suggestedActivities: "- Portfolio wireframe lab",
+        suggestedPerformanceTasks: "- Publish local HTML portfolio",
+      },
+      customNotes: "Use school lab computers with offline browsers.",
+    });
+
+    expect(created.id).toMatch(/^custom-/);
+    expect(created.source).toBe("custom");
+    expect(created.quarterLabel).toBe("Quarter I");
+
+    const updated = await engine1.saveCustomCompetency({
+      id: created.id,
+      gradeLevels: [7],
+      quarters: [1],
+      component: "ICT",
+      contentTopic: "Local Web Basics",
+      contentSubTopics: ["semantic HTML"],
+      contentStandard: "The learners demonstrate understanding of HTML.",
+      performanceStandard: "The learners create an accessible webpage.",
+      learningCompetency: "build a structured webpage using semantic HTML5",
+      customNotes: "Pair programming in 50-minute block.",
+    });
+    expect(updated.id).toBe(created.id);
+    expect(updated.learningCompetency).toBe(
+      "build a structured webpage using semantic HTML5",
+    );
+
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+    const ictList = await engine2.listCurriculum({
+      gradeLevel: 7,
+      quarter: 1,
+      component: "ICT",
+      query: "semantic HTML5",
+    });
+    expect(ictList).toHaveLength(1);
+    expect(ictList[0]).toMatchObject({
+      id: created.id,
+      source: "custom",
+      customNotes: "Pair programming in 50-minute block.",
+    });
+
+    const fullG7Ict = await engine2.listCurriculum({
+      gradeLevel: 7,
+      quarter: 1,
+      component: "ICT",
+    });
+    expect(fullG7Ict).toHaveLength(10);
+
+    await engine2.deleteCustomCompetency(created.id);
+    const afterDelete = await engine2.listCurriculum({
+      gradeLevel: 7,
+      quarter: 1,
+      component: "ICT",
+    });
+    expect(afterDelete).toHaveLength(9);
+
+    await expect(engine2.deleteCustomCompetency("cg-g7-ict-q1-01")).rejects.toThrow(
+      /not found|cannot delete/i,
+    );
+  });
+
+  it("persists unpacked Budget of Work notes on built-in and custom competencies without altering built-in fields", async () => {
+    const dataDir = await makeTempDir();
+    const engine1 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    const noted = await engine1.saveCompetencyNotes(
+      "cg-g7-ict-q1-01",
+      "Day 1: 15-min sector matching warm-up; Day 2: career poster in pairs.",
+    );
+    expect(noted.id).toBe("cg-g7-ict-q1-01");
+    expect(noted.source).toBe("built-in");
+    expect(noted.customNotes).toBe(
+      "Day 1: 15-min sector matching warm-up; Day 2: career poster in pairs.",
+    );
+    expect(noted.budgetOfWork?.weekRange).toBe("1 to 3");
+
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+    const found = await engine2.listCurriculum({
+      gradeLevel: 7,
+      component: "ICT",
+      query: "career poster",
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0]?.id).toBe("cg-g7-ict-q1-01");
+
+    const cleared = await engine2.saveCompetencyNotes("cg-g7-ict-q1-01", "   ");
+    expect(cleared.customNotes).toBeUndefined();
+
+    await expect(
+      engine2.saveCompetencyNotes("missing-id", "Note"),
+    ).rejects.toThrow(/not found/i);
+  });
 });
