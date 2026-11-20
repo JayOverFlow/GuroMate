@@ -1,0 +1,449 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f7f5;
+  --surface: #ffffff;
+  --surface-muted: #eef1ec;
+  --border: #c5cdc2;
+  --border-strong: #5c6659;
+  --text: #182018;
+  --text-muted: #4b574b;
+  --accent: #14532d;
+  --accent-hover: #0f3f22;
+  --accent-soft: #e3efe7;
+  --error: #b42318;
+  --error-bg: #fef3f2;
+  --success: #166534;
+  --success-bg: #ecfdf3;
+  --focus-ring: #0b57d0;
+  --radius: 0.5rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+.skip-link:focus {
+  position: fixed;
+  inset-block-start: 0.75rem;
+  inset-inline-start: 0.75rem;
+  z-index: 100;
+  padding: 0.625rem 1rem;
+  background: var(--accent);
+  color: #ffffff;
+  border-radius: var(--radius);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Header & Responsive Navbar */
+.site-header {
+  background: var(--surface);
+  border-block-end: 1px solid var(--border);
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 20;
+}
+
+.header-inner {
+  max-inline-size: 72rem;
+  margin-inline: auto;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.header-inner > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.brand-tag {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+}
+
+.menu-button {
+  anchor-name: --menu-button;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 2.75rem;
+  padding: 0.5rem 0.875rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.site-menu {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 25px rgb(0 0 0 / 0.12);
+}
+
+.site-menu[popover] {
+  position: fixed;
+  inset: auto;
+  inset-block-start: 4.5rem;
+  inset-block-start: anchor(--menu-button bottom);
+  inset-inline-end: 1rem;
+  inline-size: min(80dvw, 20rem);
+  max-inline-size: calc(100dvw - 2rem);
+  block-size: fit-content;
+  max-block-size: calc(100dvh - 6rem);
+  margin-block-start: 0.5rem;
+  overflow: auto;
+}
+
+.site-menu[popover]:is(:popover-open, .\:popover-open) {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.site-menu a {
+  display: flex;
+  align-items: center;
+  min-block-size: 2.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.site-menu a:hover {
+  background: var(--surface-muted);
+}
+
+.site-menu a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  border-inline-start: 3px solid var(--accent);
+}
+
+.site-header.is-wide .menu-button {
+  display: none;
+}
+
+.site-header.is-wide .site-menu {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  inline-size: auto;
+  max-inline-size: none;
+  block-size: auto;
+  max-block-size: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.site-header.is-wide .site-menu::backdrop {
+  display: none;
+}
+
+.site-header.is-wide .site-menu a[aria-current="page"] {
+  border-inline-start: 0;
+  border-block-end: 3px solid var(--accent);
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.site-header.is-measuring * {
+  transition: none !important;
+}
+
+@media (forced-colors: active) {
+  .site-menu a[aria-current="page"] {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* Main Workspace Layout */
+.app-main {
+  max-inline-size: 56rem;
+  margin-inline: auto;
+  padding: 1.75rem 1.25rem 3rem;
+}
+
+.workspace-header {
+  margin-block-end: 1.5rem;
+}
+
+.workspace-header h1 {
+  margin: 0 0 0.375rem;
+  font-size: 1.625rem;
+  line-height: 1.25;
+}
+
+.workspace-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+
+/* Settings Form */
+.settings-form {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.settings-fieldset {
+  margin: 0;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-fieldset legend {
+  padding-inline: 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.provider-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.provider-fieldset legend {
+  padding: 0;
+  margin-block-end: 0.25rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.5rem;
+}
+
+.provider-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  min-block-size: 3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.provider-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.provider-option input[type="radio"] {
+  accent-color: var(--accent);
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.field label {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.field input,
+.field textarea {
+  font: inherit;
+  font-size: max(1rem, 1em);
+  padding: 0.625rem 0.75rem;
+  min-block-size: 3rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.field textarea {
+  min-block-size: 5.5rem;
+  resize: vertical;
+}
+
+.input-with-toggle {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.input-with-toggle input {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.error-msg {
+  display: none;
+  color: var(--error);
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-block-start: 0.125rem;
+}
+
+.field :is(input, textarea):is(:user-invalid, .user-invalid-fallback) {
+  border-color: var(--error);
+  background: var(--error-bg);
+}
+
+.field :is(input, textarea):is(:user-invalid, .user-invalid-fallback) ~ .error-msg {
+  display: block;
+}
+
+.field :is(input, textarea):user-valid {
+  border-color: var(--success);
+}
+
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.btn-primary,
+.btn-secondary {
+  font: inherit;
+  font-weight: 600;
+  min-block-size: 3rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #ffffff;
+  border: 1px solid var(--accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.status-banner {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+
+.status-banner[data-tone="success"] {
+  background: var(--success-bg);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.status-banner[data-tone="error"] {
+  background: var(--error-bg);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+@media (pointer: coarse) {
+  .field input,
+  .btn-primary,
+  .btn-secondary {
+    min-block-size: 3.25rem;
+  }
+}
