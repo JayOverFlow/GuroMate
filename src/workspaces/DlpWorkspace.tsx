@@ -1,101 +1,25 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useId } from "react";
 import { renderDlpMarkdown } from "../engine/dlp";
-import type {
-  ClassSection,
-  CurriculumCompetency,
-  DailyLessonLog,
-  DailyLessonPlan,
-  DlpActivityPair,
-  DlpIntentions,
-  SessionNumber,
-} from "../engine/types";
+import type { SessionNumber } from "../engine/types";
+import {
+  DLP_ACTIVITY_ROWS,
+  DLP_INTENTIONS_LIST_FIELDS,
+  useDlpWorkspace,
+  type DeriveDlpTarget,
+} from "../hooks/useDlpWorkspace";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
-import { readErrorMessage, renderMarkdownBlocks } from "./lessonViewHelpers";
+import { renderMarkdownBlocks } from "./lessonViewHelpers";
 
-type ViewMode = "edit" | "markdown";
-type BuilderMode = "scratch" | "derive";
-
-interface StatusState {
-  tone: "success" | "error";
-  text: string;
-}
-
-type ActivityRowKey =
-  | "preLesson"
-  | "lessonFlow"
-  | "learningResources"
-  | "integrationAndContextualization"
-  | "formativeAssessment"
-  | "extendedLearningOpportunities"
-  | "reflections";
-
-const DLP_ACTIVITY_ROWS: ReadonlyArray<{
-  key: ActivityRowKey;
-  label: string;
-  section: string;
-  rows?: number;
-}> = [
-  { key: "preLesson", label: "Pre-Lesson", section: "Learning Experience", rows: 3 },
-  { key: "lessonFlow", label: "Lesson Flow", section: "Learning Experience", rows: 4 },
-  {
-    key: "learningResources",
-    label: "Learning Resources",
-    section: "Learning Experience",
-    rows: 2,
-  },
-  {
-    key: "integrationAndContextualization",
-    label: "Opportunities for Integration and Contextualization",
-    section: "Learning Experience",
-    rows: 2,
-  },
-  {
-    key: "formativeAssessment",
-    label: "Formative Assessment",
-    section: "Assessing Learning",
-    rows: 3,
-  },
-  {
-    key: "extendedLearningOpportunities",
-    label: "Extended Learning Opportunities",
-    section: "Ways Forward",
-    rows: 2,
-  },
-  {
-    key: "reflections",
-    label: "Reflections (always left blank in .docx export)",
-    section: "Ways Forward",
-    rows: 2,
-  },
-];
-
-const INTENTIONS_LIST_FIELDS: ReadonlyArray<{
-  key: "learningCompetencies" | "contentStandards" | "performanceStandards";
-  label: string;
-}> = [
-  { key: "learningCompetencies", label: "Learning Competencies (one per line)" },
-  { key: "contentStandards", label: "Content Standards (one per line)" },
-  { key: "performanceStandards", label: "Performance Standards (one per line)" },
-];
-
-export interface DeriveDlpTarget {
-  dllId: string;
-  sessionNumber: SessionNumber;
-}
+export type { DeriveDlpTarget };
 
 interface DlpWorkspaceProps {
   initialDeriveTarget?: DeriveDlpTarget | null;
   onConsumeDeriveTarget?: () => void;
   onCreateQuiz?: (dlpId: string) => void;
 }
+
+const INPUT_CLASS =
+  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
 export function DlpWorkspace({
   initialDeriveTarget,
@@ -105,417 +29,316 @@ export function DlpWorkspace({
   const headingId = useId();
   const baseId = useId();
 
-  const [dlps, setDlps] = useState<DailyLessonPlan[]>([]);
-  const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
-  const [curriculum, setCurriculum] = useState<CurriculumCompetency[]>([]);
-  const [sections, setSections] = useState<ClassSection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<StatusState | null>(null);
-
-  const [selectedDlpId, setSelectedDlpId] = useState("");
-  const [draftDlp, setDraftDlp] = useState<DailyLessonPlan | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("edit");
-  const [saving, setSaving] = useState(false);
-
-  // Builder state
-  const [builderMode, setBuilderMode] = useState<BuilderMode>("scratch");
-  const [deriveDllId, setDeriveDllId] = useState("");
-  const [deriveSessionNumber, setDeriveSessionNumber] = useState<SessionNumber>(1);
-  const [lessonTitle, setLessonTitle] = useState("");
-  const [gradeAndSection, setGradeAndSection] = useState("");
-  const [references, setReferences] = useState("");
-  const [promptNotes, setPromptNotes] = useState("");
-  const [selectedCompetencyIds, setSelectedCompetencyIds] = useState<string[]>([]);
-  const [generating, setGenerating] = useState(false);
-  const [pickedCompetencyId, setPickedCompetencyId] = useState("");
-  const deriveIntentRef = useRef(Boolean(initialDeriveTarget));
-
-  const loadWorkspaceData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [dlpRes, dllRes, currRes, secRes] = await Promise.all([
-        fetch("/api/dlps"),
-        fetch("/api/dlls"),
-        fetch("/api/curriculum"),
-        fetch("/api/class-sections"),
-      ]);
-      if (!dlpRes.ok) throw new Error(await readErrorMessage(dlpRes));
-      if (!dllRes.ok) throw new Error(await readErrorMessage(dllRes));
-      if (!currRes.ok) throw new Error(await readErrorMessage(currRes));
-      if (!secRes.ok) throw new Error(await readErrorMessage(secRes));
-
-      const loadedDlps = (await dlpRes.json()) as DailyLessonPlan[];
-      const loadedDlls = (await dllRes.json()) as DailyLessonLog[];
-      const loadedCurr = (await currRes.json()) as CurriculumCompetency[];
-      const loadedSec = (await secRes.json()) as ClassSection[];
-
-      setDlps(loadedDlps);
-      setDlls(loadedDlls);
-      setCurriculum(loadedCurr);
-      setSections(loadedSec);
-
-      if (loadedSec.length > 0) {
-        const first = loadedSec[0]!;
-        setGradeAndSection(
-          (prev) => prev || `Grade ${first.gradeLevel} - ${first.sectionName}`,
-        );
-      }
-      if (loadedDlls.length > 0) {
-        setDeriveDllId((prev) =>
-          prev && loadedDlls.some((d) => d.id === prev) ? prev : loadedDlls[0]!.id,
-        );
-      }
-      if (loadedDlps.length > 0 && !deriveIntentRef.current) {
-        setSelectedDlpId((prev) =>
-          prev && loadedDlps.some((d) => d.id === prev) ? prev : loadedDlps[0]!.id,
-        );
-      }
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadWorkspaceData();
-  }, [loadWorkspaceData]);
-
-  useEffect(() => {
-    if (!initialDeriveTarget) return;
-    deriveIntentRef.current = true;
-    setSelectedDlpId("");
-    setBuilderMode("derive");
-    setDeriveDllId(initialDeriveTarget.dllId);
-    setDeriveSessionNumber(initialDeriveTarget.sessionNumber);
-    onConsumeDeriveTarget?.();
-  }, [initialDeriveTarget, onConsumeDeriveTarget]);
-
-  useEffect(() => {
-    const match = dlps.find((d) => d.id === selectedDlpId) ?? null;
-    setDraftDlp(match ? structuredClone(match) : null);
-  }, [dlps, selectedDlpId]);
-
-  const competencyMap = useMemo(
-    () => new Map(curriculum.map((c) => [c.id, c])),
-    [curriculum],
-  );
-
-  const selectedSourceDll = useMemo(
-    () => dlls.find((d) => d.id === deriveDllId) ?? null,
-    [dlls, deriveDllId],
-  );
-
-  const activeSourceSessions = useMemo(
-    () =>
-      selectedSourceDll
-        ? selectedSourceDll.sessions.filter((s) => s.mode === "instructional")
-        : [],
-    [selectedSourceDll],
-  );
-
-  useEffect(() => {
-    if (
-      activeSourceSessions.length > 0 &&
-      !activeSourceSessions.some((s) => s.sessionNumber === deriveSessionNumber)
-    ) {
-      setDeriveSessionNumber(activeSourceSessions[0]!.sessionNumber);
-    }
-  }, [activeSourceSessions, deriveSessionNumber]);
-
-  const selectedSourceSession = useMemo(
-    () =>
-      activeSourceSessions.find((s) => s.sessionNumber === deriveSessionNumber) ?? null,
-    [activeSourceSessions, deriveSessionNumber],
-  );
-
-  function addScratchCompetency() {
-    if (!pickedCompetencyId) return;
-    setSelectedCompetencyIds((prev) =>
-      prev.includes(pickedCompetencyId) ? prev : [...prev, pickedCompetencyId],
-    );
-  }
-
-  function removeScratchCompetency(id: string) {
-    setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
-  }
-
-  async function handleGenerate(event: FormEvent) {
-    event.preventDefault();
-    setStatus(null);
-    setGenerating(true);
-    try {
-      const payload =
-        builderMode === "derive"
-          ? {
-              mode: "derive" as const,
-              dllId: deriveDllId,
-              sessionNumber: deriveSessionNumber,
-              lessonTitle,
-              references,
-              promptNotes,
-            }
-          : {
-              mode: "scratch" as const,
-              lessonTitle,
-              gradeAndSection,
-              references,
-              promptNotes,
-              competencyIds: selectedCompetencyIds,
-            };
-      const res = await fetch("/api/dlps/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const created = (await res.json()) as DailyLessonPlan;
-      setDlps((prev) => [created, ...prev]);
-      setSelectedDlpId(created.id);
-      setViewMode("edit");
-      setStatus({
-        tone: "success",
-        text: `Generated Daily Lesson Plan "${created.lessonTitle}" (${created.learningAreas}).`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  function updateDraftHeader<K extends keyof DailyLessonPlan>(
-    key: K,
-    value: DailyLessonPlan[K],
-  ) {
-    setDraftDlp((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }
-
-  function updateDraftIntentions(patch: Partial<DlpIntentions>) {
-    setDraftDlp((prev) =>
-      prev ? { ...prev, intentions: { ...prev.intentions, ...patch } } : prev,
-    );
-  }
-
-  function updateDraftActivity(
-    key: ActivityRowKey,
-    column: keyof DlpActivityPair,
-    value: string,
-  ) {
-    setDraftDlp((prev) =>
-      prev ? { ...prev, [key]: { ...prev[key], [column]: value } } : prev,
-    );
-  }
-
-  async function handleSaveEdits() {
-    if (!draftDlp) return;
-    setStatus(null);
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/dlps/${encodeURIComponent(draftDlp.id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draftDlp),
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const updated = (await res.json()) as DailyLessonPlan;
-      setDlps((prev) =>
-        prev.map((item) => (item.id === updated.id ? updated : item)),
-      );
-      setStatus({
-        tone: "success",
-        text: `Saved changes to "${updated.lessonTitle}" on local disk.`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDeleteDlp() {
-    if (!draftDlp) return;
-    setStatus(null);
-    try {
-      const res = await fetch(`/api/dlps/${encodeURIComponent(draftDlp.id)}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const remaining = dlps.filter((d) => d.id !== draftDlp.id);
-      setDlps(remaining);
-      setSelectedDlpId(remaining[0]?.id ?? "");
-      setStatus({
-        tone: "success",
-        text: `Deleted "${draftDlp.lessonTitle}".`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const {
+    dlps,
+    dlls,
+    curriculum,
+    sections,
+    loading,
+    status,
+    selectedDlpId,
+    setSelectedDlpId,
+    draftDlp,
+    viewMode,
+    setViewMode,
+    saving,
+    builderMode,
+    setBuilderMode,
+    deriveDllId,
+    setDeriveDllId,
+    deriveSessionNumber,
+    setDeriveSessionNumber,
+    lessonTitle,
+    setLessonTitle,
+    gradeAndSection,
+    setGradeAndSection,
+    references,
+    setReferences,
+    promptNotes,
+    setPromptNotes,
+    selectedCompetencyIds,
+    generating,
+    pickedCompetencyId,
+    setPickedCompetencyId,
+    competencyMap,
+    selectedSourceDll,
+    activeSourceSessions,
+    selectedSourceSession,
+    addScratchCompetency,
+    removeScratchCompetency,
+    handleGenerate,
+    updateDraftHeader,
+    updateDraftIntentions,
+    updateDraftActivity,
+    handleSaveEdits,
+    handleDeleteDlp,
+  } = useDlpWorkspace(initialDeriveTarget, onConsumeDeriveTarget);
 
   return (
-    <section className="dll-workspace" aria-labelledby={headingId}>
-      <div className="curriculum-header-row">
-        <div className="workspace-header">
-          <h1 id={headingId} tabIndex={-1}>
-            DLP Builder
+    <section
+      aria-labelledby={headingId}
+      className="flex flex-col gap-gutter-lg"
+    >
+      {/* Page Title & Action Row */}
+      <div className="flex flex-wrap items-end justify-between gap-gutter-md">
+        <div className="flex flex-col gap-gutter-xs">
+          <h1
+            id={headingId}
+            tabIndex={-1}
+            className="font-headline text-headline-lg text-on-surface text-balance"
+          >
+            {draftDlp
+              ? `${draftDlp.lessonTitle} (Detailed DLP)`
+              : "New Single-Session DLP Builder"}
           </h1>
-          <p className="workspace-subtitle">
+          <p className="font-body text-body-md text-on-surface-variant">
             Build single-session ILAW Daily Lesson Plans from a DLL Session or
             from scratch with paired Teacher&apos;s and Student&apos;s Activity.
           </p>
         </div>
 
-        <div className="actions-row">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => setSelectedDlpId("")}
-          >
-            + New DLP
-          </button>
-        </div>
-      </div>
-
-      {status && (
-        <div className="status-banner" data-tone={status.tone} role="status">
-          {status.text}
-        </div>
-      )}
-
-      {dlps.length > 0 && (
-        <div className="card dll-saved-bar">
-          <div className="field">
-            <label htmlFor={`${baseId}-saved-dlp`}>Saved Daily Lesson Plans</label>
+        <div className="flex flex-wrap items-center gap-gutter-sm">
+          {dlps.length > 0 && (
             <select
               id={`${baseId}-saved-dlp`}
+              aria-label="Saved Daily Lesson Plans"
               value={selectedDlpId}
               onChange={(e) => setSelectedDlpId(e.target.value)}
+              className="max-w-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
             >
               <option value="">Create a new Daily Lesson Plan...</option>
               {dlps.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.lessonTitle} — {item.learningAreas} ({item.gradeAndSection})
+                  {item.lessonTitle} — {item.learningAreas} (
+                  {item.gradeAndSection})
                 </option>
               ))}
             </select>
-          </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setSelectedDlpId("")}
+            className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+          >
+            <span
+              className="material-symbols-outlined text-title-md"
+              aria-hidden="true"
+            >
+              add
+            </span>
+            <span>New DLP</span>
+          </button>
+
+          {draftDlp && (
+            <>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void handleSaveEdits()}
+                className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  save
+                </span>
+                <span>{saving ? "Saving..." : "Save Changes"}</span>
+              </button>
+
+              <a
+                href={`/api/dlps/${encodeURIComponent(draftDlp.id)}/docx`}
+                download
+                className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-primary border border-primary font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  download
+                </span>
+                <span>Export ILAW .docx</span>
+              </a>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Status Banner */}
+      {status && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`rounded-md border p-gutter-md flex items-center gap-gutter-sm font-body text-body-md ${
+            status.tone === "error"
+              ? "border-error bg-error-container text-on-error-container"
+              : "border-success bg-success-container/60 text-on-success-container"
+          }`}
+        >
+          <span
+            className="material-symbols-outlined text-title-lg shrink-0"
+            aria-hidden="true"
+          >
+            {status.tone === "error" ? "error" : "check_circle"}
+          </span>
+          <span>{status.text}</span>
         </div>
       )}
 
       {loading ? (
-        <div className="card">Loading Daily Lesson Plans and Curriculum Catalog...</div>
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg font-body text-body-md text-on-surface-variant">
+          Loading Daily Lesson Plans and Curriculum Catalog...
+        </div>
       ) : !draftDlp ? (
-        <form className="settings-form" onSubmit={handleGenerate}>
-          <fieldset className="settings-fieldset">
-            <legend>1. Creation Source</legend>
+        /* Create New DLP Form */
+        <form
+          onSubmit={(e) => void handleGenerate(e)}
+          className="flex flex-col gap-gutter-lg"
+        >
+          <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
+            <legend className="font-title text-title-lg text-on-surface px-1">
+              1. Creation Source &amp; Metadata
+            </legend>
 
-            <div className="classroom-tablist" role="tablist" aria-label="DLP Creation Mode">
+            <div
+              role="tablist"
+              aria-label="DLP Creation Mode"
+              className="inline-flex flex-wrap items-center gap-gutter-xs p-gutter-xs rounded bg-surface-container border border-outline-variant self-start"
+            >
               <button
                 type="button"
                 role="tab"
-                className="classroom-tab"
                 aria-selected={builderMode === "scratch"}
                 onClick={() => setBuilderMode("scratch")}
+                className={`px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                  builderMode === "scratch"
+                    ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                    : "text-on-surface-variant hover:text-on-surface"
+                }`}
               >
                 From Scratch (Curriculum Catalog)
               </button>
               <button
                 type="button"
                 role="tab"
-                className="classroom-tab"
                 aria-selected={builderMode === "derive"}
                 onClick={() => setBuilderMode("derive")}
+                className={`px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                  builderMode === "derive"
+                    ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                    : "text-on-surface-variant hover:text-on-surface"
+                }`}
               >
                 Derive from DLL Session
               </button>
             </div>
 
-            {builderMode === "derive" ? (
-              dlls.length === 0 ? (
-                <p className="hint">
+            {builderMode === "derive" &&
+              (dlls.length === 0 ? (
+                <p className="font-body text-body-sm text-on-surface-variant">
                   No saved Daily Lesson Logs yet. Create one in{" "}
-                  <a href="#dll">DLL Builder</a> or switch to From Scratch.
+                  <a href="#dll" className="text-primary underline">
+                    DLL Builder
+                  </a>{" "}
+                  or switch to From Scratch.
                 </p>
               ) : (
-                <div className="dll-form-grid">
-                  <div className="field">
-                    <label htmlFor={`${baseId}-derive-dll`}>Saved DLL</label>
-                    <select
-                      id={`${baseId}-derive-dll`}
-                      value={deriveDllId}
-                      onChange={(e) => setDeriveDllId(e.target.value)}
-                    >
-                      {dlls.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.lessonTitle} ({item.gradeAndSection})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="flex flex-col gap-gutter-md p-gutter-md rounded bg-surface-container-low border border-outline-variant">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-derive-dll`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Saved DLL
+                      </label>
+                      <select
+                        id={`${baseId}-derive-dll`}
+                        value={deriveDllId}
+                        onChange={(e) => setDeriveDllId(e.target.value)}
+                        className={INPUT_CLASS}
+                      >
+                        {dlls.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.lessonTitle} ({item.gradeAndSection})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div className="field">
-                    <label htmlFor={`${baseId}-derive-session`}>Active Session</label>
-                    <select
-                      id={`${baseId}-derive-session`}
-                      value={deriveSessionNumber}
-                      onChange={(e) =>
-                        setDeriveSessionNumber(Number(e.target.value) as SessionNumber)
-                      }
-                    >
-                      {activeSourceSessions.map((s) => (
-                        <option key={s.sessionNumber} value={s.sessionNumber}>
-                          Session {s.sessionNumber} ({s.components.join(", ") || "TLE"})
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-derive-session`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Active Session
+                      </label>
+                      <select
+                        id={`${baseId}-derive-session`}
+                        value={deriveSessionNumber}
+                        onChange={(e) =>
+                          setDeriveSessionNumber(
+                            Number(e.target.value) as SessionNumber,
+                          )
+                        }
+                        className={INPUT_CLASS}
+                      >
+                        {activeSourceSessions.map((s) => (
+                          <option key={s.sessionNumber} value={s.sessionNumber}>
+                            Session {s.sessionNumber} (
+                            {s.components.join(", ") || "TLE"})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {selectedSourceSession && (
-                    <div className="curriculum-bow-box dlp-derive-preview">
+                    <div className="p-gutter-sm rounded bg-surface-container-lowest border border-outline-variant flex flex-col gap-gutter-xs font-body text-body-sm text-on-surface">
                       <div>
-                        <strong>Inherited TLE Component:</strong>{" "}
+                        <strong className="font-label">
+                          Inherited TLE Component:
+                        </strong>{" "}
                         {selectedSourceSession.components.join(", ") ||
                           selectedSourceDll?.learningAreas}
                       </div>
                       <div>
-                        <strong>Inherited Learning Objectives:</strong>{" "}
+                        <strong className="font-label">
+                          Inherited Learning Objectives:
+                        </strong>{" "}
                         {selectedSourceSession.learningObjectives || "—"}
                       </div>
                     </div>
                   )}
                 </div>
-              )
-            ) : null}
+              ))}
 
-            <div className="dll-form-grid">
-              <div className="field">
-                <label htmlFor={`${baseId}-title`}>Lesson Title (optional)</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+              <div className="flex flex-col gap-gutter-xs">
+                <label
+                  htmlFor={`${baseId}-title`}
+                  className="font-label text-label-md text-on-surface"
+                >
+                  Lesson Title (optional)
+                </label>
                 <input
                   id={`${baseId}-title`}
                   type="text"
                   value={lessonTitle}
                   onChange={(e) => setLessonTitle(e.target.value)}
                   placeholder="Leave blank for AI-generated title"
+                  className={INPUT_CLASS}
                 />
               </div>
 
               {builderMode === "scratch" && (
-                <div className="field">
-                  <label htmlFor={`${baseId}-grade-section`}>
-                    Grade Level and Section
+                <div className="flex flex-col gap-gutter-xs">
+                  <label
+                    htmlFor={`${baseId}-grade-section`}
+                    className="font-label text-label-md text-on-surface"
+                  >
+                    Grade Level and Section *
                   </label>
                   <input
                     id={`${baseId}-grade-section`}
@@ -524,6 +347,7 @@ export function DlpWorkspace({
                     value={gradeAndSection}
                     onChange={(e) => setGradeAndSection(e.target.value)}
                     placeholder="e.g. Grade 7 - Rizal"
+                    className={INPUT_CLASS}
                   />
                   {sections.length > 0 && (
                     <select
@@ -532,8 +356,11 @@ export function DlpWorkspace({
                       onChange={(e) => {
                         if (e.target.value) setGradeAndSection(e.target.value);
                       }}
+                      className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface"
                     >
-                      <option value="">Quick-fill from Class Sections...</option>
+                      <option value="">
+                        Quick-fill from Class Sections...
+                      </option>
                       {sections.map((sec) => {
                         const label = `Grade ${sec.gradeLevel} - ${sec.sectionName}`;
                         return (
@@ -548,8 +375,13 @@ export function DlpWorkspace({
               )}
             </div>
 
-            <div className="field">
-              <label htmlFor={`${baseId}-refs`}>References (optional)</label>
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-refs`}
+                className="font-label text-label-md text-on-surface"
+              >
+                References (optional)
+              </label>
               <input
                 id={`${baseId}-refs`}
                 type="text"
@@ -560,26 +392,39 @@ export function DlpWorkspace({
                     ? "Leave blank to inherit DLL references"
                     : "DepEd MATATAG TLE CG, Budget of Work, toolkits..."
                 }
+                className={INPUT_CLASS}
               />
             </div>
 
-            <div className="field">
-              <label htmlFor={`${baseId}-prompt-notes`}>Prompt Notes (optional)</label>
+            <div className="flex flex-col gap-gutter-xs">
+              <div className="flex flex-wrap items-center justify-between gap-gutter-xs">
+                <label
+                  htmlFor={`${baseId}-prompt-notes`}
+                  className="font-label text-label-md text-on-surface"
+                >
+                  Prompt Notes (optional)
+                </label>
+                <span className="font-body text-body-sm text-on-surface-variant">
+                  Included in the AI prompt only — never written into Learner
+                  Context.
+                </span>
+              </div>
               <textarea
                 id={`${baseId}-prompt-notes`}
+                rows={2}
                 value={promptNotes}
                 onChange={(e) => setPromptNotes(e.target.value)}
                 placeholder="e.g. 45-minute period, 40 learners in pairs, limited tools..."
+                className={INPUT_CLASS}
               />
-              <span className="hint">
-                Included in the AI prompt only; never written into Learner Context.
-              </span>
             </div>
           </fieldset>
 
           {builderMode === "scratch" && (
-            <fieldset className="settings-fieldset">
-              <legend>2. Select Learning Competencies</legend>
+            <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
+              <legend className="font-title text-title-lg text-on-surface px-1">
+                2. Select Learning Competencies
+              </legend>
 
               <CurriculumCompetencyPicker
                 baseId={baseId}
@@ -588,33 +433,40 @@ export function DlpWorkspace({
                 onPickCompetencyId={setPickedCompetencyId}
               />
 
-              <div className="actions-row">
+              <div>
                 <button
                   type="button"
-                  className="btn-secondary btn-compact"
                   disabled={!pickedCompetencyId}
                   onClick={addScratchCompetency}
+                  className="px-gutter-md py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-primary hover:bg-surface-container disabled:opacity-50"
                 >
                   + Add Learning Competency
                 </button>
               </div>
 
               {selectedCompetencyIds.length === 0 ? (
-                <p className="hint">No Learning Competency selected yet.</p>
+                <p className="font-body text-body-sm text-on-surface-variant">
+                  No Learning Competency selected yet.
+                </p>
               ) : (
-                <ul className="dll-assigned-list">
+                <ul className="flex flex-col gap-gutter-xs">
                   {selectedCompetencyIds.map((cid) => {
                     const comp = competencyMap.get(cid);
                     return (
-                      <li key={cid} className="dll-assigned-item">
-                        <span>
-                          <span className="badge">{comp?.component ?? "TLE"}</span>{" "}
+                      <li
+                        key={cid}
+                        className="p-gutter-sm rounded bg-surface-container-low border border-outline-variant flex items-center justify-between gap-gutter-sm"
+                      >
+                        <span className="font-body text-body-sm text-on-surface">
+                          <span className="inline-block px-1.5 py-0.5 mr-2 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
+                            {comp?.component ?? "TLE"}
+                          </span>
                           {comp?.learningCompetency ?? cid}
                         </span>
                         <button
                           type="button"
-                          className="btn-secondary btn-compact"
                           onClick={() => removeScratchCompetency(cid)}
+                          className="shrink-0 font-label text-label-sm text-error hover:underline"
                         >
                           Remove
                         </button>
@@ -626,246 +478,401 @@ export function DlpWorkspace({
             </fieldset>
           )}
 
-          <div className="actions-row">
+          <div className="flex justify-end">
             <button
               type="submit"
-              className="btn-primary"
               disabled={
                 generating ||
-                (builderMode === "derive" && (!deriveDllId || !selectedSourceSession))
+                (builderMode === "derive" &&
+                  (!deriveDllId || !selectedSourceSession))
               }
+              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
             >
-              {generating
-                ? "Generating DLP..."
-                : builderMode === "derive"
-                  ? "Generate DLP from Session"
-                  : "Generate Standalone DLP"}
+              <span
+                className="material-symbols-outlined text-title-md"
+                aria-hidden="true"
+              >
+                auto_awesome
+              </span>
+              <span>
+                {generating
+                  ? "Generating DLP..."
+                  : builderMode === "derive"
+                    ? "Generate DLP from Session"
+                    : "Generate Standalone DLP"}
+              </span>
             </button>
           </div>
         </form>
       ) : (
-        <div className="dll-editor-stack">
-          <div className="card dll-toolbar">
-            <div>
-              <h2>{draftDlp.lessonTitle}</h2>
-              <div className="curriculum-badges">
-                <span className="badge badge-bow">{draftDlp.learningAreas}</span>
-                <span className="badge">{draftDlp.gradeAndSection}</span>
-                <span className="badge">No. of Sessions: 1</span>
-                {draftDlp.sourceDllId && (
-                  <span className="badge">
-                    Derived from Session {draftDlp.sourceSessionNumber}
-                  </span>
-                )}
-              </div>
+        /* Editing Saved DLP */
+        <div className="flex flex-col gap-gutter-lg">
+          {/* Metadata Pills & Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-gutter-sm">
+            <div className="flex flex-wrap items-center gap-gutter-xs">
+              <span className="px-gutter-sm py-0.5 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
+                {draftDlp.learningAreas}
+              </span>
+              <span className="px-gutter-sm py-0.5 rounded-full bg-surface-variant text-on-surface-variant font-label text-label-sm">
+                {draftDlp.gradeAndSection}
+              </span>
+              <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
+                1 Session
+              </span>
+              {draftDlp.sourceDllId && (
+                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
+                  Derived from Session {draftDlp.sourceSessionNumber}
+                </span>
+              )}
             </div>
 
-            <div className="actions-row">
-              <div className="classroom-tablist" role="tablist" aria-label="DLP View Mode">
-                <button
-                  type="button"
-                  role="tab"
-                  className="classroom-tab"
-                  aria-selected={viewMode === "edit"}
-                  onClick={() => setViewMode("edit")}
-                >
-                  Inline Editor
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  className="classroom-tab"
-                  aria-selected={viewMode === "markdown"}
-                  onClick={() => setViewMode("markdown")}
-                >
-                  Markdown View
-                </button>
-              </div>
-
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={saving}
-                onClick={handleSaveEdits}
-              >
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
+            <div className="flex flex-wrap items-center gap-gutter-sm">
               {onCreateQuiz && (
                 <button
                   type="button"
-                  className="btn-secondary"
                   onClick={() => onCreateQuiz(draftDlp.id)}
+                  className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border border-outline-variant bg-surface-container-lowest font-label text-label-md text-on-surface hover:bg-surface-container-low"
                 >
-                  Create Quiz
+                  <span
+                    className="material-symbols-outlined text-title-md text-primary"
+                    aria-hidden="true"
+                  >
+                    quiz
+                  </span>
+                  <span>Create Quiz from DLP</span>
                 </button>
               )}
-              <a
-                className="btn-secondary dll-download-link"
-                href={`/api/dlps/${encodeURIComponent(draftDlp.id)}/docx`}
-                download
-              >
-                Download .docx
-              </a>
+
               <button
                 type="button"
-                className="btn-secondary"
-                onClick={handleDeleteDlp}
+                onClick={() => void handleDeleteDlp()}
+                className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border border-outline-variant bg-surface-container-lowest font-label text-label-md text-error hover:bg-error-container/30"
               >
-                Delete
+                <span
+                  className="material-symbols-outlined text-body-md"
+                  aria-hidden="true"
+                >
+                  delete
+                </span>
+                <span>Delete</span>
               </button>
             </div>
           </div>
 
-          {viewMode === "markdown" ? (
-            <article className="card dll-markdown-view">
-              {renderMarkdownBlocks(renderDlpMarkdown(draftDlp))}
-            </article>
-          ) : (
-            <div className="dll-editor-stack">
-              <div className="card settings-form">
-                <h3>Header &amp; Intentions</h3>
-                <div className="dll-form-grid">
-                  <div className="field">
-                    <label htmlFor={`${baseId}-edit-title`}>Lesson Title</label>
-                    <input
-                      id={`${baseId}-edit-title`}
-                      type="text"
-                      value={draftDlp.lessonTitle}
-                      onChange={(e) =>
-                        updateDraftHeader("lessonTitle", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`${baseId}-edit-areas`}>Learning Area/s</label>
-                    <input
-                      id={`${baseId}-edit-areas`}
-                      type="text"
-                      value={draftDlp.learningAreas}
-                      onChange={(e) =>
-                        updateDraftHeader("learningAreas", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`${baseId}-edit-gs`}>
-                      Grade Level and Section
-                    </label>
-                    <input
-                      id={`${baseId}-edit-gs`}
-                      type="text"
-                      value={draftDlp.gradeAndSection}
-                      onChange={(e) =>
-                        updateDraftHeader("gradeAndSection", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`${baseId}-edit-refs`}>References</label>
-                    <input
-                      id={`${baseId}-edit-refs`}
-                      type="text"
-                      value={draftDlp.references}
-                      onChange={(e) =>
-                        updateDraftHeader("references", e.target.value)
-                      }
-                    />
-                  </div>
-                </div>
-
-                {INTENTIONS_LIST_FIELDS.map((field) => (
-                  <div key={field.key} className="field">
-                    <label htmlFor={`${baseId}-edit-${field.key}`}>
-                      {field.label}
-                    </label>
-                    <textarea
-                      id={`${baseId}-edit-${field.key}`}
-                      value={draftDlp.intentions[field.key].join("\n")}
-                      onChange={(e) =>
-                        updateDraftIntentions({
-                          [field.key]: e.target.value.split(/\r?\n/),
-                        })
-                      }
-                    />
-                  </div>
-                ))}
-
-                <div className="field">
-                  <label htmlFor={`${baseId}-edit-objectives`}>
-                    Learning Objectives
-                  </label>
-                  <textarea
-                    id={`${baseId}-edit-objectives`}
-                    value={draftDlp.intentions.learningObjectives}
-                    onChange={(e) =>
-                      updateDraftIntentions({ learningObjectives: e.target.value })
-                    }
-                  />
-                </div>
-
-                <div className="field">
-                  <label htmlFor={`${baseId}-edit-ctx`}>
-                    Learner Context (always left blank in .docx export)
-                  </label>
-                  <textarea
-                    id={`${baseId}-edit-ctx`}
-                    value={draftDlp.intentions.learnerContext}
-                    onChange={(e) =>
-                      updateDraftIntentions({ learnerContext: e.target.value })
-                    }
-                  />
-                </div>
+          {/* View Mode Tabs */}
+          <div className="flex flex-col gap-gutter-md">
+            <div className="flex flex-wrap items-center justify-between gap-gutter-md">
+              <div
+                role="tablist"
+                aria-label="DLP View Mode"
+                className="inline-flex items-center gap-gutter-xs p-gutter-xs rounded bg-surface-container border border-outline-variant"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === "edit"}
+                  onClick={() => setViewMode("edit")}
+                  className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                    viewMode === "edit"
+                      ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                      : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    splitscreen
+                  </span>
+                  <span>Paired ILAW Table</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === "markdown"}
+                  onClick={() => setViewMode("markdown")}
+                  className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                    viewMode === "markdown"
+                      ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                      : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    article
+                  </span>
+                  <span>Markdown Web View</span>
+                </button>
               </div>
 
-              {DLP_ACTIVITY_ROWS.map((row) => (
-                <section
-                  key={row.key}
-                  className="card settings-form"
-                  aria-label={`${row.section}: ${row.label}`}
-                >
-                  <h3>
-                    {row.section}: {row.label}
-                  </h3>
-                  <div className="dlp-activity-pair">
-                    <div className="field">
-                      <label htmlFor={`${baseId}-${row.key}-teacher`}>
-                        Teacher&apos;s Activity
+              <span className="font-body text-body-sm text-on-surface-variant">
+                Edit any cell inline before exporting to{" "}
+                <span className="font-mono text-mono-md">
+                  DLP_ILAW_template.docx
+                </span>
+              </span>
+            </div>
+
+            {viewMode === "markdown" ? (
+              <article className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col gap-gutter-sm max-w-prose">
+                {renderMarkdownBlocks(renderDlpMarkdown(draftDlp))}
+              </article>
+            ) : (
+              <div className="flex flex-col gap-gutter-lg">
+                {/* Header & Intentions Card */}
+                <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
+                  <div className="flex items-center justify-between pb-gutter-sm border-b border-outline-variant">
+                    <h2 className="font-title text-title-lg text-primary">
+                      I. Header &amp; Intentions
+                    </h2>
+                    <span className="font-label text-label-sm text-on-surface-variant">
+                      {draftDlp.learningAreas}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter-md">
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-title`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Lesson Title
                       </label>
-                      <textarea
-                        id={`${baseId}-${row.key}-teacher`}
-                        rows={row.rows ?? 2}
-                        value={draftDlp[row.key].teacherActivity}
+                      <input
+                        id={`${baseId}-edit-title`}
+                        type="text"
+                        value={draftDlp.lessonTitle}
                         onChange={(e) =>
-                          updateDraftActivity(
-                            row.key,
-                            "teacherActivity",
-                            e.target.value,
-                          )
+                          updateDraftHeader("lessonTitle", e.target.value)
                         }
+                        className={INPUT_CLASS}
                       />
                     </div>
-                    <div className="field">
-                      <label htmlFor={`${baseId}-${row.key}-student`}>
-                        Student&apos;s Activity
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-areas`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Learning Area/s
                       </label>
-                      <textarea
-                        id={`${baseId}-${row.key}-student`}
-                        rows={row.rows ?? 2}
-                        value={draftDlp[row.key].studentActivity}
+                      <input
+                        id={`${baseId}-edit-areas`}
+                        type="text"
+                        value={draftDlp.learningAreas}
                         onChange={(e) =>
-                          updateDraftActivity(
-                            row.key,
-                            "studentActivity",
-                            e.target.value,
-                          )
+                          updateDraftHeader("learningAreas", e.target.value)
                         }
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-gs`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Grade Level and Section
+                      </label>
+                      <input
+                        id={`${baseId}-edit-gs`}
+                        type="text"
+                        value={draftDlp.gradeAndSection}
+                        onChange={(e) =>
+                          updateDraftHeader("gradeAndSection", e.target.value)
+                        }
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-refs`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        References
+                      </label>
+                      <input
+                        id={`${baseId}-edit-refs`}
+                        type="text"
+                        value={draftDlp.references}
+                        onChange={(e) =>
+                          updateDraftHeader("references", e.target.value)
+                        }
+                        className={INPUT_CLASS}
                       />
                     </div>
                   </div>
-                </section>
-              ))}
-            </div>
-          )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter-md">
+                    {DLP_INTENTIONS_LIST_FIELDS.map((field) => (
+                      <div key={field.key} className="flex flex-col gap-gutter-xs">
+                        <label
+                          htmlFor={`${baseId}-edit-${field.key}`}
+                          className="font-label text-label-md text-on-surface"
+                        >
+                          {field.label}
+                        </label>
+                        <textarea
+                          id={`${baseId}-edit-${field.key}`}
+                          rows={3}
+                          value={draftDlp.intentions[field.key].join("\n")}
+                          onChange={(e) =>
+                            updateDraftIntentions({
+                              [field.key]: e.target.value.split(/\r?\n/),
+                            })
+                          }
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-objectives`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Learning Objectives
+                      </label>
+                      <textarea
+                        id={`${baseId}-edit-objectives`}
+                        rows={2}
+                        value={draftDlp.intentions.learningObjectives}
+                        onChange={(e) =>
+                          updateDraftIntentions({
+                            learningObjectives: e.target.value,
+                          })
+                        }
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-ctx`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Learner Context (always left blank in .docx export)
+                      </label>
+                      <textarea
+                        id={`${baseId}-edit-ctx`}
+                        rows={2}
+                        value={draftDlp.intentions.learnerContext}
+                        onChange={(e) =>
+                          updateDraftIntentions({
+                            learnerContext: e.target.value,
+                          })
+                        }
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Two-Column Teacher's Activity / Student's Activity Matrix */}
+                <div
+                  tabIndex={0}
+                  role="region"
+                  aria-label="Paired ILAW DLP Matrix Editor"
+                  className="bg-surface-container-lowest border border-outline-variant rounded-md overflow-x-auto focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  <table className="w-full min-w-[760px] border-collapse text-left">
+                    <caption className="visually-hidden">
+                      Two-Column Teacher and Student Activity DLP Editor
+                    </caption>
+                    <thead>
+                      <tr className="bg-surface-container border-b border-outline-variant">
+                        <th
+                          scope="col"
+                          className="w-52 p-gutter-md font-title text-title-md text-on-surface border-r border-outline-variant align-top"
+                        >
+                          ILAW Section
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-1/2 p-gutter-md font-title text-title-md text-primary border-r border-outline-variant align-top"
+                        >
+                          Teacher&apos;s Activity
+                        </th>
+                        <th
+                          scope="col"
+                          className="w-1/2 p-gutter-md font-title text-title-md text-tertiary align-top"
+                        >
+                          Student&apos;s Activity
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-outline-variant">
+                      {DLP_ACTIVITY_ROWS.map((row) => {
+                        const teacherId = `${baseId}-${row.key}-teacher`;
+                        const studentId = `${baseId}-${row.key}-student`;
+                        return (
+                          <tr key={row.key}>
+                            <th
+                              scope="row"
+                              className="p-gutter-md bg-surface-container-low border-r border-outline-variant align-top"
+                            >
+                              <div className="flex flex-col gap-0.5">
+                                <span className="font-label text-label-sm text-primary">
+                                  {row.section}
+                                </span>
+                                <span className="font-label text-label-md text-on-surface">
+                                  {row.label}
+                                </span>
+                              </div>
+                            </th>
+                            <td className="p-gutter-sm border-r border-outline-variant align-top">
+                              <label
+                                htmlFor={teacherId}
+                                className="visually-hidden"
+                              >
+                                {row.label} Teacher&apos;s Activity
+                              </label>
+                              <textarea
+                                id={teacherId}
+                                rows={row.rows ?? 2}
+                                value={draftDlp[row.key].teacherActivity}
+                                onChange={(e) =>
+                                  updateDraftActivity(
+                                    row.key,
+                                    "teacherActivity",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant font-body text-body-sm text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+                              />
+                            </td>
+                            <td className="p-gutter-sm align-top">
+                              <label
+                                htmlFor={studentId}
+                                className="visually-hidden"
+                              >
+                                {row.label} Student&apos;s Activity
+                              </label>
+                              <textarea
+                                id={studentId}
+                                rows={row.rows ?? 2}
+                                value={draftDlp[row.key].studentActivity}
+                                onChange={(e) =>
+                                  updateDraftActivity(
+                                    row.key,
+                                    "studentActivity",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant font-body text-body-sm text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>

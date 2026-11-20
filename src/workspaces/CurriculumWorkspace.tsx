@@ -1,114 +1,27 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useState,
-  type FormEvent,
-} from "react";
+import { useId } from "react";
 import {
   BOW_TERMS,
   GRADE_LEVELS,
   QUARTERS,
   TLE_COMPONENTS,
-  type BudgetOfWorkInfo,
   type CurriculumCompetency,
-  type GradeLevel,
-  type QuarterNumber,
   type TleComponent,
 } from "../engine/types";
+import {
+  COMPONENT_LABELS,
+  emptyCustomForm,
+  formatGradeLabel,
+  formFromItem,
+  toggleArrayValue,
+  useCurriculumWorkspace,
+} from "../hooks/useCurriculumWorkspace";
 
-const COMPONENT_LABELS: Record<TleComponent, string> = {
-  ICT: "ICT — Information & Communications Technology",
-  AFA: "AFA — Agriculture & Fishery Arts",
-  FCS: "FCS — Family & Consumer Science",
-  IA: "IA — Industrial Arts",
+const COMPONENT_BADGE_CLASSES: Record<TleComponent, string> = {
+  ICT: "bg-tertiary-container text-on-tertiary-container",
+  FCS: "bg-secondary-container text-on-secondary-container",
+  AFA: "bg-success-container text-on-success-container",
+  IA: "bg-surface-variant text-on-surface-variant",
 };
-
-interface StatusState {
-  tone: "success" | "error";
-  text: string;
-}
-
-interface CustomFormState {
-  id?: string;
-  gradeLevels: GradeLevel[];
-  quarters: QuarterNumber[];
-  component: TleComponent;
-  sector: string;
-  contentTopic: string;
-  contentSubTopicsText: string;
-  contentStandard: string;
-  performanceStandard: string;
-  learningCompetency: string;
-  budgetOfWork: BudgetOfWorkInfo;
-  customNotes: string;
-}
-
-function emptyCustomForm(): CustomFormState {
-  return {
-    gradeLevels: [7],
-    quarters: [1],
-    component: "ICT",
-    sector: "",
-    contentTopic: "",
-    contentSubTopicsText: "",
-    contentStandard: "",
-    performanceStandard: "",
-    learningCompetency: "",
-    budgetOfWork: {
-      term: "",
-      weekRange: "",
-      suggestedActivities: "",
-      suggestedPerformanceTasks: "",
-    },
-    customNotes: "",
-  };
-}
-
-function formFromItem(item: CurriculumCompetency): CustomFormState {
-  return {
-    id: item.id,
-    gradeLevels: [...item.gradeLevels],
-    quarters: [...item.quarters],
-    component: item.component,
-    sector: item.sector ?? "",
-    contentTopic: item.contentTopic,
-    contentSubTopicsText: item.contentSubTopics.join("\n"),
-    contentStandard: item.contentStandard,
-    performanceStandard: item.performanceStandard,
-    learningCompetency: item.learningCompetency,
-    budgetOfWork: {
-      term: item.budgetOfWork?.term ?? "",
-      weekRange: item.budgetOfWork?.weekRange ?? "",
-      suggestedActivities: item.budgetOfWork?.suggestedActivities ?? "",
-      suggestedPerformanceTasks:
-        item.budgetOfWork?.suggestedPerformanceTasks ?? "",
-    },
-    customNotes: item.customNotes ?? "",
-  };
-}
-
-async function readErrorMessage(res: Response): Promise<string> {
-  try {
-    const data = (await res.json()) as { error?: string; message?: string };
-    return data.error || data.message || `Request failed (HTTP ${res.status}).`;
-  } catch {
-    return `Request failed (HTTP ${res.status}).`;
-  }
-}
-
-function toggleArrayValue<T extends number>(list: T[], value: T): T[] {
-  return list.includes(value)
-    ? list.filter((item) => item !== value)
-    : [...list, value].sort((a, b) => a - b);
-}
-
-function formatGradeLabel(grades: GradeLevel[]): string {
-  return grades.length > 1
-    ? `Grades ${grades.join("–")}`
-    : `Grade ${grades[0] ?? ""}`;
-}
 
 function CompetencyBadges({
   item,
@@ -120,305 +33,169 @@ function CompetencyBadges({
   showWeek?: boolean;
 }) {
   return (
-    <div className="curriculum-badges">
-      <span className="badge">{formatGradeLabel(item.gradeLevels)}</span>
-      <span className="badge">{item.component}</span>
-      <span className="badge">{item.quarterLabel}</span>
-      {showSector && item.sector && <span className="badge">{item.sector}</span>}
+    <div className="flex flex-wrap items-center gap-gutter-xs">
+      <span
+        className={`px-gutter-sm py-0.5 rounded-full font-label text-label-sm ${COMPONENT_BADGE_CLASSES[item.component]}`}
+      >
+        {item.component}
+      </span>
+      <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label text-label-sm">
+        {formatGradeLabel(item.gradeLevels)}
+      </span>
+      <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label text-label-sm">
+        {item.quarterLabel}
+      </span>
+      {showSector && item.sector && (
+        <span className="px-gutter-sm py-0.5 rounded-full bg-surface-variant text-on-surface-variant font-label text-label-sm">
+          {item.sector}
+        </span>
+      )}
       {showWeek && item.budgetOfWork?.weekRange && (
-        <span className="badge badge-bow">Wk {item.budgetOfWork.weekRange}</span>
+        <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-low border border-outline-variant font-mono text-label-sm text-on-surface-variant tabular-nums">
+          Wk {item.budgetOfWork.weekRange}
+        </span>
       )}
       {item.source === "custom" && (
-        <span className="badge badge-custom">Custom</span>
+        <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+          Custom
+        </span>
       )}
     </div>
   );
 }
 
+const INPUT_CLASS =
+  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
+
 export function CurriculumWorkspace() {
   const headingId = useId();
   const baseId = useId();
 
-  const [allCatalog, setAllCatalog] = useState<CurriculumCompetency[]>([]);
-  const [items, setItems] = useState<CurriculumCompetency[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<StatusState | null>(null);
-
-  const [gradeLevel, setGradeLevel] = useState<GradeLevel | "">("");
-  const [quarterOrTerm, setQuarterOrTerm] = useState<string>("");
-  const [component, setComponent] = useState<TleComponent | "">("");
-  const [sector, setSector] = useState<string>("");
-  const [query, setQuery] = useState<string>("");
-
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [notesDraft, setNotesDraft] = useState<string>("");
-  const [savingNotes, setSavingNotes] = useState(false);
-
-  const [showForm, setShowForm] = useState(false);
-  const [formState, setFormState] = useState<CustomFormState>(emptyCustomForm);
-  const [savingCustom, setSavingCustom] = useState(false);
-
-  const reportError = useCallback((err: unknown) => {
-    setStatus({
-      tone: "error",
-      text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-    });
-  }, []);
-
-  const sectorsForScope = useCallback(
-    (nextGrade: GradeLevel | "", nextComponent: TleComponent | "") => {
-      const set = new Set<string>();
-      for (const item of allCatalog) {
-        if (!item.sector) continue;
-        if (nextGrade !== "" && !item.gradeLevels.includes(nextGrade)) continue;
-        if (nextComponent !== "" && item.component !== nextComponent) continue;
-        set.add(item.sector);
-      }
-      return [...set].sort();
-    },
-    [allCatalog],
-  );
-
-  const availableSectors = useMemo(
-    () => sectorsForScope(gradeLevel, component),
-    [sectorsForScope, gradeLevel, component],
-  );
-
-  const allSectors = useMemo(() => sectorsForScope("", ""), [sectorsForScope]);
-
-  const buildFilterUrl = useCallback(() => {
-    const params = new URLSearchParams();
-    if (gradeLevel !== "") params.set("gradeLevel", String(gradeLevel));
-    if (quarterOrTerm.startsWith("q:")) {
-      params.set("quarter", quarterOrTerm.slice(2));
-    } else if (quarterOrTerm.startsWith("t:")) {
-      params.set("term", quarterOrTerm.slice(2));
-    }
-    if (component !== "") params.set("component", component);
-    if (sector) params.set("sector", sector);
-    if (query.trim()) params.set("query", query.trim());
-    const qs = params.toString();
-    return qs ? `/api/curriculum?${qs}` : "/api/curriculum";
-  }, [gradeLevel, quarterOrTerm, component, sector, query]);
-
-  const reloadFullCatalog = useCallback(async (signal?: AbortSignal) => {
-    const res = await fetch("/api/curriculum", { signal });
-    if (!res.ok) throw new Error(await readErrorMessage(res));
-    const data = (await res.json()) as CurriculumCompetency[];
-    setAllCatalog(data);
-  }, []);
-
-  const reloadFiltered = useCallback(
-    async (preferredId?: string, signal?: AbortSignal) => {
-      const res = await fetch(buildFilterUrl(), { signal });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const filtered = (await res.json()) as CurriculumCompetency[];
-      setItems(filtered);
-      setSelectedId((prev) => {
-        const targetId = preferredId ?? prev;
-        if (targetId && filtered.some((i) => i.id === targetId)) {
-          return targetId;
-        }
-        return filtered[0]?.id ?? null;
-      });
-    },
-    [buildFilterUrl],
-  );
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void reloadFullCatalog(controller.signal).catch((err) => {
-      if (!controller.signal.aborted) reportError(err);
-    });
-    return () => controller.abort();
-  }, [reloadFullCatalog, reportError]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void reloadFiltered(undefined, controller.signal)
-      .catch((err) => {
-        if (!controller.signal.aborted) reportError(err);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [reloadFiltered, reportError]);
-
-  const selectedItem = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? null,
-    [items, selectedId],
-  );
-
-  useEffect(() => {
-    setNotesDraft(selectedItem?.customNotes ?? "");
-  }, [selectedItem?.id, selectedItem?.customNotes]);
-
-  function handleGradeChange(raw: string) {
-    const nextGrade = raw ? (Number(raw) as GradeLevel) : "";
-    setGradeLevel(nextGrade);
-    if (sector && !sectorsForScope(nextGrade, component).includes(sector)) {
-      setSector("");
-    }
-  }
-
-  function handleComponentChange(raw: string) {
-    const nextComp = raw ? (raw as TleComponent) : "";
-    setComponent(nextComp);
-    if (sector && !sectorsForScope(gradeLevel, nextComp).includes(sector)) {
-      setSector("");
-    }
-  }
-
-  async function refreshAfterMutation(preferredId?: string) {
-    await Promise.all([reloadFullCatalog(), reloadFiltered(preferredId)]);
-  }
-
-  async function handleSaveNotes(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedItem) return;
-    setSavingNotes(true);
-    setStatus(null);
-    try {
-      const res = await fetch(
-        `/api/curriculum/${encodeURIComponent(selectedItem.id)}/notes`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ customNotes: notesDraft }),
-        },
-      );
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      await refreshAfterMutation(selectedItem.id);
-      setStatus({
-        tone: "success",
-        text: "Unpacked Budget of Work notes saved to local disk.",
-      });
-    } catch (err) {
-      reportError(err);
-    } finally {
-      setSavingNotes(false);
-    }
-  }
-
-  async function handleSaveCustom(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSavingCustom(true);
-    setStatus(null);
-    try {
-      const payload = {
-        gradeLevels: formState.gradeLevels,
-        quarters: formState.quarters,
-        component: formState.component,
-        sector: formState.sector.trim() || null,
-        contentTopic: formState.contentTopic,
-        contentSubTopics: formState.contentSubTopicsText
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        contentStandard: formState.contentStandard,
-        performanceStandard: formState.performanceStandard,
-        learningCompetency: formState.learningCompetency,
-        customNotes: formState.customNotes,
-        budgetOfWork: formState.budgetOfWork,
-      };
-
-      const isEdit = Boolean(formState.id);
-      const url = isEdit
-        ? `/api/curriculum/custom/${encodeURIComponent(formState.id!)}`
-        : "/api/curriculum/custom";
-      const res = await fetch(url, {
-        method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const saved = (await res.json()) as CurriculumCompetency;
-      setShowForm(false);
-      setFormState(emptyCustomForm());
-      await refreshAfterMutation(saved.id);
-      setStatus({
-        tone: "success",
-        text: isEdit
-          ? "Custom Learning Competency updated."
-          : "Custom Learning Competency added to local catalog.",
-      });
-    } catch (err) {
-      reportError(err);
-    } finally {
-      setSavingCustom(false);
-    }
-  }
-
-  async function handleDeleteCustom(item: CurriculumCompetency) {
-    setStatus(null);
-    try {
-      const res = await fetch(
-        `/api/curriculum/custom/${encodeURIComponent(item.id)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      await refreshAfterMutation();
-      setStatus({
-        tone: "success",
-        text: "Custom Learning Competency deleted.",
-      });
-    } catch (err) {
-      reportError(err);
-    }
-  }
+  const {
+    allCatalog,
+    items,
+    loading,
+    status,
+    gradeLevel,
+    quarterOrTerm,
+    setQuarterOrTerm,
+    component,
+    sector,
+    setSector,
+    query,
+    setQuery,
+    availableSectors,
+    allSectors,
+    selectedId,
+    setSelectedId,
+    selectedItem,
+    notesDraft,
+    setNotesDraft,
+    savingNotes,
+    showForm,
+    setShowForm,
+    formState,
+    setFormState,
+    savingCustom,
+    handleGradeChange,
+    handleComponentChange,
+    handleSaveNotes,
+    handleSaveCustom,
+    handleDeleteCustom,
+  } = useCurriculumWorkspace();
 
   return (
-    <section className="curriculum-workspace" aria-labelledby={headingId}>
-      <div className="workspace-header curriculum-header-row">
-        <div>
-          <h1 id={headingId} tabIndex={-1}>
-            MATATAG TLE Curriculum Catalog
+    <section
+      aria-labelledby={headingId}
+      className="flex flex-col gap-gutter-lg"
+    >
+      {/* Page Title & Action Row */}
+      <div className="flex flex-wrap items-end justify-between gap-gutter-md">
+        <div className="flex flex-col gap-gutter-xs">
+          <h1
+            id={headingId}
+            tabIndex={-1}
+            className="font-headline text-headline-lg text-on-surface text-balance"
+          >
+            Grades 7–10 MATATAG TLE Catalog
           </h1>
-          <p className="workspace-subtitle">
-            Grades 7–10 Curriculum Guide, Grade 7 Budget of Work, and custom
-            Learning Competencies (<code>./data/curriculum-custom.json</code>).
+          <p className="font-body text-body-md text-on-surface-variant">
+            Browse DepEd CG standards across ICT, AFA, FCS, and IA, enriched
+            with Grade 7 Budget of Work and custom competencies (
+            <code className="font-mono text-mono-md">
+              ./data/curriculum-custom.json
+            </code>
+            ).
           </p>
         </div>
+
         <button
           type="button"
-          className="btn-primary"
           onClick={() => {
             setFormState(emptyCustomForm());
             setShowForm((prev) => !prev);
           }}
+          className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
         >
-          {showForm ? "Close Custom Form" : "Add Custom Competency"}
+          <span
+            className="material-symbols-outlined text-title-md"
+            aria-hidden="true"
+          >
+            {showForm ? "close" : "add_circle"}
+          </span>
+          <span>
+            {showForm ? "Close Custom Form" : "Add Custom Competency"}
+          </span>
         </button>
       </div>
 
+      {/* Status Banner */}
       <div
-        className="status-banner"
         role="status"
         aria-live="polite"
-        data-tone={status?.tone}
         hidden={!status}
+        className={`rounded-md border p-gutter-md flex items-center gap-gutter-sm font-body text-body-md ${
+          status?.tone === "error"
+            ? "border-error bg-error-container text-on-error-container"
+            : "border-success bg-success-container/60 text-on-success-container"
+        }`}
       >
-        {status?.text ?? ""}
+        <span
+          className="material-symbols-outlined text-title-lg shrink-0"
+          aria-hidden="true"
+        >
+          {status?.tone === "error" ? "error" : "check_circle"}
+        </span>
+        <span>{status?.text ?? ""}</span>
       </div>
 
+      {/* Add / Edit Custom Competency Form */}
       {showForm && (
         <form
-          className="card curriculum-custom-form"
           onSubmit={(e) => void handleSaveCustom(e)}
+          className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md"
         >
-          <h2>
+          <h2 className="font-title text-title-lg text-on-surface">
             {formState.id
               ? "Edit Custom Learning Competency"
               : "New Custom Learning Competency"}
           </h2>
 
-          <div className="curriculum-form-grid">
-            <fieldset className="curriculum-check-group">
-              <legend>Grade Level(s)</legend>
-              <div className="curriculum-check-row">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+            <fieldset className="flex flex-col gap-gutter-xs">
+              <legend className="font-label text-label-md text-on-surface mb-1">
+                Grade Level(s)
+              </legend>
+              <div className="flex flex-wrap gap-gutter-sm">
                 {GRADE_LEVELS.map((g) => (
-                  <label key={g} className="curriculum-check-pill">
+                  <label
+                    key={g}
+                    className={`inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border cursor-pointer font-label text-label-md ${
+                      formState.gradeLevels.includes(g)
+                        ? "bg-surface-container-low border-primary text-primary"
+                        : "bg-surface-container-lowest border-outline-variant text-on-surface"
+                    }`}
+                  >
                     <input
                       type="checkbox"
                       checked={formState.gradeLevels.includes(g)}
@@ -428,6 +205,7 @@ export function CurriculumWorkspace() {
                           gradeLevels: toggleArrayValue(prev.gradeLevels, g),
                         }))
                       }
+                      className="accent-primary"
                     />
                     <span>G{g}</span>
                   </label>
@@ -435,11 +213,20 @@ export function CurriculumWorkspace() {
               </div>
             </fieldset>
 
-            <fieldset className="curriculum-check-group">
-              <legend>Quarter(s)</legend>
-              <div className="curriculum-check-row">
+            <fieldset className="flex flex-col gap-gutter-xs">
+              <legend className="font-label text-label-md text-on-surface mb-1">
+                Quarter(s)
+              </legend>
+              <div className="flex flex-wrap gap-gutter-sm">
                 {QUARTERS.map((q) => (
-                  <label key={q} className="curriculum-check-pill">
+                  <label
+                    key={q}
+                    className={`inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border cursor-pointer font-label text-label-md ${
+                      formState.quarters.includes(q)
+                        ? "bg-surface-container-low border-primary text-primary"
+                        : "bg-surface-container-lowest border-outline-variant text-on-surface"
+                    }`}
+                  >
                     <input
                       type="checkbox"
                       checked={formState.quarters.includes(q)}
@@ -449,6 +236,7 @@ export function CurriculumWorkspace() {
                           quarters: toggleArrayValue(prev.quarters, q),
                         }))
                       }
+                      className="accent-primary"
                     />
                     <span>Q{q}</span>
                   </label>
@@ -456,8 +244,11 @@ export function CurriculumWorkspace() {
               </div>
             </fieldset>
 
-            <div className="field">
-              <label htmlFor={`${baseId}-custom-component`}>
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-component`}
+                className="font-label text-label-md text-on-surface"
+              >
                 TLE Component
               </label>
               <select
@@ -469,6 +260,7 @@ export function CurriculumWorkspace() {
                     component: e.target.value as TleComponent,
                   }))
                 }
+                className={INPUT_CLASS}
               >
                 {TLE_COMPONENTS.map((value) => (
                   <option key={value} value={value}>
@@ -478,8 +270,11 @@ export function CurriculumWorkspace() {
               </select>
             </div>
 
-            <div className="field">
-              <label htmlFor={`${baseId}-custom-sector`}>
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-sector`}
+                className="font-label text-label-md text-on-surface"
+              >
                 Sector (optional, Grades 9–10)
               </label>
               <input
@@ -491,6 +286,7 @@ export function CurriculumWorkspace() {
                   setFormState((prev) => ({ ...prev, sector: e.target.value }))
                 }
                 placeholder="e.g. COMPUTER PROGRAMMING"
+                className={INPUT_CLASS}
               />
               <datalist id={`${baseId}-sector-options`}>
                 {allSectors.map((s) => (
@@ -500,8 +296,13 @@ export function CurriculumWorkspace() {
             </div>
           </div>
 
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-topic`}>Content Topic *</label>
+          <div className="flex flex-col gap-gutter-xs">
+            <label
+              htmlFor={`${baseId}-custom-topic`}
+              className="font-label text-label-md text-on-surface"
+            >
+              Content Topic *
+            </label>
             <input
               id={`${baseId}-custom-topic`}
               type="text"
@@ -513,15 +314,20 @@ export function CurriculumWorkspace() {
                   contentTopic: e.target.value,
                 }))
               }
+              className={INPUT_CLASS}
             />
           </div>
 
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-subtopics`}>
+          <div className="flex flex-col gap-gutter-xs">
+            <label
+              htmlFor={`${baseId}-custom-subtopics`}
+              className="font-label text-label-md text-on-surface"
+            >
               Content Sub-Topics (one per line)
             </label>
             <textarea
               id={`${baseId}-custom-subtopics`}
+              rows={2}
               value={formState.contentSubTopicsText}
               onChange={(e) =>
                 setFormState((prev) => ({
@@ -529,47 +335,66 @@ export function CurriculumWorkspace() {
                   contentSubTopicsText: e.target.value,
                 }))
               }
+              className={INPUT_CLASS}
             />
           </div>
 
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-cs`}>Content Standard *</label>
-            <textarea
-              id={`${baseId}-custom-cs`}
-              required
-              value={formState.contentStandard}
-              onChange={(e) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  contentStandard: e.target.value,
-                }))
-              }
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-cs`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Content Standard *
+              </label>
+              <textarea
+                id={`${baseId}-custom-cs`}
+                rows={2}
+                required
+                value={formState.contentStandard}
+                onChange={(e) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    contentStandard: e.target.value,
+                  }))
+                }
+                className={INPUT_CLASS}
+              />
+            </div>
+
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-ps`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Performance Standard *
+              </label>
+              <textarea
+                id={`${baseId}-custom-ps`}
+                rows={2}
+                required
+                value={formState.performanceStandard}
+                onChange={(e) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    performanceStandard: e.target.value,
+                  }))
+                }
+                className={INPUT_CLASS}
+              />
+            </div>
           </div>
 
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-ps`}>
-              Performance Standard *
-            </label>
-            <textarea
-              id={`${baseId}-custom-ps`}
-              required
-              value={formState.performanceStandard}
-              onChange={(e) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  performanceStandard: e.target.value,
-                }))
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-lc`}>
+          <div className="flex flex-col gap-gutter-xs">
+            <label
+              htmlFor={`${baseId}-custom-lc`}
+              className="font-label text-label-md text-on-surface"
+            >
               Learning Competency *
             </label>
             <textarea
               id={`${baseId}-custom-lc`}
+              rows={2}
               required
               value={formState.learningCompetency}
               onChange={(e) =>
@@ -578,12 +403,16 @@ export function CurriculumWorkspace() {
                   learningCompetency: e.target.value,
                 }))
               }
+              className={INPUT_CLASS}
             />
           </div>
 
-          <div className="curriculum-form-grid">
-            <div className="field">
-              <label htmlFor={`${baseId}-custom-bow-term`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-bow-term`}
+                className="font-label text-label-md text-on-surface"
+              >
                 BoW Term (optional)
               </label>
               <input
@@ -597,11 +426,15 @@ export function CurriculumWorkspace() {
                     budgetOfWork: { ...prev.budgetOfWork, term: e.target.value },
                   }))
                 }
+                className={INPUT_CLASS}
               />
             </div>
 
-            <div className="field">
-              <label htmlFor={`${baseId}-custom-bow-week`}>
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-bow-week`}
+                className="font-label text-label-md text-on-surface"
+              >
                 BoW Week Range (optional)
               </label>
               <input
@@ -618,54 +451,69 @@ export function CurriculumWorkspace() {
                     },
                   }))
                 }
+                className={INPUT_CLASS}
+              />
+            </div>
+
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-bow-activities`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Suggested Activities (optional)
+              </label>
+              <textarea
+                id={`${baseId}-custom-bow-activities`}
+                rows={2}
+                value={formState.budgetOfWork.suggestedActivities}
+                onChange={(e) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    budgetOfWork: {
+                      ...prev.budgetOfWork,
+                      suggestedActivities: e.target.value,
+                    },
+                  }))
+                }
+                className={INPUT_CLASS}
+              />
+            </div>
+
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-custom-bow-tasks`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Suggested Performance Tasks (optional)
+              </label>
+              <textarea
+                id={`${baseId}-custom-bow-tasks`}
+                rows={2}
+                value={formState.budgetOfWork.suggestedPerformanceTasks}
+                onChange={(e) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    budgetOfWork: {
+                      ...prev.budgetOfWork,
+                      suggestedPerformanceTasks: e.target.value,
+                    },
+                  }))
+                }
+                className={INPUT_CLASS}
               />
             </div>
           </div>
 
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-bow-activities`}>
-              Suggested Activities (optional)
-            </label>
-            <textarea
-              id={`${baseId}-custom-bow-activities`}
-              value={formState.budgetOfWork.suggestedActivities}
-              onChange={(e) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  budgetOfWork: {
-                    ...prev.budgetOfWork,
-                    suggestedActivities: e.target.value,
-                  },
-                }))
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-bow-tasks`}>
-              Suggested Performance Tasks (optional)
-            </label>
-            <textarea
-              id={`${baseId}-custom-bow-tasks`}
-              value={formState.budgetOfWork.suggestedPerformanceTasks}
-              onChange={(e) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  budgetOfWork: {
-                    ...prev.budgetOfWork,
-                    suggestedPerformanceTasks: e.target.value,
-                  },
-                }))
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor={`${baseId}-custom-notes`}>
+          <div className="flex flex-col gap-gutter-xs">
+            <label
+              htmlFor={`${baseId}-custom-notes`}
+              className="font-label text-label-md text-on-surface"
+            >
               Unpacked Budget of Work / Teaching Notes
             </label>
             <textarea
               id={`${baseId}-custom-notes`}
+              rows={2}
               value={formState.customNotes}
               onChange={(e) =>
                 setFormState((prev) => ({
@@ -673,14 +521,15 @@ export function CurriculumWorkspace() {
                   customNotes: e.target.value,
                 }))
               }
+              className={INPUT_CLASS}
             />
           </div>
 
-          <div className="actions-row">
+          <div className="flex flex-wrap items-center gap-gutter-sm">
             <button
               type="submit"
-              className="btn-primary"
               disabled={savingCustom}
+              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
             >
               {savingCustom
                 ? "Saving..."
@@ -690,11 +539,11 @@ export function CurriculumWorkspace() {
             </button>
             <button
               type="button"
-              className="btn-secondary"
               onClick={() => {
                 setShowForm(false);
                 setFormState(emptyCustomForm());
               }}
+              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
             >
               Cancel
             </button>
@@ -702,13 +551,45 @@ export function CurriculumWorkspace() {
         </form>
       )}
 
-      <div className="card curriculum-filters" role="search">
-        <div className="field">
-          <label htmlFor={`${baseId}-grade`}>Grade Level</label>
+      {/* Search & Filter Bar */}
+      <search className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-md grid grid-cols-1 md:grid-cols-12 gap-gutter-md items-end">
+        <div className="flex flex-col gap-gutter-xs md:col-span-4">
+          <label
+            htmlFor={`${baseId}-query`}
+            className="font-label text-label-md text-on-surface"
+          >
+            Search Catalog
+          </label>
+          <div className="relative flex items-center">
+            <span
+              aria-hidden="true"
+              className="material-symbols-outlined text-title-md text-on-surface-variant absolute left-3 pointer-events-none"
+            >
+              search
+            </span>
+            <input
+              id={`${baseId}-query`}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search competency, topic, standard, or notes..."
+              className="w-full pl-10 pr-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface placeholder:text-on-surface-variant focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+          <label
+            htmlFor={`${baseId}-grade`}
+            className="font-label text-label-md text-on-surface"
+          >
+            Grade Level
+          </label>
           <select
             id={`${baseId}-grade`}
             value={gradeLevel === "" ? "" : String(gradeLevel)}
             onChange={(e) => handleGradeChange(e.target.value)}
+            className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
           >
             <option value="">All Grades (7–10)</option>
             {GRADE_LEVELS.map((g) => (
@@ -719,12 +600,40 @@ export function CurriculumWorkspace() {
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor={`${baseId}-quarter`}>Quarter / Term</label>
+        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+          <label
+            htmlFor={`${baseId}-component`}
+            className="font-label text-label-md text-on-surface"
+          >
+            TLE Component
+          </label>
+          <select
+            id={`${baseId}-component`}
+            value={component}
+            onChange={(e) => handleComponentChange(e.target.value)}
+            className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            <option value="">All Components</option>
+            {TLE_COMPONENTS.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+          <label
+            htmlFor={`${baseId}-quarter`}
+            className="font-label text-label-md text-on-surface"
+          >
+            Quarter / Term
+          </label>
           <select
             id={`${baseId}-quarter`}
             value={quarterOrTerm}
             onChange={(e) => setQuarterOrTerm(e.target.value)}
+            className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
           >
             <option value="">All Quarters &amp; Terms</option>
             <optgroup label="Curriculum Guide Quarters">
@@ -744,33 +653,23 @@ export function CurriculumWorkspace() {
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor={`${baseId}-component`}>TLE Component</label>
-          <select
-            id={`${baseId}-component`}
-            value={component}
-            onChange={(e) => handleComponentChange(e.target.value)}
+        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+          <label
+            htmlFor={`${baseId}-sector`}
+            className="font-label text-label-md text-on-surface"
           >
-            <option value="">All Components</option>
-            {TLE_COMPONENTS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="field">
-          <label htmlFor={`${baseId}-sector`}>Specialized Sector</label>
+            G9–10 Sector
+          </label>
           <select
             id={`${baseId}-sector`}
             value={sector}
             onChange={(e) => setSector(e.target.value)}
             disabled={availableSectors.length === 0}
+            className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
           >
             <option value="">
               {availableSectors.length === 0
-                ? "None (Grades 7–8 exploratory)"
+                ? "None (Grades 7–8)"
                 : "All Sectors"}
             </option>
             {availableSectors.map((s) => (
@@ -780,52 +679,56 @@ export function CurriculumWorkspace() {
             ))}
           </select>
         </div>
+      </search>
 
-        <div className="field curriculum-search-field">
-          <label htmlFor={`${baseId}-query`}>Search Catalog</label>
-          <input
-            id={`${baseId}-query`}
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search competency, topic, standard, or notes..."
-          />
-        </div>
-      </div>
-
+      {/* Master-Detail Catalog Grid */}
       {loading ? (
-        <p>Loading curriculum catalog...</p>
+        <div className="rounded-md border border-outline-variant bg-surface-container-lowest p-gutter-lg text-on-surface-variant font-body text-body-md">
+          Loading curriculum catalog...
+        </div>
       ) : (
-        <div className="curriculum-grid">
-          <div className="card curriculum-list-panel">
-            <div className="curriculum-list-meta">
-              <strong>{items.length}</strong>{" "}
-              {items.length === 1 ? "Learning Competency" : "Learning Competencies"}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter-lg items-start">
+          {/* Left Column: Competency List */}
+          <div className="lg:col-span-5 flex flex-col gap-gutter-sm">
+            <div className="flex items-center justify-between px-gutter-xs">
+              <span className="font-label text-label-md text-on-surface-variant">
+                Showing <strong className="text-on-surface">{items.length}</strong>{" "}
+                of {allCatalog.length || items.length}{" "}
+                {items.length === 1 ? "Competency" : "Competencies"}
+              </span>
+              <span className="font-label text-label-sm text-primary">
+                BoW Enriched
+              </span>
             </div>
+
             {items.length === 0 ? (
-              <p className="hint">
+              <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg font-body text-body-md text-on-surface-variant">
                 No Learning Competencies match the selected filters.
-              </p>
+              </div>
             ) : (
-              <ul className="curriculum-list">
+              <ul className="flex flex-col gap-gutter-sm max-h-[70vh] overflow-y-auto pr-1">
                 {items.map((item) => {
                   const isSelected = item.id === selectedId;
                   return (
                     <li key={item.id}>
                       <button
                         type="button"
-                        className={`curriculum-list-item${isSelected ? " is-selected" : ""}`}
                         aria-current={isSelected ? "true" : undefined}
                         onClick={() => setSelectedId(item.id)}
+                        className={`w-full text-left rounded-md p-gutter-md flex flex-col gap-gutter-xs transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+                          isSelected
+                            ? "bg-surface-container-lowest border-2 border-primary"
+                            : "bg-surface-container-lowest border border-outline-variant hover:border-primary"
+                        }`}
                       >
                         <CompetencyBadges item={item} showWeek />
-                        <div className="curriculum-item-title">
-                          {item.learningCompetency}
-                        </div>
-                        <div className="curriculum-item-topic">
-                          {item.sector ? `${item.sector} · ` : ""}
+                        <h2 className="font-title text-title-md text-on-surface text-pretty">
                           {item.contentTopic}
-                        </div>
+                        </h2>
+                        <p className="font-body text-body-sm text-on-surface-variant text-pretty line-clamp-2">
+                          {item.sector ? `${item.sector} · ` : ""}
+                          {item.learningCompetency}
+                        </p>
                       </button>
                     </li>
                   );
@@ -834,136 +737,185 @@ export function CurriculumWorkspace() {
             )}
           </div>
 
-          <div className="card curriculum-detail-panel">
+          {/* Right Column: Competency & BoW Detail Inspector */}
+          <article className="lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md lg:sticky lg:top-20">
             {!selectedItem ? (
-              <p className="hint">
+              <p className="font-body text-body-md text-on-surface-variant">
                 Select a Learning Competency from the catalog to inspect its
                 Content, Standards, and Budget of Work details.
               </p>
             ) : (
-              <div className="curriculum-detail">
-                <div className="curriculum-detail-top">
-                  <CompetencyBadges item={selectedItem} showSector />
+              <>
+                <header className="flex flex-wrap items-start justify-between gap-gutter-md pb-gutter-md border-b border-outline-variant">
+                  <div className="flex flex-col gap-gutter-xs min-w-0 flex-1">
+                    <CompetencyBadges item={selectedItem} showSector />
+                    <h2 className="font-headline text-headline-md text-on-surface mt-1">
+                      {selectedItem.contentTopic}
+                    </h2>
+                    {selectedItem.sectorDescription && (
+                      <p className="font-body text-body-sm text-on-surface-variant">
+                        {selectedItem.sectorDescription}
+                      </p>
+                    )}
+                  </div>
 
                   {selectedItem.source === "custom" && (
-                    <div className="actions-row">
+                    <div className="flex flex-wrap items-center gap-gutter-xs">
                       <button
                         type="button"
-                        className="btn-secondary"
                         onClick={() => {
                           setFormState(formFromItem(selectedItem));
                           setShowForm(true);
                         }}
+                        className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
                       >
                         Edit Competency
                       </button>
                       <button
                         type="button"
-                        className="btn-secondary"
                         onClick={() => void handleDeleteCustom(selectedItem)}
+                        className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-error-container text-on-error-container border border-error/30 font-label text-label-md hover:opacity-90 focus-visible:outline-2 focus-visible:outline-error"
                       >
                         Delete
                       </button>
                     </div>
                   )}
-                </div>
+                </header>
 
-                <h2>{selectedItem.learningCompetency}</h2>
-
-                {selectedItem.sectorDescription && (
-                  <p className="hint">{selectedItem.sectorDescription}</p>
-                )}
-
-                <dl className="curriculum-dl">
-                  <div>
-                    <dt>Content Topic</dt>
-                    <dd>
-                      <strong>{selectedItem.contentTopic}</strong>
-                      {selectedItem.contentSubTopics.length > 0 && (
-                        <ul className="curriculum-subtopics">
-                          {selectedItem.contentSubTopics.map((sub, idx) => (
-                            <li key={`${sub}-${idx}`}>{sub}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </dd>
+                <div className="flex flex-col gap-gutter-sm">
+                  <div className="flex flex-col gap-gutter-xs">
+                    <span className="font-label text-label-md text-primary">
+                      Learning Competency
+                    </span>
+                    <p className="font-body text-body-md text-on-surface text-pretty">
+                      {selectedItem.learningCompetency}
+                    </p>
                   </div>
 
-                  <div>
-                    <dt>Content Standard</dt>
-                    <dd>{selectedItem.contentStandard}</dd>
-                  </div>
-
-                  <div>
-                    <dt>Performance Standard</dt>
-                    <dd>{selectedItem.performanceStandard}</dd>
-                  </div>
-
-                  {selectedItem.budgetOfWork && (
-                    <div>
-                      <dt>
-                        Budget of Work ({selectedItem.budgetOfWork.term || "BoW"}
-                        {selectedItem.budgetOfWork.weekRange
-                          ? ` · Week ${selectedItem.budgetOfWork.weekRange}`
-                          : ""}
-                        )
-                      </dt>
-                      <dd className="curriculum-bow-box">
-                        {selectedItem.budgetOfWork.suggestedActivities && (
-                          <div>
-                            <strong>Suggested Activities</strong>
-                            <pre className="curriculum-pre">
-                              {selectedItem.budgetOfWork.suggestedActivities}
-                            </pre>
-                          </div>
-                        )}
-                        {selectedItem.budgetOfWork.suggestedPerformanceTasks && (
-                          <div>
-                            <strong>Suggested Performance Tasks</strong>
-                            <pre className="curriculum-pre">
-                              {
-                                selectedItem.budgetOfWork
-                                  .suggestedPerformanceTasks
-                              }
-                            </pre>
-                          </div>
-                        )}
-                      </dd>
+                  {selectedItem.contentSubTopics.length > 0 && (
+                    <div className="flex flex-col gap-gutter-xs">
+                      <span className="font-label text-label-md text-on-surface">
+                        Content Sub-topics (MATATAG CG)
+                      </span>
+                      <ul className="list-disc list-inside font-body text-body-sm text-on-surface-variant flex flex-col gap-gutter-xs">
+                        {selectedItem.contentSubTopics.map((sub, idx) => (
+                          <li key={`${sub}-${idx}`}>{sub}</li>
+                        ))}
+                      </ul>
                     </div>
                   )}
-                </dl>
+                </div>
 
-                <form
-                  className="curriculum-notes-form"
-                  onSubmit={(e) => void handleSaveNotes(e)}
-                >
-                  <div className="field">
-                    <label htmlFor={`${baseId}-detail-notes`}>
-                      Custom / Unpacked Budget of Work Notes
-                    </label>
-                    <span className="hint">
-                      Saved locally to disk alongside this competency.
+                {/* Content & Performance Standards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md p-gutter-md rounded bg-surface-container-low border border-outline-variant">
+                  <div className="flex flex-col gap-gutter-xs">
+                    <span className="font-label text-label-md text-on-surface">
+                      Content Standard
                     </span>
+                    <p className="font-body text-body-sm text-on-surface-variant text-pretty">
+                      {selectedItem.contentStandard}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-gutter-xs">
+                    <span className="font-label text-label-md text-on-surface">
+                      Performance Standard
+                    </span>
+                    <p className="font-body text-body-sm text-on-surface-variant text-pretty">
+                      {selectedItem.performanceStandard}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Budget of Work Enrichment */}
+                {selectedItem.budgetOfWork && (
+                  <div className="flex flex-col gap-gutter-sm pt-gutter-sm border-t border-outline-variant">
+                    <div className="flex items-center justify-between gap-gutter-sm">
+                      <span className="font-title text-title-md text-primary">
+                        Budget of Work (
+                        {selectedItem.budgetOfWork.term || "BoW"})
+                      </span>
+                      {selectedItem.budgetOfWork.weekRange && (
+                        <span className="font-mono text-mono-md text-on-surface-variant tabular-nums">
+                          Week {selectedItem.budgetOfWork.weekRange}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+                      {selectedItem.budgetOfWork.suggestedActivities && (
+                        <div className="flex flex-col gap-gutter-xs">
+                          <span className="font-label text-label-md text-on-surface">
+                            Suggested Activities
+                          </span>
+                          <p className="font-body text-body-sm text-on-surface-variant whitespace-pre-wrap text-pretty">
+                            {selectedItem.budgetOfWork.suggestedActivities}
+                          </p>
+                        </div>
+                      )}
+                      {selectedItem.budgetOfWork.suggestedPerformanceTasks && (
+                        <div className="flex flex-col gap-gutter-xs">
+                          <span className="font-label text-label-md text-on-surface">
+                            Suggested Performance Tasks
+                          </span>
+                          <p className="font-body text-body-sm text-on-surface-variant whitespace-pre-wrap text-pretty">
+                            {
+                              selectedItem.budgetOfWork
+                                .suggestedPerformanceTasks
+                            }
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Editable Unpacked BoW Notes */}
+                <form
+                  onSubmit={(e) => void handleSaveNotes(e)}
+                  className="flex flex-col gap-gutter-sm pt-gutter-sm border-t border-outline-variant"
+                >
+                  <div className="flex flex-col gap-gutter-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-detail-notes`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Custom / Unpacked Budget of Work Notes
+                      </label>
+                      <span className="font-body text-body-sm text-on-surface-variant">
+                        Saved locally to disk alongside this competency.
+                      </span>
+                    </div>
                     <textarea
                       id={`${baseId}-detail-notes`}
+                      rows={3}
                       value={notesDraft}
                       onChange={(e) => setNotesDraft(e.target.value)}
                       placeholder="Add daily unpacked objectives, lab tools needed, or pacing adjustments..."
+                      className="w-full px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
                     />
                   </div>
-                  <div className="actions-row">
+                  <div className="flex justify-end">
                     <button
                       type="submit"
-                      className="btn-primary"
                       disabled={savingNotes}
+                      className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded border border-outline-variant bg-surface-container-lowest font-label text-label-md text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
                     >
-                      {savingNotes ? "Saving..." : "Save BoW Notes"}
+                      <span
+                        className="material-symbols-outlined text-title-md text-primary"
+                        aria-hidden="true"
+                      >
+                        save
+                      </span>
+                      <span>
+                        {savingNotes ? "Saving..." : "Save BoW Notes"}
+                      </span>
                     </button>
                   </div>
                 </form>
-              </div>
+              </>
             )}
-          </div>
+          </article>
         </div>
       )}
     </section>

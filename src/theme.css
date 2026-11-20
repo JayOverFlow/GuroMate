@@ -1,0 +1,240 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #003e1c;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #1e5631;
+  --color-on-primary-container: #8fca9b;
+
+  --color-secondary: #9b4500;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #fd8a42;
+  --color-on-secondary-container: #682c00;
+
+  --color-tertiary: #003d38;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #005650;
+  --color-on-tertiary-container: #76cbc2;
+
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad5;
+  --color-on-error-container: #930009;
+
+  --color-background: #fff8f5;
+  --color-on-background: #1f1b17;
+  --color-surface: #fff8f5;
+  --color-surface-dim: #e2d8d2;
+  --color-surface-bright: #fff8f5;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #fcf2eb;
+  --color-surface-container: #f6ece6;
+  --color-surface-container-high: #f0e6e0;
+  --color-surface-container-highest: #eae1da;
+  --color-on-surface: #1f1b17;
+  --color-surface-variant: #dce5da;
+  --color-on-surface-variant: #414941;
+  --color-outline: #717970;
+  --color-outline-variant: #c0c9be;
+  --color-inverse-surface: #342f2b;
+  --color-inverse-on-surface: #f9efe8;
+  --color-inverse-primary: #99d4a4;
+
+  --color-success: #006d30;
+  --color-on-success: #ffffff;
+  --color-success-container: #95f8a7;
+  --color-on-success-container: #00210a;
+
+  --color-warning: #904d00;
+  --color-on-warning: #ffffff;
+  --color-warning-container: #ffdcc3;
+  --color-on-warning-container: #2f1500;
+
+  --radius-sm: 4px;
+  --radius-DEFAULT: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  --spacing-gutter-xs: 4px;
+  --spacing-gutter-sm: 8px;
+  --spacing-gutter-md: 16px;
+  --spacing-gutter-lg: 24px;
+  --spacing-gutter-xl: 32px;
+  --spacing-section: 48px;
+  --spacing-page-margin: 24px;
+
+  --font-display: "Red Hat Text", system-ui, -apple-system, sans-serif;
+  --font-headline: "Red Hat Text", system-ui, -apple-system, sans-serif;
+  --font-title: "Red Hat Text", system-ui, -apple-system, sans-serif;
+  --font-body: "Radio Canada Big", system-ui, -apple-system, sans-serif;
+  --font-label: "Red Hat Text", system-ui, -apple-system, sans-serif;
+  --font-mono: "Red Hat Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --text-display-lg: 36px;
+  --text-display-lg--line-height: 44px;
+  --text-display-lg--letter-spacing: -0.5px;
+  --text-display-lg--font-weight: 700;
+
+  --text-headline-lg: 28px;
+  --text-headline-lg--line-height: 34px;
+  --text-headline-lg--letter-spacing: -0.25px;
+  --text-headline-lg--font-weight: 700;
+
+  --text-headline-md: 22px;
+  --text-headline-md--line-height: 28px;
+  --text-headline-md--letter-spacing: -0.1px;
+  --text-headline-md--font-weight: 600;
+
+  --text-title-lg: 18px;
+  --text-title-lg--line-height: 24px;
+  --text-title-lg--font-weight: 600;
+
+  --text-title-md: 15px;
+  --text-title-md--line-height: 20px;
+  --text-title-md--font-weight: 600;
+
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 24px;
+  --text-body-lg--font-weight: 400;
+
+  --text-body-md: 14px;
+  --text-body-md--line-height: 20px;
+  --text-body-md--font-weight: 400;
+
+  --text-body-sm: 12px;
+  --text-body-sm--line-height: 18px;
+  --text-body-sm--letter-spacing: 0.1px;
+  --text-body-sm--font-weight: 400;
+
+  --text-label-lg: 14px;
+  --text-label-lg--line-height: 20px;
+  --text-label-lg--letter-spacing: 0.1px;
+  --text-label-lg--font-weight: 600;
+
+  --text-label-md: 12px;
+  --text-label-md--line-height: 16px;
+  --text-label-md--letter-spacing: 0.2px;
+  --text-label-md--font-weight: 600;
+
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 14px;
+  --text-label-sm--letter-spacing: 0.3px;
+  --text-label-sm--font-weight: 600;
+
+  --text-mono-md: 13px;
+  --text-mono-md--line-height: 18px;
+  --text-mono-md--font-weight: 500;
+
+  --transition-duration-state-change: 120ms;
+  --transition-duration-surface-enter: 220ms;
+  --transition-duration-surface-exit: 150ms;
+
+  --ease-state-change: ease-out;
+  --ease-surface-enter: cubic-bezier(0.2, 0, 0, 1);
+  --ease-surface-exit: cubic-bezier(0.3, 0, 1, 1);
+}
+
+.material-symbols-outlined {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1 !important;
+  box-sizing: content-box;
+  overflow: hidden;
+  white-space: nowrap;
+  direction: ltr;
+  vertical-align: middle;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+
+.material-symbols-outlined.is-filled {
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+
+/* Mobile Navigation Drawer (modern-web-guidance: dialog + scroll-snap) */
+.NavDrawer {
+  --drawer-width: min(20rem, 84dvw, 100dvw - 24px);
+  --drawer-backdrop: 0;
+  inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  overflow: visible;
+}
+
+.NavDrawer::backdrop {
+  background: #000000;
+  opacity: calc(var(--drawer-backdrop) / 2);
+}
+
+.NavDrawer-scroller {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--drawer-width) 100%;
+  overflow-x: scroll;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+  scroll-snap-type: x mandatory;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .NavDrawer-scroller {
+    scroll-behavior: smooth;
+  }
+}
+
+.NavDrawer-scroller::after {
+  content: "";
+  scroll-snap-align: end;
+  scroll-initial-target: nearest;
+}
+
+.NavDrawer-sheet {
+  height: 100svh;
+  overflow-y: auto;
+  scroll-snap-align: start;
+  scrollbar-width: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  .NavDrawer {
+    timeline-scope: --nav-drawer-fade;
+    animation: fade-nav-drawer-backdrop linear both;
+    animation-timeline: --nav-drawer-fade;
+  }
+
+  .NavDrawer-scroller {
+    scroll-timeline: --nav-drawer-fade x;
+  }
+
+  @property --drawer-backdrop {
+    syntax: "<number>";
+    inherits: true;
+    initial-value: 0;
+  }
+
+  @keyframes fade-nav-drawer-backdrop {
+    0% {
+      --drawer-backdrop: 1;
+    }
+    100% {
+      --drawer-backdrop: 0;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

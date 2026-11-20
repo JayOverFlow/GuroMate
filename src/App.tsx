@@ -1,64 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import type { SessionNumber } from "./engine/types";
+import { useEffect, useState } from "react";
+import {
+  AppShell,
+  WORKSPACES,
+  type WorkspaceId,
+} from "./components/AppShell";
+import type { GuroMateSettings, SessionNumber } from "./engine/types";
+import { useClassroomTimer } from "./hooks/useClassroomTimer";
 import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
 import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
 import { DllWorkspace } from "./workspaces/DllWorkspace";
 import { DlpWorkspace, type DeriveDlpTarget } from "./workspaces/DlpWorkspace";
 import { QuizWorkspace, type QuizLaunchTarget } from "./workspaces/QuizWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
-
-type WorkspaceId =
-  | "dll"
-  | "dlp"
-  | "quiz"
-  | "classroom"
-  | "curriculum"
-  | "settings";
-
-interface WorkspaceDef {
-  id: WorkspaceId;
-  label: string;
-  description: string;
-}
-
-const WORKSPACES: WorkspaceDef[] = [
-  {
-    id: "dll",
-    label: "DLL Builder",
-    description:
-      "Weekly 5-session Daily Lesson Logs (ILAW Framework) and .docx export.",
-  },
-  {
-    id: "dlp",
-    label: "DLP Builder",
-    description:
-      "Single-session Daily Lesson Plans with Teacher's and Student's Activity.",
-  },
-  {
-    id: "quiz",
-    label: "Quiz Maker",
-    description:
-      "Printable formative quizzes with Answer Key and lesson sync.",
-  },
-  {
-    id: "classroom",
-    label: "Classroom Tools",
-    description:
-      "Class Sections, Random Student Picker, Group Maker, and Classroom Timer.",
-  },
-  {
-    id: "curriculum",
-    label: "Curriculum",
-    description:
-      "Grades 7-10 MATATAG TLE Curriculum Guide and Budget of Work catalog.",
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    description:
-      "Teacher Profile signatories and personal AI provider configuration.",
-  },
-];
 
 function parseWorkspaceFromHash(): WorkspaceId | null {
   const raw = window.location.hash.replace(/^#/, "") as WorkspaceId;
@@ -71,11 +24,10 @@ export function App() {
   );
   const [deriveTarget, setDeriveTarget] = useState<DeriveDlpTarget | null>(null);
   const [quizTarget, setQuizTarget] = useState<QuizLaunchTarget | null>(null);
-  const [isWide, setIsWide] = useState(false);
+  const [teacherName, setTeacherName] = useState<string>("");
+  const [openTimerTabSignal, setOpenTimerTabSignal] = useState(0);
 
-  const headerRef = useRef<HTMLElement>(null);
-  const innerRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
+  const timer = useClassroomTimer();
 
   useEffect(() => {
     const onHashChange = () => {
@@ -92,79 +44,30 @@ export function App() {
   }, [activeWorkspace]);
 
   useEffect(() => {
-    const header = headerRef.current;
-    const inner = innerRef.current;
-    const menu = menuRef.current;
-    if (!header || !inner || !menu) return;
-
-    let lastHeaderWidth = header.getBoundingClientRect().width;
-    let wideNow = false;
-    let rafId = 0;
-
-    const applyLayout = (wide: boolean) => {
-      wideNow = wide;
-      setIsWide(wide);
-      const wasOpen = menu.matches(":popover-open, .\\:popover-open");
-      if (wide) {
-        menu.removeAttribute("popover");
-      } else {
-        menu.setAttribute("popover", "auto");
-        if (wasOpen) {
-          try {
-            menu.showPopover();
-          } catch {
-            // Ignore when polyfill/native popover is already transitioning.
-          }
+    let active = true;
+    void fetch("/api/settings")
+      .then((res) => (res.ok ? (res.json() as Promise<GuroMateSettings>) : null))
+      .then((data) => {
+        if (active && data?.profile?.studentTeacherName) {
+          setTeacherName(data.profile.studentTeacherName);
         }
-      }
-    };
-
-    const measure = () => {
-      header.classList.add("is-measuring", "is-wide");
-      menu.removeAttribute("popover");
-      const fits = inner.scrollWidth <= inner.clientWidth;
-      if (!fits) {
-        header.classList.remove("is-wide");
-      }
-      applyLayout(fits);
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        header.classList.remove("is-measuring");
+      })
+      .catch(() => {
+        // Ignore; SettingsWorkspace reports load errors directly.
       });
-    };
-
-    measure();
-
-    const observer = new ResizeObserver((entries) => {
-      const nextWidth = header.getBoundingClientRect().width;
-      const grew = nextWidth > lastHeaderWidth;
-      lastHeaderWidth = nextWidth;
-      const menuChanged = entries.some((entry) => entry.target === menu);
-      if (wideNow || grew || menuChanged) {
-        measure();
-      }
-    });
-    observer.observe(header);
-    observer.observe(menu);
-
     return () => {
-      cancelAnimationFrame(rafId);
-      observer.disconnect();
+      active = false;
     };
   }, []);
 
-  const currentWorkspace =
-    WORKSPACES.find((w) => w.id === activeWorkspace) ?? WORKSPACES[5]!;
-
   function handleNavClick(id: WorkspaceId) {
     setActiveWorkspace(id);
-    if (!isWide && menuRef.current?.matches(":popover-open, .\\:popover-open")) {
-      try {
-        menuRef.current.hidePopover();
-      } catch {
-        // Ignore if already closed.
-      }
-    }
+  }
+
+  function handleOpenTimerWorkspace() {
+    setOpenTimerTabSignal((n) => n + 1);
+    setActiveWorkspace("classroom");
+    window.location.hash = "classroom";
   }
 
   function handleDeriveDlp(dllId: string, sessionNumber: SessionNumber) {
@@ -180,112 +83,47 @@ export function App() {
   }
 
   return (
-    <>
-      <header ref={headerRef} className={`site-header${isWide ? " is-wide" : ""}`}>
-        <a href="#main-content" className="skip-link visually-hidden">
-          Skip to main content
-        </a>
-        <div ref={innerRef} className="header-inner">
-          <a className="site-brand" href="#settings">
-            <span>GuroMate</span>
-            <span className="brand-tag">MATATAG TLE</span>
-          </a>
-
-          <nav className="site-nav" aria-label="Primary">
-            <button
-              className="menu-button"
-              type="button"
-              {...({
-                popovertarget: "site-menu",
-                popovertargetaction: "toggle",
-              } as Record<string, string>)}
-              aria-controls="site-menu"
-            >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
-              <span>Menu</span>
-            </button>
-
-            <ul
-              ref={menuRef}
-              id="site-menu"
-              className="site-menu"
-              {...(!isWide ? ({ popover: "auto" } as Record<string, string>) : {})}
-            >
-              {WORKSPACES.map((workspace) => (
-                <li key={workspace.id}>
-                  <a
-                    href={`#${workspace.id}`}
-                    aria-current={
-                      activeWorkspace === workspace.id ? "page" : undefined
-                    }
-                    onClick={() => handleNavClick(workspace.id)}
-                  >
-                    {workspace.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </div>
-      </header>
-
-      <main id="main-content" className="app-main">
-        {activeWorkspace === "dll" ? (
-          <DllWorkspace
-            onDeriveDlp={handleDeriveDlp}
-            onCreateQuiz={(dllId, sessionNumber) =>
-              handleLaunchQuiz({ sourceKind: "dll", dllId, sessionNumber })
-            }
-          />
-        ) : activeWorkspace === "dlp" ? (
-          <DlpWorkspace
-            initialDeriveTarget={deriveTarget}
-            onConsumeDeriveTarget={() => setDeriveTarget(null)}
-            onCreateQuiz={(dlpId) =>
-              handleLaunchQuiz({ sourceKind: "dlp", dlpId })
-            }
-          />
-        ) : activeWorkspace === "quiz" ? (
-          <QuizWorkspace
-            initialLaunchTarget={quizTarget}
-            onConsumeLaunchTarget={() => setQuizTarget(null)}
-          />
-        ) : activeWorkspace === "settings" ? (
-          <SettingsWorkspace />
-        ) : activeWorkspace === "curriculum" ? (
-          <CurriculumWorkspace />
-        ) : activeWorkspace === "classroom" ? (
-          <ClassroomWorkspace />
-        ) : (
-          <section className="card" aria-labelledby="workspace-heading">
-            <div className="workspace-header">
-              <h1 id="workspace-heading" tabIndex={-1}>
-                {currentWorkspace.label}
-              </h1>
-              <p className="workspace-subtitle">
-                {currentWorkspace.description}
-              </p>
-            </div>
-            <p>
-              This workspace is scheduled for implementation in a subsequent
-              issue. Use <a href="#settings">Settings</a> to configure Teacher
-              Profile signatories and your personal AI provider.
-            </p>
-          </section>
-        )}
-      </main>
-    </>
+    <AppShell
+      activeWorkspace={activeWorkspace}
+      onSelectWorkspace={handleNavClick}
+      onOpenTimerWorkspace={handleOpenTimerWorkspace}
+      timer={timer}
+      teacherName={teacherName}
+    >
+      {activeWorkspace === "dll" ? (
+        <DllWorkspace
+          onDeriveDlp={handleDeriveDlp}
+          onCreateQuiz={(dllId, sessionNumber) =>
+            handleLaunchQuiz({ sourceKind: "dll", dllId, sessionNumber })
+          }
+        />
+      ) : activeWorkspace === "dlp" ? (
+        <DlpWorkspace
+          initialDeriveTarget={deriveTarget}
+          onConsumeDeriveTarget={() => setDeriveTarget(null)}
+          onCreateQuiz={(dlpId) =>
+            handleLaunchQuiz({ sourceKind: "dlp", dlpId })
+          }
+        />
+      ) : activeWorkspace === "quiz" ? (
+        <QuizWorkspace
+          initialLaunchTarget={quizTarget}
+          onConsumeLaunchTarget={() => setQuizTarget(null)}
+        />
+      ) : activeWorkspace === "settings" ? (
+        <SettingsWorkspace
+          onSettingsSaved={(saved) =>
+            setTeacherName(saved.profile.studentTeacherName)
+          }
+        />
+      ) : activeWorkspace === "curriculum" ? (
+        <CurriculumWorkspace />
+      ) : (
+        <ClassroomWorkspace
+          timer={timer}
+          openTimerTabSignal={openTimerTabSignal}
+        />
+      )}
+    </AppShell>
   );
 }
