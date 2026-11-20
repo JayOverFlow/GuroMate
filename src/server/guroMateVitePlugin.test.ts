@@ -182,4 +182,74 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     );
     expect(missingNoteRes.status).toBe(404);
   });
+
+  it("serves Class Section CRUD and error status codes over /api/class-sections", async () => {
+    const baseUrl = await startTestServer();
+
+    const emptyRes = await fetch(`${baseUrl}/api/class-sections`);
+    expect(emptyRes.status).toBe(200);
+    expect(await emptyRes.json()).toEqual([]);
+
+    const invalidRes = await fetch(`${baseUrl}/api/class-sections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeLevel: 7,
+        sectionName: "",
+        students: ["Ana"],
+      }),
+    });
+    expect(invalidRes.status).toBe(400);
+
+    const createRes = await fetch(`${baseUrl}/api/class-sections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeLevel: 7,
+        sectionName: "7-Sampaguita",
+        students: ["Ana Cruz", "Ben Reyes"],
+      }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as {
+      id: string;
+      sectionName: string;
+    };
+    expect(created.sectionName).toBe("7-Sampaguita");
+
+    const updateRes = await fetch(
+      `${baseUrl}/api/class-sections/${encodeURIComponent(created.id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gradeLevel: 8,
+          sectionName: "8-Narra",
+          students: ["Ana Cruz", "Ben Reyes", "Cara Lim"],
+        }),
+      },
+    );
+    expect(updateRes.status).toBe(200);
+    expect(await updateRes.json()).toMatchObject({
+      id: created.id,
+      gradeLevel: 8,
+      sectionName: "8-Narra",
+      students: ["Ana Cruz", "Ben Reyes", "Cara Lim"],
+    });
+
+    const listRes = await fetch(`${baseUrl}/api/class-sections`);
+    expect(listRes.status).toBe(200);
+    expect(await listRes.json()).toHaveLength(1);
+
+    const delRes = await fetch(
+      `${baseUrl}/api/class-sections/${encodeURIComponent(created.id)}`,
+      { method: "DELETE" },
+    );
+    expect(delRes.status).toBe(200);
+
+    const missingRes = await fetch(`${baseUrl}/api/class-sections/missing-id`, {
+      method: "DELETE",
+    });
+    expect(missingRes.status).toBe(404);
+  });
 });

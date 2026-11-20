@@ -11,6 +11,8 @@ import {
   type AiConnectionCheckResult,
   type AiProviderSettings,
   type BudgetOfWorkInfo,
+  type ClassSection,
+  type ClassSectionInput,
   type CurriculumCompetency,
   type CurriculumFilter,
   type CustomCompetencyInput,
@@ -221,6 +223,35 @@ export const DEFAULT_SETTINGS: GuroMateSettings = {
 export class SettingsValidationError extends Error {}
 export class CurriculumValidationError extends Error {}
 export class CurriculumNotFoundError extends Error {}
+export class ClassSectionValidationError extends Error {}
+export class ClassSectionNotFoundError extends Error {}
+
+function validateAndBuildClassSection(
+  input: ClassSectionInput,
+  existingId?: string,
+): ClassSection {
+  if (!VALID_GRADES.has(input.gradeLevel)) {
+    throw new ClassSectionValidationError(
+      "Grade Level must be between 7 and 10.",
+    );
+  }
+  const sectionName = input.sectionName.trim();
+  if (!sectionName) {
+    throw new ClassSectionValidationError("Section Name is required.");
+  }
+  const students = input.students.map((s) => s.trim()).filter(Boolean);
+  if (students.length === 0) {
+    throw new ClassSectionValidationError(
+      "At least one student name is required.",
+    );
+  }
+  return {
+    id: existingId ?? `sec-${randomUUID().slice(0, 8)}`,
+    gradeLevel: input.gradeLevel,
+    sectionName,
+    students,
+  };
+}
 
 function cloneDefaults(): GuroMateSettings {
   return {
@@ -302,6 +333,7 @@ export function createGuroMateEngine(
     options.dataDir,
     "curriculum-custom.json",
   );
+  const classSectionsPath = path.join(options.dataDir, "class-sections.json");
   const aiAdapter = options.aiAdapter ?? createLiveAiAdapter();
 
   async function getSettings(): Promise<GuroMateSettings> {
@@ -495,6 +527,46 @@ export function createGuroMateEngine(
     await writeJsonAtomic(customCurriculumPath, store);
   }
 
+  async function readClassSections(): Promise<ClassSection[]> {
+    const parsed = await readJsonOrDefault<unknown>(
+      classSectionsPath,
+      () => [],
+    );
+    return Array.isArray(parsed) ? (parsed as ClassSection[]) : [];
+  }
+
+  async function saveClassSection(
+    input: ClassSectionInput,
+  ): Promise<ClassSection> {
+    const sections = await readClassSections();
+    let saved: ClassSection;
+    if (input.id) {
+      const index = sections.findIndex((item) => item.id === input.id);
+      if (index === -1) {
+        throw new ClassSectionNotFoundError(
+          `Class Section not found: ${input.id}`,
+        );
+      }
+      saved = validateAndBuildClassSection(input, input.id);
+      sections[index] = saved;
+    } else {
+      saved = validateAndBuildClassSection(input);
+      sections.push(saved);
+    }
+    await writeJsonAtomic(classSectionsPath, sections);
+    return saved;
+  }
+
+  async function deleteClassSection(id: string): Promise<void> {
+    const sections = await readClassSections();
+    const index = sections.findIndex((item) => item.id === id);
+    if (index === -1) {
+      throw new ClassSectionNotFoundError(`Class Section not found: ${id}`);
+    }
+    sections.splice(index, 1);
+    await writeJsonAtomic(classSectionsPath, sections);
+  }
+
   return {
     dataDir: options.dataDir,
     templatesDir: options.templatesDir,
@@ -505,5 +577,8 @@ export function createGuroMateEngine(
     saveCustomCompetency,
     saveCompetencyNotes,
     deleteCustomCompetency,
+    listClassSections: readClassSections,
+    saveClassSection,
+    deleteClassSection,
   };
 }

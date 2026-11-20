@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { Connect, Plugin } from "vite";
 import {
+  ClassSectionNotFoundError,
+  ClassSectionValidationError,
   CurriculumNotFoundError,
   CurriculumValidationError,
   SettingsValidationError,
@@ -12,6 +14,7 @@ import {
   QUARTERS,
   TLE_COMPONENTS,
   type AiProviderSettings,
+  type ClassSectionInput,
   type CurriculumFilter,
   type CustomCompetencyInput,
   type GradeLevel,
@@ -156,6 +159,20 @@ function parseCustomCompetencyBody(body: unknown): CustomCompetencyInput {
   };
 }
 
+function parseClassSectionBody(body: unknown): ClassSectionInput {
+  if (!isRecord(body)) {
+    throw new HttpError(400, "Class section payload must be a JSON object.");
+  }
+  return {
+    gradeLevel: Number(body.gradeLevel) as GradeLevel,
+    sectionName:
+      typeof body.sectionName === "string" ? body.sectionName : "",
+    students: Array.isArray(body.students)
+      ? body.students.filter((s): s is string => typeof s === "string")
+      : [],
+  };
+}
+
 /** Creates the HTTP middleware exposing GuroMate Engine operations under `/api`. */
 export function createGuroMateMiddleware(
   engine: GuroMateEngine,
@@ -244,6 +261,32 @@ export function createGuroMateMiddleware(
         return;
       }
 
+      if (req.method === "GET" && urlPath === "/api/class-sections") {
+        sendJson(res, 200, await engine.listClassSections());
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/api/class-sections") {
+        const input = parseClassSectionBody(await readJsonBody(req));
+        sendJson(res, 201, await engine.saveClassSection(input));
+        return;
+      }
+
+      const sectionMatch = urlPath.match(/^\/api\/class-sections\/([^/]+)$/);
+      if (sectionMatch) {
+        const id = decodeURIComponent(sectionMatch[1]!);
+        if (req.method === "PUT") {
+          const input = parseClassSectionBody(await readJsonBody(req));
+          sendJson(res, 200, await engine.saveClassSection({ ...input, id }));
+          return;
+        }
+        if (req.method === "DELETE") {
+          await engine.deleteClassSection(id);
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+      }
+
       sendJson(res, 404, { error: `Unknown API route: ${req.method} ${urlPath}` });
     })().catch((err) => {
       if (err instanceof HttpError) {
@@ -252,12 +295,16 @@ export function createGuroMateMiddleware(
       }
       if (
         err instanceof SettingsValidationError ||
-        err instanceof CurriculumValidationError
+        err instanceof CurriculumValidationError ||
+        err instanceof ClassSectionValidationError
       ) {
         sendJson(res, 400, { error: err.message });
         return;
       }
-      if (err instanceof CurriculumNotFoundError) {
+      if (
+        err instanceof CurriculumNotFoundError ||
+        err instanceof ClassSectionNotFoundError
+      ) {
         sendJson(res, 404, { error: err.message });
         return;
       }
