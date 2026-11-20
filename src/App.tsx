@@ -4,6 +4,7 @@ import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
 import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
 import { DllWorkspace } from "./workspaces/DllWorkspace";
 import { DlpWorkspace, type DeriveDlpTarget } from "./workspaces/DlpWorkspace";
+import { QuizWorkspace, type QuizLaunchTarget } from "./workspaces/QuizWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
 type WorkspaceId =
@@ -69,6 +70,7 @@ export function App() {
     () => parseWorkspaceFromHash() ?? "settings",
   );
   const [deriveTarget, setDeriveTarget] = useState<DeriveDlpTarget | null>(null);
+  const [quizTarget, setQuizTarget] = useState<QuizLaunchTarget | null>(null);
   const [isWide, setIsWide] = useState(false);
 
   const headerRef = useRef<HTMLElement>(null);
@@ -171,6 +173,12 @@ export function App() {
     window.location.hash = "dlp";
   }
 
+  function handleLaunchQuiz(target: QuizLaunchTarget) {
+    setQuizTarget(target);
+    setActiveWorkspace("quiz");
+    window.location.hash = "quiz";
+  }
+
   return (
     <>
       <header ref={headerRef} className={`site-header${isWide ? " is-wide" : ""}`}>
@@ -235,11 +243,24 @@ export function App() {
 
       <main id="main-content" className="app-main">
         {activeWorkspace === "dll" ? (
-          <DllWorkspace onDeriveDlp={handleDeriveDlp} />
+          <DllWorkspace
+            onDeriveDlp={handleDeriveDlp}
+            onCreateQuiz={(dllId, sessionNumber) =>
+              handleLaunchQuiz({ sourceKind: "dll", dllId, sessionNumber })
+            }
+          />
         ) : activeWorkspace === "dlp" ? (
           <DlpWorkspace
             initialDeriveTarget={deriveTarget}
             onConsumeDeriveTarget={() => setDeriveTarget(null)}
+            onCreateQuiz={(dlpId) =>
+              handleLaunchQuiz({ sourceKind: "dlp", dlpId })
+            }
+          />
+        ) : activeWorkspace === "quiz" ? (
+          <QuizWorkspace
+            initialLaunchTarget={quizTarget}
+            onConsumeLaunchTarget={() => setQuizTarget(null)}
           />
         ) : activeWorkspace === "settings" ? (
           <SettingsWorkspace />

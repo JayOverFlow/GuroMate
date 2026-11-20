@@ -5,7 +5,7 @@ interface Span {
   end: number;
 }
 
-function escapeXml(text: string): string {
+export function escapeXml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

@@ -113,9 +113,10 @@ function createInitialSessionConfigs(): DllSessionConfig[] {
 
 interface DllWorkspaceProps {
   onDeriveDlp?: (dllId: string, sessionNumber: SessionNumber) => void;
+  onCreateQuiz?: (dllId: string, sessionNumber: SessionNumber) => void;
 }
 
-export function DllWorkspace({ onDeriveDlp }: DllWorkspaceProps) {
+export function DllWorkspace({ onDeriveDlp, onCreateQuiz }: DllWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
 
@@ -829,16 +830,31 @@ export function DllWorkspace({ onDeriveDlp }: DllWorkspaceProps) {
                           ? `(${session.components.join(", ")})`
                           : ""}
                     </h3>
-                    {session.mode === "instructional" && onDeriveDlp && (
-                      <button
-                        type="button"
-                        className="btn-secondary btn-compact"
-                        onClick={() =>
-                          onDeriveDlp(draftDll.id, session.sessionNumber)
-                        }
-                      >
-                        Derive DLP
-                      </button>
+                    {session.mode === "instructional" && (onDeriveDlp || onCreateQuiz) && (
+                      <div className="actions-row">
+                        {onDeriveDlp && (
+                          <button
+                            type="button"
+                            className="btn-secondary btn-compact"
+                            onClick={() =>
+                              onDeriveDlp(draftDll.id, session.sessionNumber)
+                            }
+                          >
+                            Derive DLP
+                          </button>
+                        )}
+                        {onCreateQuiz && (
+                          <button
+                            type="button"
+                            className="btn-secondary btn-compact"
+                            onClick={() =>
+                              onCreateQuiz(draftDll.id, session.sessionNumber)
+                            }
+                          >
+                            Create Quiz
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="dll-session-fields">

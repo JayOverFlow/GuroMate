@@ -10,12 +10,15 @@ import {
   DllValidationError,
   DlpNotFoundError,
   DlpValidationError,
+  QuizNotFoundError,
+  QuizValidationError,
   SettingsValidationError,
   createGuroMateEngine,
 } from "../engine/createGuroMateEngine";
 import {
   GRADE_LEVELS,
   QUARTERS,
+  QUIZ_QUESTION_TYPES,
   TLE_COMPONENTS,
   type AiProviderSettings,
   type ClassSectionInput,
@@ -26,9 +29,12 @@ import {
   type DllSessionConfig,
   type GenerateDllInput,
   type GenerateDlpInput,
+  type GenerateQuizInput,
   type GradeLevel,
   type GuroMateEngine,
   type QuarterNumber,
+  type Quiz,
+  type QuizItemCounts,
   type SessionNumber,
   type SettingsPatch,
   type TleComponent,
@@ -264,6 +270,62 @@ function parseGenerateDlpBody(body: unknown): GenerateDlpInput {
   };
 }
 
+function parseQuizItemCounts(raw: unknown): QuizItemCounts {
+  const counts: QuizItemCounts = {
+    multipleChoice: 0,
+    trueFalse: 0,
+    identification: 0,
+    essayRubric: 0,
+  };
+  if (!isRecord(raw)) return counts;
+  for (const type of QUIZ_QUESTION_TYPES) {
+    const val = raw[type];
+    counts[type] = typeof val === "number" ? val : Number(val ?? 0);
+  }
+  return counts;
+}
+
+function parseGenerateQuizBody(body: unknown): GenerateQuizInput {
+  if (!isRecord(body)) {
+    throw new HttpError(400, "Quiz generation payload must be a JSON object.");
+  }
+  const optional = {
+    ...(typeof body.title === "string" ? { title: body.title } : {}),
+    ...(typeof body.promptNotes === "string" ? { promptNotes: body.promptNotes } : {}),
+    itemCounts: parseQuizItemCounts(body.itemCounts),
+  };
+  if (body.sourceKind === "dll") {
+    if (typeof body.dllId !== "string" || !body.dllId.trim()) {
+      throw new HttpError(400, "dllId is required when generating from a DLL Session.");
+    }
+    return {
+      sourceKind: "dll",
+      dllId: body.dllId,
+      sessionNumber: Number(body.sessionNumber) as SessionNumber,
+      ...optional,
+    };
+  }
+  if (body.sourceKind === "dlp") {
+    if (typeof body.dlpId !== "string" || !body.dlpId.trim()) {
+      throw new HttpError(400, "dlpId is required when generating from a DLP.");
+    }
+    return {
+      sourceKind: "dlp",
+      dlpId: body.dlpId,
+      ...optional,
+    };
+  }
+  return {
+    sourceKind: "standalone",
+    gradeAndSection:
+      typeof body.gradeAndSection === "string" ? body.gradeAndSection : "",
+    competencyIds: Array.isArray(body.competencyIds)
+      ? body.competencyIds.filter((s): s is string => typeof s === "string")
+      : [],
+    ...optional,
+  };
+}
+
 /** Creates the HTTP middleware exposing GuroMate Engine operations under `/api`. */
 export function createGuroMateMiddleware(
   engine: GuroMateEngine,
@@ -468,6 +530,58 @@ export function createGuroMateMiddleware(
         }
       }
 
+      if (req.method === "GET" && urlPath === "/api/quizzes") {
+        sendJson(res, 200, await engine.listQuizzes());
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/api/quizzes/generate") {
+        const input = parseGenerateQuizBody(await readJsonBody(req));
+        sendJson(res, 201, await engine.generateQuiz(input));
+        return;
+      }
+
+      const quizSyncMatch = urlPath.match(/^\/api\/quizzes\/([^/]+)\/sync$/);
+      if (req.method === "POST" && quizSyncMatch) {
+        const id = decodeURIComponent(quizSyncMatch[1]!);
+        sendJson(res, 200, await engine.syncQuizToLesson(id));
+        return;
+      }
+
+      const quizDocxMatch = urlPath.match(/^\/api\/quizzes\/([^/]+)\/docx$/);
+      if (req.method === "GET" && quizDocxMatch) {
+        const id = decodeURIComponent(quizDocxMatch[1]!);
+        const { filename, buffer } = await engine.exportQuizDocx(id);
+        sendDocx(res, filename, buffer);
+        return;
+      }
+
+      const quizMatch = urlPath.match(/^\/api\/quizzes\/([^/]+)$/);
+      if (quizMatch) {
+        const id = decodeURIComponent(quizMatch[1]!);
+        if (req.method === "GET") {
+          sendJson(res, 200, await engine.getQuiz(id));
+          return;
+        }
+        if (req.method === "PUT") {
+          const body = await readJsonBody(req);
+          if (!isRecord(body)) {
+            throw new HttpError(400, "Quiz payload must be a JSON object.");
+          }
+          const updated = await engine.saveQuiz({
+            ...(body as unknown as Quiz),
+            id,
+          });
+          sendJson(res, 200, updated);
+          return;
+        }
+        if (req.method === "DELETE") {
+          await engine.deleteQuiz(id);
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+      }
+
       sendJson(res, 404, { error: `Unknown API route: ${req.method} ${urlPath}` });
     })().catch((err) => {
       if (err instanceof HttpError) {
@@ -479,7 +593,8 @@ export function createGuroMateMiddleware(
         err instanceof CurriculumValidationError ||
         err instanceof ClassSectionValidationError ||
         err instanceof DllValidationError ||
-        err instanceof DlpValidationError
+        err instanceof DlpValidationError ||
+        err instanceof QuizValidationError
       ) {
         sendJson(res, 400, { error: err.message });
         return;
@@ -488,7 +603,8 @@ export function createGuroMateMiddleware(
         err instanceof CurriculumNotFoundError ||
         err instanceof ClassSectionNotFoundError ||
         err instanceof DllNotFoundError ||
-        err instanceof DlpNotFoundError
+        err instanceof DlpNotFoundError ||
+        err instanceof QuizNotFoundError
       ) {
         sendJson(res, 404, { error: err.message });
         return;

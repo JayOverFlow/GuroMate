@@ -509,4 +509,136 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     const missingRes = await fetch(`${baseUrl}/api/dlps/${encodeURIComponent(created.id)}`);
     expect(missingRes.status).toBe(404);
   });
+
+  it("serves Quiz generation, listing, inline editing, lesson sync, deletion, and .docx download over /api/quizzes", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-quiz-"));
+    tempDirs.push(dataDir);
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "HTTP DLL Quiz Source",
+                references: "CG",
+                sessions: [1, 2, 3, 4, 5].map((n) => ({
+                  sessionNumber: n,
+                  learningObjectives: `Obj ${n}`,
+                  preLesson: `Pre ${n}`,
+                  lessonFlow: `Flow ${n}`,
+                  learningResources: `Res ${n}`,
+                  integrationAndContextualization: `Int ${n}`,
+                  formativeAssessment: `Ass ${n}`,
+                  extendedLearningOpportunities: `Ext ${n}`,
+                })),
+              }),
+            };
+          }
+          return {
+            text: JSON.stringify({
+              title: "HTTP Formative Quiz",
+              sections: [
+                {
+                  type: "multipleChoice",
+                  directions: "Pick A-D.",
+                  items: [
+                    {
+                      prompt: "Sample question?",
+                      choices: ["Opt 1", "Opt 2", "Opt 3", "Opt 4"],
+                      answer: "A. Opt 1",
+                    },
+                  ],
+                },
+              ],
+            }),
+          };
+        },
+      },
+    });
+    const middleware = createGuroMateMiddleware(engine);
+    const server = createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 404;
+        res.end("Not Found");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const emptyRes = await fetch(`${baseUrl}/api/quizzes`);
+    expect(emptyRes.status).toBe(200);
+    expect(await emptyRes.json()).toEqual([]);
+
+    const badRes = await fetch(`${baseUrl}/api/quizzes/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceKind: "standalone",
+        gradeAndSection: "7-Rizal",
+        competencyIds: [],
+        itemCounts: { multipleChoice: 0, trueFalse: 0, identification: 0, essayRubric: 0 },
+      }),
+    });
+    expect(badRes.status).toBe(400);
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const dll = await engine.generateDll({
+      gradeAndSection: "7-Rizal",
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [ict.id],
+      })),
+    });
+
+    const genRes = await fetch(`${baseUrl}/api/quizzes/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceKind: "dll",
+        dllId: dll.id,
+        sessionNumber: 1,
+        itemCounts: { multipleChoice: 1, trueFalse: 0, identification: 0, essayRubric: 0 },
+      }),
+    });
+    expect(genRes.status).toBe(201);
+    const created = (await genRes.json()) as { id: string; title: string };
+    expect(created.title).toBe("HTTP Formative Quiz");
+
+    const putRes = await fetch(`${baseUrl}/api/quizzes/${encodeURIComponent(created.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...created, title: "HTTP Quiz Updated" }),
+    });
+    expect(putRes.status).toBe(200);
+    expect(await putRes.json()).toMatchObject({ title: "HTTP Quiz Updated" });
+
+    const syncRes = await fetch(`${baseUrl}/api/quizzes/${encodeURIComponent(created.id)}/sync`, {
+      method: "POST",
+    });
+    expect(syncRes.status).toBe(200);
+    expect((await engine.getDll(dll.id)).sessions[0]!.formativeAssessment).toContain(
+      "HTTP Quiz Updated",
+    );
+
+    const docxRes = await fetch(`${baseUrl}/api/quizzes/${encodeURIComponent(created.id)}/docx`);
+    expect(docxRes.status).toBe(200);
+    expect(docxRes.headers.get("content-type")).toContain(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    expect(docxRes.headers.get("content-disposition")).toContain(".docx");
+    const docxBytes = Buffer.from(await docxRes.arrayBuffer());
+    expect(docxBytes.subarray(0, 2).toString("ascii")).toBe("PK");
+
+    const delRes = await fetch(`${baseUrl}/api/quizzes/${encodeURIComponent(created.id)}`, {
+      method: "DELETE",
+    });
+    expect(delRes.status).toBe(200);
+    const missingRes = await fetch(`${baseUrl}/api/quizzes/${encodeURIComponent(created.id)}`);
+    expect(missingRes.status).toBe(404);
+  });
 });

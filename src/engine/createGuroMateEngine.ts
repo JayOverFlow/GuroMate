@@ -23,10 +23,25 @@ import {
   resolveDerivedDlpContext,
   resolveScratchDlpContext,
 } from "./dlp";
+import {
+  QuizNotFoundError,
+  QuizValidationError,
+  assembleGeneratedQuizSections,
+  buildQuizPrompt,
+  formatQuizForLesson,
+  normalizeEditedQuiz,
+  parseAiQuizPayload,
+  renderQuizMarkdown,
+  resolveDllSessionQuizContext,
+  resolveDlpQuizContext,
+  resolveStandaloneQuizContext,
+  validateQuizItemCounts,
+} from "./quiz";
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
 import { createLiveAiAdapter } from "./liveAiAdapter";
 import { AI_PROVIDER_MAP } from "./providers";
+import { buildQuizDocxBuffer } from "./quizDocx";
 import { readZipEntry, replaceZipEntry } from "./zip";
 import {
   GRADE_LEVELS,
@@ -44,11 +59,14 @@ import {
   type DailyLessonPlan,
   type GenerateDllInput,
   type GenerateDlpInput,
+  type GenerateQuizInput,
   type GuroMateEngine,
   type GuroMateEngineOptions,
   type GuroMateSettings,
   type GradeLevel,
   type QuarterNumber,
+  type Quiz,
+  type QuizSyncResult,
   type SettingsPatch,
   type TeacherProfileSettings,
   type TleComponent,
@@ -253,7 +271,14 @@ export class CurriculumValidationError extends Error {}
 export class CurriculumNotFoundError extends Error {}
 export class ClassSectionValidationError extends Error {}
 export class ClassSectionNotFoundError extends Error {}
-export { DllNotFoundError, DllValidationError, DlpNotFoundError, DlpValidationError };
+export {
+  DllNotFoundError,
+  DllValidationError,
+  DlpNotFoundError,
+  DlpValidationError,
+  QuizNotFoundError,
+  QuizValidationError,
+};
 
 function validateAndBuildClassSection(
   input: ClassSectionInput,
@@ -367,6 +392,8 @@ export function createGuroMateEngine(
   const dllsIndexPath = path.join(options.dataDir, "dlls.json");
   const dlpsDir = path.join(options.dataDir, "dlps");
   const dlpsIndexPath = path.join(options.dataDir, "dlps.json");
+  const quizzesDir = path.join(options.dataDir, "quizzes");
+  const quizzesIndexPath = path.join(options.dataDir, "quizzes.json");
   const aiAdapter = options.aiAdapter ?? createLiveAiAdapter();
 
   async function getSettings(): Promise<GuroMateSettings> {
@@ -673,6 +700,12 @@ export function createGuroMateEngine(
     renderDlpMarkdown,
     (id) => new DlpNotFoundError(`Daily Lesson Plan not found: ${id}`),
   );
+  const quizStore = createLessonStore<Quiz>(
+    quizzesIndexPath,
+    quizzesDir,
+    renderQuizMarkdown,
+    (id) => new QuizNotFoundError(`Formative Quiz not found: ${id}`),
+  );
 
   async function generateDll(input: GenerateDllInput): Promise<DailyLessonLog> {
     const catalog = await listCurriculum();
@@ -729,6 +762,19 @@ export function createGuroMateEngine(
     return dllStore.prepend(dll);
   }
 
+  function buildDocxFilename(
+    prefix: "DLL" | "DLP" | "Quiz",
+    title: string,
+    id: string,
+  ): string {
+    const safeSlug =
+      title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || id;
+    return `${prefix}-${safeSlug}.docx`;
+  }
+
   async function exportIlawDocx(
     templateFilename: string,
     prefix: "DLL" | "DLP",
@@ -747,13 +793,8 @@ export function createGuroMateEngine(
       "word/document.xml",
       Buffer.from(updatedXml, "utf8"),
     );
-    const safeSlug =
-      lessonTitle
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "") || id;
     return {
-      filename: `${prefix}-${safeSlug}.docx`,
+      filename: buildDocxFilename(prefix, lessonTitle, id),
       buffer,
     };
   }
@@ -868,6 +909,120 @@ export function createGuroMateEngine(
     );
   }
 
+  async function generateQuiz(input: GenerateQuizInput): Promise<Quiz> {
+    const itemCounts = validateQuizItemCounts(input.itemCounts);
+    const catalog = await listCurriculum();
+    const competencyMap = new Map(catalog.map((c) => [c.id, c]));
+
+    const resolved =
+      input.sourceKind === "dll"
+        ? resolveDllSessionQuizContext(
+            await dllStore.getById(input.dllId),
+            input.sessionNumber,
+            competencyMap,
+          )
+        : input.sourceKind === "dlp"
+          ? resolveDlpQuizContext(
+              await dlpStore.getById(input.dlpId),
+              competencyMap,
+            )
+          : resolveStandaloneQuizContext(
+              input.competencyIds,
+              input.gradeAndSection,
+              competencyMap,
+            );
+
+    const prompt = buildQuizPrompt({
+      context: resolved,
+      title: input.title,
+      promptNotes: input.promptNotes,
+      itemCounts,
+    });
+
+    const settings = await getSettings();
+    const aiResult = await aiAdapter.generateText({
+      prompt,
+      settings: settings.ai,
+    });
+    const parsed = parseAiQuizPayload(aiResult.text);
+    const sections = assembleGeneratedQuizSections(itemCounts, parsed.sections);
+    const now = new Date().toISOString();
+
+    const quiz: Quiz = {
+      id: `quiz-${randomUUID().slice(0, 8)}`,
+      createdAt: now,
+      updatedAt: now,
+      title:
+        input.title?.trim() ||
+        (typeof parsed.title === "string" && parsed.title.trim()) ||
+        `${resolved.learningAreas} Formative Quiz (${resolved.gradeAndSection})`,
+      learningAreas: resolved.learningAreas,
+      gradeAndSection: resolved.gradeAndSection,
+      promptNotes: input.promptNotes?.trim() ?? "",
+      source: resolved.source,
+      competencyIds: resolved.competencyIds,
+      learningCompetencies: resolved.learningCompetencies,
+      sections,
+    };
+
+    return quizStore.prepend(quiz);
+  }
+
+  async function syncQuizToLesson(id: string): Promise<QuizSyncResult> {
+    const quiz = await quizStore.getById(id);
+    if (quiz.source.kind === "standalone") {
+      throw new QuizValidationError(
+        "Standalone quizzes are not linked to a DLL Session or DLP.",
+      );
+    }
+
+    const formatted = formatQuizForLesson(quiz);
+    const now = new Date().toISOString();
+
+    if (quiz.source.kind === "dll") {
+      const targetSessionNumber = quiz.source.sessionNumber;
+      const dll = await dllStore.update(quiz.source.dllId, (items, index) => {
+        const current = items[index]!;
+        const targetSession = current.sessions.find(
+          (s) => s.sessionNumber === targetSessionNumber,
+        );
+        if (!targetSession || targetSession.mode !== "instructional") {
+          throw new QuizValidationError(
+            `Cannot sync Quiz into non-instructional Session ${targetSessionNumber}.`,
+          );
+        }
+        const sessions = current.sessions.map((s) =>
+          s.sessionNumber === targetSessionNumber
+            ? { ...s, formativeAssessment: formatted }
+            : s,
+        ) as DailyLessonLog["sessions"];
+        return { ...current, sessions, updatedAt: now };
+      });
+      return { kind: "dll", dll };
+    }
+
+    const dlp = await dlpStore.update(quiz.source.dlpId, (items, index) => {
+      const current = items[index]!;
+      return {
+        ...current,
+        formativeAssessment: {
+          teacherActivity: `Administer formative quiz "${quiz.title}" and check learner responses using the Quiz Answer Key.`,
+          studentActivity: formatted,
+        },
+        updatedAt: now,
+      };
+    });
+    return { kind: "dlp", dlp };
+  }
+
+  async function exportQuizDocx(id: string) {
+    const quiz = await quizStore.getById(id);
+    return {
+      filename: buildDocxFilename("Quiz", quiz.title, quiz.id),
+      buffer: buildQuizDocxBuffer(quiz),
+    };
+  }
+
   return {
     dataDir: options.dataDir,
     templatesDir: options.templatesDir,
@@ -895,5 +1050,13 @@ export function createGuroMateEngine(
     deleteDlp: dlpStore.remove,
     renderDlpMarkdown,
     exportDlpDocx,
+    listQuizzes: quizStore.readAll,
+    getQuiz: quizStore.getById,
+    generateQuiz,
+    saveQuiz: (quiz) => quizStore.update(quiz.id, () => normalizeEditedQuiz(quiz)),
+    deleteQuiz: quizStore.remove,
+    renderQuizMarkdown,
+    syncQuizToLesson,
+    exportQuizDocx,
   };
 }

@@ -252,6 +252,79 @@ export type GenerateDlpInput =
       competencyIds: string[];
     };
 
+export const QUIZ_QUESTION_TYPES = [
+  "multipleChoice",
+  "trueFalse",
+  "identification",
+  "essayRubric",
+] as const;
+export type QuizQuestionType = (typeof QUIZ_QUESTION_TYPES)[number];
+
+export type QuizItemCounts = Record<QuizQuestionType, number>;
+
+export interface QuizItem {
+  id: string;
+  prompt: string;
+  choices?: string[];
+  answer: string;
+  rubric?: string;
+}
+
+export interface QuizSection {
+  type: QuizQuestionType;
+  title: string;
+  directions: string;
+  items: QuizItem[];
+}
+
+export type QuizSource =
+  | { kind: "dll"; dllId: string; sessionNumber: SessionNumber }
+  | { kind: "dlp"; dlpId: string }
+  | { kind: "standalone"; competencyIds: string[] };
+
+export interface Quiz {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
+  learningAreas: string;
+  gradeAndSection: string;
+  promptNotes: string;
+  source: QuizSource;
+  competencyIds: string[];
+  learningCompetencies: string[];
+  sections: QuizSection[];
+}
+
+export type GenerateQuizInput =
+  | {
+      sourceKind: "dll";
+      dllId: string;
+      sessionNumber: SessionNumber;
+      title?: string;
+      promptNotes?: string;
+      itemCounts: QuizItemCounts;
+    }
+  | {
+      sourceKind: "dlp";
+      dlpId: string;
+      title?: string;
+      promptNotes?: string;
+      itemCounts: QuizItemCounts;
+    }
+  | {
+      sourceKind: "standalone";
+      competencyIds: string[];
+      gradeAndSection: string;
+      title?: string;
+      promptNotes?: string;
+      itemCounts: QuizItemCounts;
+    };
+
+export type QuizSyncResult =
+  | { kind: "dll"; dll: DailyLessonLog }
+  | { kind: "dlp"; dlp: DailyLessonPlan };
+
 export interface GuroMateEngine {
   readonly dataDir: string;
   readonly templatesDir: string;
@@ -286,4 +359,12 @@ export interface GuroMateEngine {
   deleteDlp(id: string): Promise<void>;
   renderDlpMarkdown(dlp: DailyLessonPlan): string;
   exportDlpDocx(id: string): Promise<DocxExport>;
+  listQuizzes(): Promise<Quiz[]>;
+  getQuiz(id: string): Promise<Quiz>;
+  generateQuiz(input: GenerateQuizInput): Promise<Quiz>;
+  saveQuiz(quiz: Quiz): Promise<Quiz>;
+  deleteQuiz(id: string): Promise<void>;
+  renderQuizMarkdown(quiz: Quiz): string;
+  syncQuizToLesson(id: string): Promise<QuizSyncResult>;
+  exportQuizDocx(id: string): Promise<DocxExport>;
 }
