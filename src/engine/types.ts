@@ -118,6 +118,20 @@ export interface CustomCompetencyInput {
   customNotes?: string;
 }
 
+export interface ClassSection {
+  id: string;
+  gradeLevel: GradeLevel;
+  sectionName: string;
+  students: string[];
+}
+
+export interface ClassSectionInput {
+  id?: string;
+  gradeLevel: GradeLevel;
+  sectionName: string;
+  students: string[];
+}
+
 export interface GuroMateEngine {
   readonly dataDir: string;
   readonly templatesDir: string;
@@ -135,4 +149,7 @@ export interface GuroMateEngine {
     customNotes: string,
   ): Promise<CurriculumCompetency>;
   deleteCustomCompetency(id: string): Promise<void>;
+  listClassSections(): Promise<ClassSection[]>;
+  saveClassSection(input: ClassSectionInput): Promise<ClassSection>;
+  deleteClassSection(id: string): Promise<void>;
 }

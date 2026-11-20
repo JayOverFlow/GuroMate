@@ -563,4 +563,68 @@ describe("createGuroMateEngine", () => {
       engine2.saveCompetencyNotes("missing-id", "Note"),
     ).rejects.toThrow(/not found/i);
   });
+
+  it("creates, edits, persists, and deletes Class Sections with validation across engine instances", async () => {
+    const dataDir = await makeTempDir();
+    const engine1 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    expect(await engine1.listClassSections()).toEqual([]);
+
+    await expect(
+      engine1.saveClassSection({
+        gradeLevel: 7,
+        sectionName: "   ",
+        students: ["Ana", "Ben"],
+      }),
+    ).rejects.toThrow(/section name/i);
+
+    await expect(
+      engine1.saveClassSection({
+        gradeLevel: 7,
+        sectionName: "7-Rizal",
+        students: ["   ", ""],
+      }),
+    ).rejects.toThrow(/student/i);
+
+    const created = await engine1.saveClassSection({
+      gradeLevel: 7,
+      sectionName: "  7-Rizal  ",
+      students: ["  Ana Cruz ", "", "Ben Reyes", "Cara Lim  "],
+    });
+    expect(created.id).toMatch(/^sec-/);
+    expect(created).toMatchObject({
+      gradeLevel: 7,
+      sectionName: "7-Rizal",
+      students: ["Ana Cruz", "Ben Reyes", "Cara Lim"],
+    });
+
+    const updated = await engine1.saveClassSection({
+      id: created.id,
+      gradeLevel: 8,
+      sectionName: "8-Bonifacio",
+      students: ["Ana Cruz", "Danilo Santos"],
+    });
+    expect(updated).toEqual({
+      id: created.id,
+      gradeLevel: 8,
+      sectionName: "8-Bonifacio",
+      students: ["Ana Cruz", "Danilo Santos"],
+    });
+
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+    expect(await engine2.listClassSections()).toEqual([updated]);
+
+    await engine2.deleteClassSection(created.id);
+    expect(await engine2.listClassSections()).toEqual([]);
+
+    await expect(engine2.deleteClassSection("missing-sec")).rejects.toThrow(
+      /not found/i,
+    );
+  });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
 import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
@@ -227,6 +228,8 @@ export function App() {
           <SettingsWorkspace />
         ) : activeWorkspace === "curriculum" ? (
           <CurriculumWorkspace />
+        ) : activeWorkspace === "classroom" ? (
+          <ClassroomWorkspace />
         ) : (
           <section className="card" aria-labelledby="workspace-heading">
             <div className="workspace-header">
