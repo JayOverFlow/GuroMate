@@ -1091,3 +1091,20 @@ button:disabled {
 .dlp-derive-preview {
   grid-column: 1 / -1;
 }
+
+/* Quiz Maker Workspace */
+.quiz-counts-grid,
+.quiz-choices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
+.quiz-item-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}

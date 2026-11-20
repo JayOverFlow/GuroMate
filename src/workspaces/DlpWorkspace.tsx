@@ -94,11 +94,13 @@ export interface DeriveDlpTarget {
 interface DlpWorkspaceProps {
   initialDeriveTarget?: DeriveDlpTarget | null;
   onConsumeDeriveTarget?: () => void;
+  onCreateQuiz?: (dlpId: string) => void;
 }
 
 export function DlpWorkspace({
   initialDeriveTarget,
   onConsumeDeriveTarget,
+  onCreateQuiz,
 }: DlpWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
@@ -688,6 +690,15 @@ export function DlpWorkspace({
               >
                 {saving ? "Saving..." : "Save Changes"}
               </button>
+              {onCreateQuiz && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => onCreateQuiz(draftDlp.id)}
+                >
+                  Create Quiz
+                </button>
+              )}
               <a
                 className="btn-secondary dll-download-link"
                 href={`/api/dlps/${encodeURIComponent(draftDlp.id)}/docx`}
