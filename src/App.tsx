@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
 import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
+import { DllWorkspace } from "./workspaces/DllWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
 type WorkspaceId =
@@ -224,7 +225,9 @@ export function App() {
       </header>
 
       <main id="main-content" className="app-main">
-        {activeWorkspace === "settings" ? (
+        {activeWorkspace === "dll" ? (
+          <DllWorkspace />
+        ) : activeWorkspace === "settings" ? (
           <SettingsWorkspace />
         ) : activeWorkspace === "curriculum" ? (
           <CurriculumWorkspace />

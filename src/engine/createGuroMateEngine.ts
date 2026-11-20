@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import rawCatalog from "./curriculumCatalog.json";
+import {
+  DllNotFoundError,
+  DllValidationError,
+  assembleGeneratedSessions,
+  buildDllPrompt,
+  normalizeEditedDll,
+  parseAiDllPayload,
+  renderDllMarkdown,
+  resolveDllSessions,
+} from "./dll";
+import { injectDllIntoDocumentXml } from "./dllDocx";
 import { createLiveAiAdapter } from "./liveAiAdapter";
 import { AI_PROVIDER_MAP } from "./providers";
+import { readZipEntry, replaceZipEntry } from "./zip";
 import {
   GRADE_LEVELS,
   QUARTERS,
@@ -16,6 +28,8 @@ import {
   type CurriculumCompetency,
   type CurriculumFilter,
   type CustomCompetencyInput,
+  type DailyLessonLog,
+  type GenerateDllInput,
   type GuroMateEngine,
   type GuroMateEngineOptions,
   type GuroMateSettings,
@@ -225,6 +239,7 @@ export class CurriculumValidationError extends Error {}
 export class CurriculumNotFoundError extends Error {}
 export class ClassSectionValidationError extends Error {}
 export class ClassSectionNotFoundError extends Error {}
+export { DllNotFoundError, DllValidationError };
 
 function validateAndBuildClassSection(
   input: ClassSectionInput,
@@ -334,6 +349,8 @@ export function createGuroMateEngine(
     "curriculum-custom.json",
   );
   const classSectionsPath = path.join(options.dataDir, "class-sections.json");
+  const dllsDir = path.join(options.dataDir, "dlls");
+  const dllsIndexPath = path.join(options.dataDir, "dlls.json");
   const aiAdapter = options.aiAdapter ?? createLiveAiAdapter();
 
   async function getSettings(): Promise<GuroMateSettings> {
@@ -567,6 +584,136 @@ export function createGuroMateEngine(
     await writeJsonAtomic(classSectionsPath, sections);
   }
 
+  async function readDlls(): Promise<DailyLessonLog[]> {
+    const parsed = await readJsonOrDefault<unknown>(dllsIndexPath, () => []);
+    return Array.isArray(parsed) ? (parsed as DailyLessonLog[]) : [];
+  }
+
+  async function writeDllMarkdownFile(dll: DailyLessonLog): Promise<void> {
+    await mkdir(dllsDir, { recursive: true });
+    const mdPath = path.join(dllsDir, `${dll.id}.md`);
+    const tmpPath = `${mdPath}.tmp`;
+    await writeFile(tmpPath, renderDllMarkdown(dll), "utf8");
+    await rename(tmpPath, mdPath);
+  }
+
+  function requireDllIndex(dlls: DailyLessonLog[], id: string): number {
+    const index = dlls.findIndex((item) => item.id === id);
+    if (index === -1) {
+      throw new DllNotFoundError(`Daily Lesson Log not found: ${id}`);
+    }
+    return index;
+  }
+
+  async function getDll(id: string): Promise<DailyLessonLog> {
+    const dlls = await readDlls();
+    return dlls[requireDllIndex(dlls, id)]!;
+  }
+
+  async function generateDll(input: GenerateDllInput): Promise<DailyLessonLog> {
+    const catalog = await listCurriculum();
+    const competencyMap = new Map(catalog.map((c) => [c.id, c]));
+    const resolved = resolveDllSessions(input, competencyMap);
+    const learningAreas = resolved.components.join(", ");
+
+    const prompt = buildDllPrompt({
+      lessonTitle: input.lessonTitle,
+      gradeAndSection: resolved.gradeAndSection,
+      learningAreas,
+      references: input.references,
+      promptNotes: input.promptNotes,
+      orderedConfigs: resolved.orderedConfigs,
+      sessionCompetencies: resolved.sessionCompetencies,
+    });
+
+    const settings = await getSettings();
+    const aiResult = await aiAdapter.generateText({
+      prompt,
+      settings: settings.ai,
+    });
+    const parsed = parseAiDllPayload(aiResult.text);
+    const now = new Date().toISOString();
+    const fallbackTitle = `${learningAreas} (${resolved.gradeAndSection})`;
+
+    const dll: DailyLessonLog = {
+      id: `dll-${randomUUID().slice(0, 8)}`,
+      createdAt: now,
+      updatedAt: now,
+      lessonTitle:
+        input.lessonTitle?.trim() ||
+        (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
+        fallbackTitle,
+      learningAreas,
+      gradeAndSection: resolved.gradeAndSection,
+      references:
+        input.references?.trim() ||
+        (typeof parsed.references === "string" ? parsed.references.trim() : ""),
+      promptNotes: input.promptNotes?.trim() ?? "",
+      intentions: {
+        learningCompetencies: resolved.learningCompetencies,
+        contentStandards: resolved.contentStandards,
+        performanceStandards: resolved.performanceStandards,
+        learnerContext: "",
+      },
+      sessions: assembleGeneratedSessions(
+        resolved.orderedConfigs,
+        resolved.sessionCompetencies,
+        parsed.sessions,
+      ),
+    };
+
+    const existing = await readDlls();
+    existing.unshift(dll);
+    await writeJsonAtomic(dllsIndexPath, existing);
+    await writeDllMarkdownFile(dll);
+    return dll;
+  }
+
+  async function saveDll(dll: DailyLessonLog): Promise<DailyLessonLog> {
+    const existing = await readDlls();
+    const index = requireDllIndex(existing, dll.id);
+    const normalized = normalizeEditedDll(dll);
+    existing[index] = normalized;
+    await writeJsonAtomic(dllsIndexPath, existing);
+    await writeDllMarkdownFile(normalized);
+    return normalized;
+  }
+
+  async function deleteDll(id: string): Promise<void> {
+    const existing = await readDlls();
+    const index = requireDllIndex(existing, id);
+    existing.splice(index, 1);
+    await writeJsonAtomic(dllsIndexPath, existing);
+    try {
+      await unlink(path.join(dllsDir, `${id}.md`));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+
+  async function exportDllDocx(id: string) {
+    const dll = await getDll(id);
+    const settings = await getSettings();
+    const templatePath = path.join(options.templatesDir, "DLL_ILAW_template.docx");
+    const templateBuf = await readFile(templatePath);
+    const docXml = readZipEntry(templateBuf, "word/document.xml").toString("utf8");
+    const updatedXml = injectDllIntoDocumentXml(docXml, dll, settings.profile);
+    const buffer = replaceZipEntry(
+      templateBuf,
+      "word/document.xml",
+      Buffer.from(updatedXml, "utf8"),
+    );
+    const safeSlug =
+      dll.lessonTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || dll.id;
+    return {
+      filename: `DLL-${safeSlug}.docx`,
+      buffer,
+    };
+  }
+
   return {
     dataDir: options.dataDir,
     templatesDir: options.templatesDir,
@@ -580,5 +727,12 @@ export function createGuroMateEngine(
     listClassSections: readClassSections,
     saveClassSection,
     deleteClassSection,
+    listDlls: readDlls,
+    getDll,
+    generateDll,
+    saveDll,
+    deleteDll,
+    renderDllMarkdown,
+    exportDllDocx,
   };
 }

@@ -987,3 +987,97 @@ button:disabled {
 .classroom-timer-box.is-fullscreen-overlay .projector-clock {
   font-size: clamp(5rem, 16vw, 11rem);
 }
+
+/* DLL Builder Workspace */
+.app-main:has(.dll-workspace) {
+  max-inline-size: 72rem;
+}
+
+.dll-workspace,
+.dll-editor-stack {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.dll-saved-bar {
+  padding: 1rem 1.25rem;
+}
+
+.dll-form-grid,
+.dll-session-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+.dll-session-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.875rem;
+}
+
+.dll-session-card {
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  display: grid;
+  gap: 0.625rem;
+  align-content: start;
+}
+
+.dll-session-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dll-session-card-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dll-assigned-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dll-assigned-item {
+  display: grid;
+  gap: 0.375rem;
+  padding: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+}
+
+.dll-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.dll-toolbar h2 {
+  margin: 0 0 0.375rem;
+  font-size: 1.25rem;
+}
+
+.dll-download-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.dll-markdown-view h2,
+.dll-markdown-view h3,
+.dll-markdown-view h4 {
+  margin-block: 0.75rem 0.375rem;
+}

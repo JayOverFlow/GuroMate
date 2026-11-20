@@ -1,0 +1,410 @@
+import {
+  SESSION_NUMBERS,
+  type CurriculumCompetency,
+  type DailyLessonLog,
+  type DllSessionConfig,
+  type DllSessionPlan,
+  type GenerateDllInput,
+  type SessionNumber,
+  type TleComponent,
+} from "./types";
+
+export class DllValidationError extends Error {}
+export class DllNotFoundError extends Error {}
+
+interface AiSessionPayload {
+  sessionNumber?: number;
+  learningObjectives?: string;
+  preLesson?: string;
+  lessonFlow?: string;
+  learningResources?: string;
+  integrationAndContextualization?: string;
+  formativeAssessment?: string;
+  extendedLearningOpportunities?: string;
+}
+
+interface AiDllPayload {
+  lessonTitle?: string;
+  references?: string;
+  sessions?: AiSessionPayload[];
+}
+
+function dedupeOrdered<T>(items: T[]): T[] {
+  const seen = new Set<T>();
+  const out: T[] = [];
+  for (const item of items) {
+    if (!seen.has(item)) {
+      seen.add(item);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+/** Validates 5-session config and resolves Curriculum Guide competencies per session. */
+export function resolveDllSessions(
+  input: GenerateDllInput,
+  competencyMap: Map<string, CurriculumCompetency>,
+): {
+  gradeAndSection: string;
+  orderedConfigs: DllSessionConfig[];
+  sessionCompetencies: Map<SessionNumber, CurriculumCompetency[]>;
+  components: TleComponent[];
+  learningCompetencies: string[];
+  contentStandards: string[];
+  performanceStandards: string[];
+} {
+  const gradeAndSection = input.gradeAndSection.trim();
+  if (!gradeAndSection) {
+    throw new DllValidationError("Grade Level and Section is required.");
+  }
+
+  if (!Array.isArray(input.sessions) || input.sessions.length !== 5) {
+    throw new DllValidationError(
+      "Exactly 5 Sessions (Session 1 through Session 5) are required.",
+    );
+  }
+
+  const bySession = new Map<SessionNumber, DllSessionConfig>();
+  for (const cfg of input.sessions) {
+    if (!SESSION_NUMBERS.includes(cfg.sessionNumber)) {
+      throw new DllValidationError(
+        `Invalid Session number: ${String(cfg.sessionNumber)}.`,
+      );
+    }
+    if (bySession.has(cfg.sessionNumber)) {
+      throw new DllValidationError(
+        `Duplicate configuration for Session ${cfg.sessionNumber}.`,
+      );
+    }
+    bySession.set(cfg.sessionNumber, cfg);
+  }
+
+  const orderedConfigs = SESSION_NUMBERS.map((n) => bySession.get(n)!);
+  const sessionCompetencies = new Map<SessionNumber, CurriculumCompetency[]>();
+  const allComponents: TleComponent[] = [];
+  const allCompetencies: string[] = [];
+  const allContentStandards: string[] = [];
+  const allPerformanceStandards: string[] = [];
+
+  let instructionalCount = 0;
+  for (const cfg of orderedConfigs) {
+    if (cfg.mode === "non-instructional") {
+      sessionCompetencies.set(cfg.sessionNumber, []);
+      continue;
+    }
+
+    const ids = dedupeOrdered(cfg.competencyIds.map((id) => id.trim()).filter(Boolean));
+    if (ids.length === 0) {
+      throw new DllValidationError(
+        `Session ${cfg.sessionNumber} must assign at least one Learning Competency or be marked non-instructional.`,
+      );
+    }
+    instructionalCount += 1;
+
+    const resolved: CurriculumCompetency[] = [];
+    for (const id of ids) {
+      const comp = competencyMap.get(id);
+      if (!comp) {
+        throw new DllValidationError(
+          `Learning Competency not found for Session ${cfg.sessionNumber}: ${id}`,
+        );
+      }
+      resolved.push(comp);
+      allComponents.push(comp.component);
+      allCompetencies.push(comp.learningCompetency);
+      allContentStandards.push(comp.contentStandard);
+      allPerformanceStandards.push(comp.performanceStandard);
+    }
+    sessionCompetencies.set(cfg.sessionNumber, resolved);
+  }
+
+  if (instructionalCount === 0) {
+    throw new DllValidationError(
+      "At least one Session must be instructional with a Learning Competency.",
+    );
+  }
+
+  return {
+    gradeAndSection,
+    orderedConfigs,
+    sessionCompetencies,
+    components: dedupeOrdered(allComponents),
+    learningCompetencies: dedupeOrdered(allCompetencies),
+    contentStandards: dedupeOrdered(allContentStandards),
+    performanceStandards: dedupeOrdered(allPerformanceStandards),
+  };
+}
+
+/** Builds the AI generation prompt combining Curriculum Guide, Budget of Work, and Prompt Notes. */
+export function buildDllPrompt(params: {
+  lessonTitle?: string;
+  gradeAndSection: string;
+  learningAreas: string;
+  references?: string;
+  promptNotes?: string;
+  orderedConfigs: DllSessionConfig[];
+  sessionCompetencies: Map<SessionNumber, CurriculumCompetency[]>;
+}): string {
+  const sessionLines = params.orderedConfigs.map((cfg) => {
+    if (cfg.mode === "non-instructional") {
+      const reason = cfg.nonInstructionalReason?.trim() || "Non-instructional / Holiday";
+      return `Session ${cfg.sessionNumber}: NON-INSTRUCTIONAL (${reason}). Leave instructional fields brief or note "${reason}".`;
+    }
+    const comps = params.sessionCompetencies.get(cfg.sessionNumber) ?? [];
+    const compDetails = comps
+      .map((c) => {
+        const parts = [
+          `- [${c.component}${c.sector ? ` / ${c.sector}` : ""}] Topic: ${c.contentTopic}`,
+          c.contentSubTopics.length > 0
+            ? `  Sub-topics: ${c.contentSubTopics.join("; ")}`
+            : "",
+          `  Learning Competency: ${c.learningCompetency}`,
+          `  Content Standard: ${c.contentStandard}`,
+          `  Performance Standard: ${c.performanceStandard}`,
+          c.budgetOfWork
+            ? `  Budget of Work (${c.budgetOfWork.term}, Week ${c.budgetOfWork.weekRange}): Suggested Activities: ${c.budgetOfWork.suggestedActivities} | Suggested Performance Tasks: ${c.budgetOfWork.suggestedPerformanceTasks}`
+            : "",
+          c.customNotes ? `  Teacher Competency Notes: ${c.customNotes}` : "",
+        ];
+        return parts.filter(Boolean).join("\n");
+      })
+      .join("\n");
+    return `Session ${cfg.sessionNumber} (Instructional):\n${compDetails}`;
+  });
+
+  const promptNotes = params.promptNotes?.trim();
+
+  return [
+    "Generate a 5-Session DepEd MATATAG TLE Daily Lesson Log (DLL) following the ILAW Framework.",
+    `Learning Area/s: ${params.learningAreas}`,
+    `Grade Level and Section: ${params.gradeAndSection}`,
+    params.lessonTitle?.trim() ? `Requested Lesson Title: ${params.lessonTitle.trim()}` : "",
+    params.references?.trim() ? `Requested References: ${params.references.trim()}` : "",
+    promptNotes
+      ? `Teacher Prompt Notes (use to guide pacing, equipment, and activities; never copy into Learner Context):\n${promptNotes}`
+      : "",
+    "",
+    "Session Assignments:",
+    sessionLines.join("\n\n"),
+    "",
+    "Respond ONLY with valid JSON matching this schema:",
+    JSON.stringify(
+      {
+        lessonTitle: "string",
+        references: "string",
+        sessions: [
+          {
+            sessionNumber: 1,
+            learningObjectives: "string",
+            preLesson: "string",
+            lessonFlow: "string",
+            learningResources: "string",
+            integrationAndContextualization: "string",
+            formativeAssessment: "string",
+            extendedLearningOpportunities: "string",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "Include all 5 sessions (sessionNumber 1 to 5). Do not include Learner Context or Reflections.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Parses structured JSON from the AI adapter, stripping optional code fences. */
+export function parseAiDllPayload(rawText: string): AiDllPayload {
+  const cleaned = rawText
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new DllValidationError(
+      "AI response was not valid JSON for Daily Lesson Log generation.",
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new DllValidationError("AI response must be a JSON object.");
+  }
+  return parsed as AiDllPayload;
+}
+
+/** Builds normalized 5-session plans from AI output, keeping Reflections and Learner Context blank. */
+export function assembleGeneratedSessions(
+  orderedConfigs: DllSessionConfig[],
+  sessionCompetencies: Map<SessionNumber, CurriculumCompetency[]>,
+  aiSessions: AiSessionPayload[] | undefined,
+): [DllSessionPlan, DllSessionPlan, DllSessionPlan, DllSessionPlan, DllSessionPlan] {
+  const aiBySession = new Map<number, AiSessionPayload>();
+  if (Array.isArray(aiSessions)) {
+    for (const entry of aiSessions) {
+      if (typeof entry.sessionNumber === "number") {
+        aiBySession.set(entry.sessionNumber, entry);
+      }
+    }
+  }
+
+  const plans = orderedConfigs.map((cfg) => {
+    const comps = sessionCompetencies.get(cfg.sessionNumber) ?? [];
+    const components = dedupeOrdered(comps.map((c) => c.component));
+    if (cfg.mode === "non-instructional") {
+      const reason = cfg.nonInstructionalReason?.trim() || "Non-instructional / Holiday";
+      return {
+        sessionNumber: cfg.sessionNumber,
+        mode: "non-instructional" as const,
+        competencyIds: [],
+        components: [],
+        nonInstructionalReason: reason,
+        learningObjectives: reason,
+        preLesson: "",
+        lessonFlow: "",
+        learningResources: "",
+        integrationAndContextualization: "",
+        formativeAssessment: "",
+        extendedLearningOpportunities: "",
+        reflections: "",
+      };
+    }
+
+    const ai = aiBySession.get(cfg.sessionNumber) ?? {};
+    const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    return {
+      sessionNumber: cfg.sessionNumber,
+      mode: "instructional" as const,
+      competencyIds: comps.map((c) => c.id),
+      components,
+      learningObjectives: str(ai.learningObjectives),
+      preLesson: str(ai.preLesson),
+      lessonFlow: str(ai.lessonFlow),
+      learningResources: str(ai.learningResources),
+      integrationAndContextualization: str(ai.integrationAndContextualization),
+      formativeAssessment: str(ai.formativeAssessment),
+      extendedLearningOpportunities: str(ai.extendedLearningOpportunities),
+      reflections: "",
+    };
+  });
+
+  return plans as [
+    DllSessionPlan,
+    DllSessionPlan,
+    DllSessionPlan,
+    DllSessionPlan,
+    DllSessionPlan,
+  ];
+}
+
+/** Normalizes and validates an edited Daily Lesson Log before persistence. */
+export function normalizeEditedDll(dll: DailyLessonLog): DailyLessonLog {
+  const lessonTitle = dll.lessonTitle.trim();
+  if (!lessonTitle) {
+    throw new DllValidationError("Lesson Title is required.");
+  }
+  const learningAreas = dll.learningAreas.trim();
+  if (!learningAreas) {
+    throw new DllValidationError("Learning Area/s is required.");
+  }
+  const gradeAndSection = dll.gradeAndSection.trim();
+  if (!gradeAndSection) {
+    throw new DllValidationError("Grade Level and Section is required.");
+  }
+  if (!Array.isArray(dll.sessions) || dll.sessions.length !== 5) {
+    throw new DllValidationError("Exactly 5 Sessions are required.");
+  }
+  const sessions = dll.sessions.map((s, idx) => ({
+    ...s,
+    sessionNumber: SESSION_NUMBERS[idx]!,
+    learningObjectives: s.learningObjectives.trim(),
+    preLesson: s.preLesson.trim(),
+    lessonFlow: s.lessonFlow.trim(),
+    learningResources: s.learningResources.trim(),
+    integrationAndContextualization: s.integrationAndContextualization.trim(),
+    formativeAssessment: s.formativeAssessment.trim(),
+    extendedLearningOpportunities: s.extendedLearningOpportunities.trim(),
+    reflections: s.reflections.trim(),
+  })) as DailyLessonLog["sessions"];
+
+  return {
+    ...dll,
+    lessonTitle,
+    learningAreas,
+    gradeAndSection,
+    references: dll.references.trim(),
+    promptNotes: dll.promptNotes.trim(),
+    intentions: {
+      learningCompetencies: dll.intentions.learningCompetencies
+        .map((c) => c.trim())
+        .filter(Boolean),
+      contentStandards: dll.intentions.contentStandards
+        .map((c) => c.trim())
+        .filter(Boolean),
+      performanceStandards: dll.intentions.performanceStandards
+        .map((c) => c.trim())
+        .filter(Boolean),
+      learnerContext: dll.intentions.learnerContext.trim(),
+    },
+    sessions,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Renders a Daily Lesson Log into clean ILAW Framework Markdown. */
+export function renderDllMarkdown(dll: DailyLessonLog): string {
+  const lines: string[] = [
+    `# ${dll.lessonTitle || "Daily Lesson Log"}`,
+    "",
+    `- **Learning Area/s:** ${dll.learningAreas}`,
+    `- **Grade Level and Section:** ${dll.gradeAndSection}`,
+    "- **No. of Sessions:** 5",
+    `- **References:** ${dll.references || "—"}`,
+    "",
+    "## Intentions",
+    "",
+    "### Learning Competencies",
+    ...dll.intentions.learningCompetencies.map((c) => `- ${c}`),
+    "",
+    "### Content Standards",
+    ...dll.intentions.contentStandards.map((c) => `- ${c}`),
+    "",
+    "### Performance Standards",
+    ...dll.intentions.performanceStandards.map((c) => `- ${c}`),
+    "",
+    "### Learner Context",
+    dll.intentions.learnerContext.trim() || "_(Left blank for manual completion)_",
+    "",
+    "## Sessions (ILAW Framework)",
+    "",
+  ];
+
+  for (const session of dll.sessions) {
+    const label =
+      session.mode === "non-instructional"
+        ? `Non-Instructional (${session.nonInstructionalReason || "Holiday"})`
+        : session.components.join(", ");
+    lines.push(`### Session ${session.sessionNumber}${label ? ` — ${label}` : ""}`);
+    lines.push("");
+    lines.push(`- **Learning Objectives:** ${session.learningObjectives || "—"}`);
+    lines.push(`- **Pre-Lesson:** ${session.preLesson || "—"}`);
+    lines.push(`- **Lesson Flow:** ${session.lessonFlow || "—"}`);
+    lines.push(`- **Learning Resources:** ${session.learningResources || "—"}`);
+    lines.push(
+      `- **Opportunities for Integration and Contextualization:** ${session.integrationAndContextualization || "—"}`,
+    );
+    lines.push(`- **Formative Assessment:** ${session.formativeAssessment || "—"}`);
+    lines.push(
+      `- **Extended Learning Opportunities:** ${session.extendedLearningOpportunities || "—"}`,
+    );
+    lines.push(
+      `- **Reflections:** ${session.reflections.trim() || "_(Left blank for manual completion)_"}`,
+    );
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}

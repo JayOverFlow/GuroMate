@@ -6,6 +6,8 @@ import {
   ClassSectionValidationError,
   CurriculumNotFoundError,
   CurriculumValidationError,
+  DllNotFoundError,
+  DllValidationError,
   SettingsValidationError,
   createGuroMateEngine,
 } from "../engine/createGuroMateEngine";
@@ -17,9 +19,13 @@ import {
   type ClassSectionInput,
   type CurriculumFilter,
   type CustomCompetencyInput,
+  type DailyLessonLog,
+  type DllSessionConfig,
+  type GenerateDllInput,
   type GradeLevel,
   type GuroMateEngine,
   type QuarterNumber,
+  type SessionNumber,
   type SettingsPatch,
   type TleComponent,
 } from "../engine/types";
@@ -173,6 +179,46 @@ function parseClassSectionBody(body: unknown): ClassSectionInput {
   };
 }
 
+function parseGenerateDllBody(body: unknown): GenerateDllInput {
+  if (!isRecord(body)) {
+    throw new HttpError(400, "DLL generation payload must be a JSON object.");
+  }
+  const sessions: DllSessionConfig[] = Array.isArray(body.sessions)
+    ? body.sessions.map((entry) => {
+        if (!isRecord(entry)) {
+          throw new HttpError(400, "Each session config must be an object.");
+        }
+        return {
+          sessionNumber: Number(entry.sessionNumber) as SessionNumber,
+          mode:
+            entry.mode === "non-instructional"
+              ? "non-instructional"
+              : "instructional",
+          competencyIds: Array.isArray(entry.competencyIds)
+            ? entry.competencyIds.filter((s): s is string => typeof s === "string")
+            : [],
+          ...(typeof entry.nonInstructionalReason === "string"
+            ? { nonInstructionalReason: entry.nonInstructionalReason }
+            : {}),
+        };
+      })
+    : [];
+  return {
+    ...(typeof body.lessonTitle === "string"
+      ? { lessonTitle: body.lessonTitle }
+      : {}),
+    gradeAndSection:
+      typeof body.gradeAndSection === "string" ? body.gradeAndSection : "",
+    ...(typeof body.references === "string"
+      ? { references: body.references }
+      : {}),
+    ...(typeof body.promptNotes === "string"
+      ? { promptNotes: body.promptNotes }
+      : {}),
+    sessions,
+  };
+}
+
 /** Creates the HTTP middleware exposing GuroMate Engine operations under `/api`. */
 export function createGuroMateMiddleware(
   engine: GuroMateEngine,
@@ -287,6 +333,60 @@ export function createGuroMateMiddleware(
         }
       }
 
+      if (req.method === "GET" && urlPath === "/api/dlls") {
+        sendJson(res, 200, await engine.listDlls());
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/api/dlls/generate") {
+        const input = parseGenerateDllBody(await readJsonBody(req));
+        sendJson(res, 201, await engine.generateDll(input));
+        return;
+      }
+
+      const dllDocxMatch = urlPath.match(/^\/api\/dlls\/([^/]+)\/docx$/);
+      if (req.method === "GET" && dllDocxMatch) {
+        const id = decodeURIComponent(dllDocxMatch[1]!);
+        const { filename, buffer } = await engine.exportDllDocx(id);
+        res.statusCode = 200;
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        );
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.end(buffer);
+        return;
+      }
+
+      const dllMatch = urlPath.match(/^\/api\/dlls\/([^/]+)$/);
+      if (dllMatch) {
+        const id = decodeURIComponent(dllMatch[1]!);
+        if (req.method === "GET") {
+          sendJson(res, 200, await engine.getDll(id));
+          return;
+        }
+        if (req.method === "PUT") {
+          const body = await readJsonBody(req);
+          if (!isRecord(body)) {
+            throw new HttpError(400, "DLL payload must be a JSON object.");
+          }
+          const updated = await engine.saveDll({
+            ...(body as unknown as DailyLessonLog),
+            id,
+          });
+          sendJson(res, 200, updated);
+          return;
+        }
+        if (req.method === "DELETE") {
+          await engine.deleteDll(id);
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+      }
+
       sendJson(res, 404, { error: `Unknown API route: ${req.method} ${urlPath}` });
     })().catch((err) => {
       if (err instanceof HttpError) {
@@ -296,14 +396,16 @@ export function createGuroMateMiddleware(
       if (
         err instanceof SettingsValidationError ||
         err instanceof CurriculumValidationError ||
-        err instanceof ClassSectionValidationError
+        err instanceof ClassSectionValidationError ||
+        err instanceof DllValidationError
       ) {
         sendJson(res, 400, { error: err.message });
         return;
       }
       if (
         err instanceof CurriculumNotFoundError ||
-        err instanceof ClassSectionNotFoundError
+        err instanceof ClassSectionNotFoundError ||
+        err instanceof DllNotFoundError
       ) {
         sendJson(res, 404, { error: err.message });
         return;
