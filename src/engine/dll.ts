@@ -1,4 +1,9 @@
 import {
+  dedupeOrdered,
+  formatCompetencyLines,
+  parseAiJsonObject,
+} from "./lessonHelpers";
+import {
   SESSION_NUMBERS,
   type CurriculumCompetency,
   type DailyLessonLog,
@@ -27,18 +32,6 @@ interface AiDllPayload {
   lessonTitle?: string;
   references?: string;
   sessions?: AiSessionPayload[];
-}
-
-function dedupeOrdered<T>(items: T[]): T[] {
-  const seen = new Set<T>();
-  const out: T[] = [];
-  for (const item of items) {
-    if (!seen.has(item)) {
-      seen.add(item);
-      out.push(item);
-    }
-  }
-  return out;
 }
 
 /** Validates 5-session config and resolves Curriculum Guide competencies per session. */
@@ -152,24 +145,7 @@ export function buildDllPrompt(params: {
       return `Session ${cfg.sessionNumber}: NON-INSTRUCTIONAL (${reason}). Leave instructional fields brief or note "${reason}".`;
     }
     const comps = params.sessionCompetencies.get(cfg.sessionNumber) ?? [];
-    const compDetails = comps
-      .map((c) => {
-        const parts = [
-          `- [${c.component}${c.sector ? ` / ${c.sector}` : ""}] Topic: ${c.contentTopic}`,
-          c.contentSubTopics.length > 0
-            ? `  Sub-topics: ${c.contentSubTopics.join("; ")}`
-            : "",
-          `  Learning Competency: ${c.learningCompetency}`,
-          `  Content Standard: ${c.contentStandard}`,
-          `  Performance Standard: ${c.performanceStandard}`,
-          c.budgetOfWork
-            ? `  Budget of Work (${c.budgetOfWork.term}, Week ${c.budgetOfWork.weekRange}): Suggested Activities: ${c.budgetOfWork.suggestedActivities} | Suggested Performance Tasks: ${c.budgetOfWork.suggestedPerformanceTasks}`
-            : "",
-          c.customNotes ? `  Teacher Competency Notes: ${c.customNotes}` : "",
-        ];
-        return parts.filter(Boolean).join("\n");
-      })
-      .join("\n");
+    const compDetails = formatCompetencyLines(comps);
     return `Session ${cfg.sessionNumber} (Instructional):\n${compDetails}`;
   });
 
@@ -217,23 +193,11 @@ export function buildDllPrompt(params: {
 
 /** Parses structured JSON from the AI adapter, stripping optional code fences. */
 export function parseAiDllPayload(rawText: string): AiDllPayload {
-  const cleaned = rawText
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    throw new DllValidationError(
-      "AI response was not valid JSON for Daily Lesson Log generation.",
-    );
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new DllValidationError("AI response must be a JSON object.");
-  }
-  return parsed as AiDllPayload;
+  return parseAiJsonObject(
+    rawText,
+    "Daily Lesson Log",
+    (msg) => new DllValidationError(msg),
+  ) as AiDllPayload;
 }
 
 /** Builds normalized 5-session plans from AI output, keeping Reflections and Learner Context blank. */
