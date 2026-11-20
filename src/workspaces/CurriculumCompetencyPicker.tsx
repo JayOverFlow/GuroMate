@@ -16,6 +16,9 @@ interface CurriculumCompetencyPickerProps {
   onPickCompetencyId: (id: string) => void;
 }
 
+const CONTROL_CLASS =
+  "w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
+
 export function CurriculumCompetencyPicker({
   baseId,
   curriculum,
@@ -30,9 +33,12 @@ export function CurriculumCompetencyPicker({
   const filteredCurriculum = useMemo(() => {
     const q = filterQuery.trim().toLowerCase();
     return curriculum.filter((item) => {
-      if (filterGrade !== "" && !item.gradeLevels.includes(filterGrade)) return false;
-      if (filterQuarter !== "" && !item.quarters.includes(filterQuarter)) return false;
-      if (filterComponent !== "" && item.component !== filterComponent) return false;
+      if (filterGrade !== "" && !item.gradeLevels.includes(filterGrade))
+        return false;
+      if (filterQuarter !== "" && !item.quarters.includes(filterQuarter))
+        return false;
+      if (filterComponent !== "" && item.component !== filterComponent)
+        return false;
       if (q) {
         const hay =
           `${item.learningCompetency} ${item.contentTopic} ${item.sector ?? ""}`.toLowerCase();
@@ -54,10 +60,15 @@ export function CurriculumCompetencyPicker({
   }, [filteredCurriculum, pickedCompetencyId, onPickCompetencyId]);
 
   return (
-    <>
-      <div className="curriculum-filters">
-        <div className="field">
-          <label htmlFor={`${baseId}-f-grade`}>Grade</label>
+    <div className="flex flex-col gap-gutter-md">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter-sm">
+        <div className="flex flex-col gap-gutter-xs">
+          <label
+            htmlFor={`${baseId}-f-grade`}
+            className="font-label text-label-md text-on-surface"
+          >
+            Grade
+          </label>
           <select
             id={`${baseId}-f-grade`}
             value={filterGrade}
@@ -66,6 +77,7 @@ export function CurriculumCompetencyPicker({
                 e.target.value ? (Number(e.target.value) as GradeLevel) : "",
               )
             }
+            className={CONTROL_CLASS}
           >
             <option value="">All Grades</option>
             {GRADE_LEVELS.map((g) => (
@@ -76,8 +88,13 @@ export function CurriculumCompetencyPicker({
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor={`${baseId}-f-quarter`}>Quarter</label>
+        <div className="flex flex-col gap-gutter-xs">
+          <label
+            htmlFor={`${baseId}-f-quarter`}
+            className="font-label text-label-md text-on-surface"
+          >
+            Quarter
+          </label>
           <select
             id={`${baseId}-f-quarter`}
             value={filterQuarter}
@@ -86,6 +103,7 @@ export function CurriculumCompetencyPicker({
                 e.target.value ? (Number(e.target.value) as QuarterNumber) : "",
               )
             }
+            className={CONTROL_CLASS}
           >
             <option value="">All Quarters</option>
             {QUARTERS.map((q) => (
@@ -96,14 +114,20 @@ export function CurriculumCompetencyPicker({
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor={`${baseId}-f-comp`}>TLE Component</label>
+        <div className="flex flex-col gap-gutter-xs">
+          <label
+            htmlFor={`${baseId}-f-comp`}
+            className="font-label text-label-md text-on-surface"
+          >
+            TLE Component
+          </label>
           <select
             id={`${baseId}-f-comp`}
             value={filterComponent}
             onChange={(e) =>
               setFilterComponent((e.target.value as TleComponent | "") ?? "")
             }
+            className={CONTROL_CLASS}
           >
             <option value="">All Components</option>
             {TLE_COMPONENTS.map((c) => (
@@ -114,26 +138,36 @@ export function CurriculumCompetencyPicker({
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor={`${baseId}-f-query`}>Search Competency</label>
+        <div className="flex flex-col gap-gutter-xs">
+          <label
+            htmlFor={`${baseId}-f-query`}
+            className="font-label text-label-md text-on-surface"
+          >
+            Search Competency
+          </label>
           <input
             id={`${baseId}-f-query`}
             type="search"
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
             placeholder="Keyword or topic..."
+            className={CONTROL_CLASS}
           />
         </div>
       </div>
 
-      <div className="field">
-        <label htmlFor={`${baseId}-pick-comp`}>
+      <div className="flex flex-col gap-gutter-xs">
+        <label
+          htmlFor={`${baseId}-pick-comp`}
+          className="font-label text-label-md text-on-surface"
+        >
           Learning Competency ({filteredCurriculum.length} matches)
         </label>
         <select
           id={`${baseId}-pick-comp`}
           value={pickedCompetencyId}
           onChange={(e) => onPickCompetencyId(e.target.value)}
+          className={CONTROL_CLASS}
         >
           {filteredCurriculum.length === 0 ? (
             <option value="">No matching competencies</option>
@@ -146,6 +180,6 @@ export function CurriculumCompetencyPicker({
           )}
         </select>
       </div>
-    </>
+    </div>
   );
 }

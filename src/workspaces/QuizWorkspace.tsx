@@ -1,51 +1,29 @@
+import { useId } from "react";
 import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
-import { QUIZ_SECTION_META, ROMAN_PARTS, renderQuizMarkdown } from "../engine/quiz";
+  QUIZ_SECTION_META,
+  ROMAN_PARTS,
+  renderQuizMarkdown,
+} from "../engine/quiz";
 import {
   QUIZ_QUESTION_TYPES,
-  type ClassSection,
-  type CurriculumCompetency,
-  type DailyLessonLog,
-  type DailyLessonPlan,
-  type Quiz,
-  type QuizItemCounts,
-  type QuizQuestionType,
-  type QuizSyncResult,
   type SessionNumber,
 } from "../engine/types";
+import {
+  useQuizWorkspace,
+  type QuizLaunchTarget,
+} from "../hooks/useQuizWorkspace";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
-import { readErrorMessage, renderMarkdownBlocks } from "./lessonViewHelpers";
+import { renderMarkdownBlocks } from "./lessonViewHelpers";
 
-type ViewMode = "edit" | "markdown";
-type SourceKind = "standalone" | "dll" | "dlp";
-
-interface StatusState {
-  tone: "success" | "error";
-  text: string;
-}
-
-export type QuizLaunchTarget =
-  | { sourceKind: "dll"; dllId: string; sessionNumber: SessionNumber }
-  | { sourceKind: "dlp"; dlpId: string };
+export type { QuizLaunchTarget };
 
 interface QuizWorkspaceProps {
   initialLaunchTarget?: QuizLaunchTarget | null;
   onConsumeLaunchTarget?: () => void;
 }
 
-const DEFAULT_COUNTS: QuizItemCounts = {
-  multipleChoice: 5,
-  trueFalse: 0,
-  identification: 0,
-  essayRubric: 0,
-};
+const INPUT_CLASS =
+  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
 export function QuizWorkspace({
   initialLaunchTarget,
@@ -54,432 +32,88 @@ export function QuizWorkspace({
   const headingId = useId();
   const baseId = useId();
 
-  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
-  const [dlps, setDlps] = useState<DailyLessonPlan[]>([]);
-  const [curriculum, setCurriculum] = useState<CurriculumCompetency[]>([]);
-  const [sections, setSections] = useState<ClassSection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<StatusState | null>(null);
-
-  const [selectedQuizId, setSelectedQuizId] = useState("");
-  const [draftQuiz, setDraftQuiz] = useState<Quiz | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("markdown");
-  const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-
-  // Builder state
-  const [sourceKind, setSourceKind] = useState<SourceKind>("standalone");
-  const [selectedDllId, setSelectedDllId] = useState("");
-  const [selectedSessionNumber, setSelectedSessionNumber] = useState<SessionNumber>(1);
-  const [selectedDlpId, setSelectedDlpId] = useState("");
-  const [title, setTitle] = useState("");
-  const [gradeAndSection, setGradeAndSection] = useState("");
-  const [promptNotes, setPromptNotes] = useState("");
-  const [itemCounts, setItemCounts] = useState<QuizItemCounts>(DEFAULT_COUNTS);
-  const [selectedCompetencyIds, setSelectedCompetencyIds] = useState<string[]>([]);
-  const [pickedCompetencyId, setPickedCompetencyId] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const launchIntentRef = useRef(Boolean(initialLaunchTarget));
-
-  const loadWorkspaceData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [quizRes, dllRes, dlpRes, currRes, secRes] = await Promise.all([
-        fetch("/api/quizzes"),
-        fetch("/api/dlls"),
-        fetch("/api/dlps"),
-        fetch("/api/curriculum"),
-        fetch("/api/class-sections"),
-      ]);
-      if (!quizRes.ok) throw new Error(await readErrorMessage(quizRes));
-      if (!dllRes.ok) throw new Error(await readErrorMessage(dllRes));
-      if (!dlpRes.ok) throw new Error(await readErrorMessage(dlpRes));
-      if (!currRes.ok) throw new Error(await readErrorMessage(currRes));
-      if (!secRes.ok) throw new Error(await readErrorMessage(secRes));
-
-      const loadedQuizzes = (await quizRes.json()) as Quiz[];
-      const loadedDlls = (await dllRes.json()) as DailyLessonLog[];
-      const loadedDlps = (await dlpRes.json()) as DailyLessonPlan[];
-      const loadedCurr = (await currRes.json()) as CurriculumCompetency[];
-      const loadedSec = (await secRes.json()) as ClassSection[];
-
-      setQuizzes(loadedQuizzes);
-      setDlls(loadedDlls);
-      setDlps(loadedDlps);
-      setCurriculum(loadedCurr);
-      setSections(loadedSec);
-
-      if (loadedSec.length > 0) {
-        const first = loadedSec[0]!;
-        setGradeAndSection(
-          (prev) => prev || `Grade ${first.gradeLevel} - ${first.sectionName}`,
-        );
-      }
-      if (loadedDlls.length > 0) {
-        setSelectedDllId((prev) =>
-          prev && loadedDlls.some((d) => d.id === prev) ? prev : loadedDlls[0]!.id,
-        );
-      }
-      if (loadedDlps.length > 0) {
-        setSelectedDlpId((prev) =>
-          prev && loadedDlps.some((d) => d.id === prev) ? prev : loadedDlps[0]!.id,
-        );
-      }
-      if (loadedQuizzes.length > 0 && !launchIntentRef.current) {
-        setSelectedQuizId((prev) =>
-          prev && loadedQuizzes.some((q) => q.id === prev)
-            ? prev
-            : loadedQuizzes[0]!.id,
-        );
-      }
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadWorkspaceData();
-  }, [loadWorkspaceData]);
-
-  useEffect(() => {
-    if (!initialLaunchTarget) return;
-    launchIntentRef.current = true;
-    setSelectedQuizId("");
-    if (initialLaunchTarget.sourceKind === "dll") {
-      setSourceKind("dll");
-      setSelectedDllId(initialLaunchTarget.dllId);
-      setSelectedSessionNumber(initialLaunchTarget.sessionNumber);
-    } else {
-      setSourceKind("dlp");
-      setSelectedDlpId(initialLaunchTarget.dlpId);
-    }
-    onConsumeLaunchTarget?.();
-  }, [initialLaunchTarget, onConsumeLaunchTarget]);
-
-  useEffect(() => {
-    const match = quizzes.find((q) => q.id === selectedQuizId) ?? null;
-    setDraftQuiz(match ? structuredClone(match) : null);
-  }, [quizzes, selectedQuizId]);
-
-  const competencyMap = useMemo(
-    () => new Map(curriculum.map((c) => [c.id, c])),
-    [curriculum],
-  );
-
-  const selectedSourceDll = useMemo(
-    () => dlls.find((d) => d.id === selectedDllId) ?? null,
-    [dlls, selectedDllId],
-  );
-
-  const activeSourceSessions = useMemo(
-    () =>
-      selectedSourceDll
-        ? selectedSourceDll.sessions.filter((s) => s.mode === "instructional")
-        : [],
-    [selectedSourceDll],
-  );
-
-  useEffect(() => {
-    if (
-      activeSourceSessions.length > 0 &&
-      !activeSourceSessions.some((s) => s.sessionNumber === selectedSessionNumber)
-    ) {
-      setSelectedSessionNumber(activeSourceSessions[0]!.sessionNumber);
-    }
-  }, [activeSourceSessions, selectedSessionNumber]);
-
-  const selectedSourceSession = useMemo(
-    () =>
-      activeSourceSessions.find((s) => s.sessionNumber === selectedSessionNumber) ??
-      null,
-    [activeSourceSessions, selectedSessionNumber],
-  );
-
-  function addCompetency() {
-    if (!pickedCompetencyId) return;
-    setSelectedCompetencyIds((prev) =>
-      prev.includes(pickedCompetencyId) ? prev : [...prev, pickedCompetencyId],
-    );
-  }
-
-  function removeCompetency(id: string) {
-    setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
-  }
-
-  function updateCount(type: QuizQuestionType, value: string) {
-    const num = Math.max(0, Math.min(50, Math.floor(Number(value) || 0)));
-    setItemCounts((prev) => ({ ...prev, [type]: num }));
-  }
-
-  async function handleGenerate(event: FormEvent) {
-    event.preventDefault();
-    setStatus(null);
-    setGenerating(true);
-    try {
-      const shared = { title, promptNotes, itemCounts };
-      const payload =
-        sourceKind === "dll"
-          ? {
-              ...shared,
-              sourceKind: "dll" as const,
-              dllId: selectedDllId,
-              sessionNumber: selectedSessionNumber,
-            }
-          : sourceKind === "dlp"
-            ? {
-                ...shared,
-                sourceKind: "dlp" as const,
-                dlpId: selectedDlpId,
-              }
-            : {
-                ...shared,
-                sourceKind: "standalone" as const,
-                competencyIds: selectedCompetencyIds,
-                gradeAndSection,
-              };
-
-      const res = await fetch("/api/quizzes/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const created = (await res.json()) as Quiz;
-      setQuizzes((prev) => [created, ...prev]);
-      setSelectedQuizId(created.id);
-      setViewMode("markdown");
-      setStatus({
-        tone: "success",
-        text: `Generated Quiz "${created.title}" (${created.learningAreas}).`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  function updateDraftSection(
-    sectionIdx: number,
-    updater: (section: Quiz["sections"][number]) => Quiz["sections"][number],
-  ) {
-    setDraftQuiz((prev) =>
-      prev
-        ? {
-            ...prev,
-            sections: prev.sections.map((s, idx) =>
-              idx === sectionIdx ? updater(s) : s,
-            ),
-          }
-        : prev,
-    );
-  }
-
-  function updateDraftItem(
-    sectionIdx: number,
-    itemIdx: number,
-    updater: (
-      item: Quiz["sections"][number]["items"][number],
-    ) => Quiz["sections"][number]["items"][number],
-  ) {
-    updateDraftSection(sectionIdx, (section) => ({
-      ...section,
-      items: section.items.map((item, idx) =>
-        idx === itemIdx ? updater(item) : item,
-      ),
-    }));
-  }
-
-  function updateSectionDirections(sectionIdx: number, directions: string) {
-    updateDraftSection(sectionIdx, (s) => ({ ...s, directions }));
-  }
-
-  function updateItemField(
-    sectionIdx: number,
-    itemIdx: number,
-    field: "prompt" | "answer" | "rubric",
-    value: string,
-  ) {
-    updateDraftItem(sectionIdx, itemIdx, (item) => ({ ...item, [field]: value }));
-  }
-
-  function updateChoice(
-    sectionIdx: number,
-    itemIdx: number,
-    choiceIdx: number,
-    value: string,
-  ) {
-    updateDraftItem(sectionIdx, itemIdx, (item) => {
-      const choices = [...(item.choices ?? [])];
-      choices[choiceIdx] = value;
-      return { ...item, choices };
-    });
-  }
-
-  async function saveDraftQuiz(quiz: Quiz): Promise<Quiz> {
-    const res = await fetch(`/api/quizzes/${encodeURIComponent(quiz.id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(quiz),
-    });
-    if (!res.ok) throw new Error(await readErrorMessage(res));
-    const updated = (await res.json()) as Quiz;
-    setQuizzes((prev) =>
-      prev.map((item) => (item.id === updated.id ? updated : item)),
-    );
-    return updated;
-  }
-
-  async function handleSaveEdits() {
-    if (!draftQuiz) return;
-    setStatus(null);
-    setSaving(true);
-    try {
-      const updated = await saveDraftQuiz(draftQuiz);
-      setStatus({
-        tone: "success",
-        text: `Saved changes to "${updated.title}" on local disk.`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleSyncToLesson() {
-    if (!draftQuiz) return;
-    setStatus(null);
-    setSyncing(true);
-    try {
-      const saved = await saveDraftQuiz(draftQuiz);
-      const res = await fetch(`/api/quizzes/${encodeURIComponent(saved.id)}/sync`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const result = (await res.json()) as QuizSyncResult;
-      const targetLabel =
-        result.kind === "dll"
-          ? `DLL "${result.dll.lessonTitle}" Session ${saved.source.kind === "dll" ? saved.source.sessionNumber : ""}`
-          : `DLP "${result.dlp.lessonTitle}"`;
-      setStatus({
-        tone: "success",
-        text: `Synced Quiz items into ${targetLabel} Formative Assessment.`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function handleDownloadDocx() {
-    if (!draftQuiz) return;
-    setStatus(null);
-    setDownloading(true);
-    try {
-      const saved = await saveDraftQuiz(draftQuiz);
-      const res = await fetch(`/api/quizzes/${encodeURIComponent(saved.id)}/docx`);
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const blob = await res.blob();
-      const disposition = res.headers.get("content-disposition") ?? "";
-      const filenameMatch = disposition.match(/filename="([^"]+)"/);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filenameMatch?.[1] ?? `${saved.id}.docx`;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setDownloading(false);
-    }
-  }
-
-  async function handleDeleteQuiz() {
-    if (!draftQuiz) return;
-    setStatus(null);
-    try {
-      const res = await fetch(`/api/quizzes/${encodeURIComponent(draftQuiz.id)}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const remaining = quizzes.filter((q) => q.id !== draftQuiz.id);
-      setQuizzes(remaining);
-      setSelectedQuizId(remaining[0]?.id ?? "");
-      setStatus({
-        tone: "success",
-        text: `Deleted "${draftQuiz.title}".`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const {
+    quizzes,
+    dlls,
+    dlps,
+    curriculum,
+    sections,
+    loading,
+    status,
+    selectedQuizId,
+    setSelectedQuizId,
+    draftQuiz,
+    setDraftQuiz,
+    viewMode,
+    setViewMode,
+    saving,
+    syncing,
+    downloading,
+    sourceKind,
+    setSourceKind,
+    selectedDllId,
+    setSelectedDllId,
+    selectedSessionNumber,
+    setSelectedSessionNumber,
+    selectedDlpId,
+    setSelectedDlpId,
+    title,
+    setTitle,
+    gradeAndSection,
+    setGradeAndSection,
+    promptNotes,
+    setPromptNotes,
+    itemCounts,
+    selectedCompetencyIds,
+    pickedCompetencyId,
+    setPickedCompetencyId,
+    generating,
+    competencyMap,
+    activeSourceSessions,
+    selectedSourceSession,
+    addCompetency,
+    removeCompetency,
+    updateCount,
+    handleGenerate,
+    updateSectionDirections,
+    updateItemField,
+    updateChoice,
+    handleSaveEdits,
+    handleSyncToLesson,
+    handleDownloadDocx,
+    handleDeleteQuiz,
+  } = useQuizWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
 
   return (
-    <section className="dll-workspace" aria-labelledby={headingId}>
-      <div className="curriculum-header-row">
-        <div className="workspace-header">
-          <h1 id={headingId} tabIndex={-1}>
-            Quiz Maker
+    <section
+      aria-labelledby={headingId}
+      className="flex flex-col gap-gutter-lg"
+    >
+      {/* Page Title & Action Row */}
+      <div className="flex flex-wrap items-end justify-between gap-gutter-md">
+        <div className="flex flex-col gap-gutter-xs">
+          <h1
+            id={headingId}
+            tabIndex={-1}
+            className="font-headline text-headline-lg text-on-surface text-balance"
+          >
+            {draftQuiz ? draftQuiz.title : "Printable Formative Quiz Maker"}
           </h1>
-          <p className="workspace-subtitle">
+          <p className="font-body text-body-md text-on-surface-variant">
             Generate printable formative Quizzes from a DLL Session, DLP, or
             Learning Competencies, sync into lessons, and export .docx with a
             page-separated Answer Key.
           </p>
         </div>
 
-        <div className="actions-row">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => setSelectedQuizId("")}
-          >
-            + New Quiz
-          </button>
-        </div>
-      </div>
-
-      {status && (
-        <div className="status-banner" data-tone={status.tone} role="status">
-          {status.text}
-        </div>
-      )}
-
-      {quizzes.length > 0 && (
-        <div className="card dll-saved-bar">
-          <div className="field">
-            <label htmlFor={`${baseId}-saved-quiz`}>Saved Quizzes</label>
+        <div className="flex flex-wrap items-center gap-gutter-sm">
+          {quizzes.length > 0 && (
             <select
               id={`${baseId}-saved-quiz`}
+              aria-label="Saved Quizzes"
               value={selectedQuizId}
               onChange={(e) => setSelectedQuizId(e.target.value)}
+              className="max-w-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
             >
               <option value="">Create a new Formative Quiz...</option>
               {quizzes.map((item) => (
@@ -488,42 +122,137 @@ export function QuizWorkspace({
                 </option>
               ))}
             </select>
-          </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setSelectedQuizId("")}
+            className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+          >
+            <span
+              className="material-symbols-outlined text-title-md"
+              aria-hidden="true"
+            >
+              add
+            </span>
+            <span>New Quiz</span>
+          </button>
+
+          {draftQuiz && (
+            <>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void handleSaveEdits()}
+                className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  save
+                </span>
+                <span>{saving ? "Saving..." : "Save Changes"}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={downloading}
+                onClick={() => void handleDownloadDocx()}
+                className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-primary border border-primary font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  print
+                </span>
+                <span>
+                  {downloading ? "Preparing DOCX..." : "Download DOCX"}
+                </span>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Status Banner */}
+      {status && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`rounded-md border p-gutter-md flex items-center gap-gutter-sm font-body text-body-md ${
+            status.tone === "error"
+              ? "border-error bg-error-container text-on-error-container"
+              : "border-success bg-success-container/60 text-on-success-container"
+          }`}
+        >
+          <span
+            className="material-symbols-outlined text-title-lg shrink-0"
+            aria-hidden="true"
+          >
+            {status.tone === "error" ? "error" : "check_circle"}
+          </span>
+          <span>{status.text}</span>
         </div>
       )}
 
       {loading ? (
-        <div className="card">Loading Quizzes, Lessons, and Curriculum Catalog...</div>
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg font-body text-body-md text-on-surface-variant">
+          Loading Quizzes, Lessons, and Curriculum Catalog...
+        </div>
       ) : !draftQuiz ? (
-        <form className="settings-form" onSubmit={handleGenerate}>
-          <fieldset className="settings-fieldset">
-            <legend>1. Quiz Source</legend>
+        /* New Quiz Builder Form */
+        <form
+          onSubmit={(e) => void handleGenerate(e)}
+          className="flex flex-col gap-gutter-lg"
+        >
+          <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
+            <legend className="font-title text-title-lg text-on-surface px-1">
+              1. Quiz Source
+            </legend>
 
-            <div className="classroom-tablist" role="tablist" aria-label="Quiz Source">
+            <div
+              role="tablist"
+              aria-label="Quiz Source"
+              className="inline-flex flex-wrap items-center gap-gutter-xs p-gutter-xs rounded bg-surface-container border border-outline-variant self-start"
+            >
               <button
                 type="button"
                 role="tab"
-                className="classroom-tab"
                 aria-selected={sourceKind === "standalone"}
                 onClick={() => setSourceKind("standalone")}
+                className={`px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                  sourceKind === "standalone"
+                    ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                    : "text-on-surface-variant hover:text-on-surface"
+                }`}
               >
                 Learning Competencies
               </button>
               <button
                 type="button"
                 role="tab"
-                className="classroom-tab"
                 aria-selected={sourceKind === "dll"}
                 onClick={() => setSourceKind("dll")}
+                className={`px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                  sourceKind === "dll"
+                    ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                    : "text-on-surface-variant hover:text-on-surface"
+                }`}
               >
                 From DLL Session
               </button>
               <button
                 type="button"
                 role="tab"
-                className="classroom-tab"
                 aria-selected={sourceKind === "dlp"}
                 onClick={() => setSourceKind("dlp")}
+                className={`px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                  sourceKind === "dlp"
+                    ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                    : "text-on-surface-variant hover:text-on-surface"
+                }`}
               >
                 From DLP
               </button>
@@ -531,17 +260,27 @@ export function QuizWorkspace({
 
             {sourceKind === "dll" ? (
               dlls.length === 0 ? (
-                <p className="hint">
-                  No saved DLLs yet. Create one in <a href="#dll">DLL Builder</a>.
+                <p className="font-body text-body-sm text-on-surface-variant">
+                  No saved DLLs yet. Create one in{" "}
+                  <a href="#dll" className="text-primary underline">
+                    DLL Builder
+                  </a>
+                  .
                 </p>
               ) : (
-                <div className="dll-form-grid">
-                  <div className="field">
-                    <label htmlFor={`${baseId}-src-dll`}>Saved DLL</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
+                  <div className="flex flex-col gap-gutter-xs">
+                    <label
+                      htmlFor={`${baseId}-src-dll`}
+                      className="font-label text-label-md text-on-surface"
+                    >
+                      Saved DLL
+                    </label>
                     <select
                       id={`${baseId}-src-dll`}
                       value={selectedDllId}
                       onChange={(e) => setSelectedDllId(e.target.value)}
+                      className={INPUT_CLASS}
                     >
                       {dlls.map((item) => (
                         <option key={item.id} value={item.id}>
@@ -550,18 +289,27 @@ export function QuizWorkspace({
                       ))}
                     </select>
                   </div>
-                  <div className="field">
-                    <label htmlFor={`${baseId}-src-session`}>Active Session</label>
+                  <div className="flex flex-col gap-gutter-xs">
+                    <label
+                      htmlFor={`${baseId}-src-session`}
+                      className="font-label text-label-md text-on-surface"
+                    >
+                      Active Session
+                    </label>
                     <select
                       id={`${baseId}-src-session`}
                       value={selectedSessionNumber}
                       onChange={(e) =>
-                        setSelectedSessionNumber(Number(e.target.value) as SessionNumber)
+                        setSelectedSessionNumber(
+                          Number(e.target.value) as SessionNumber,
+                        )
                       }
+                      className={INPUT_CLASS}
                     >
                       {activeSourceSessions.map((s) => (
                         <option key={s.sessionNumber} value={s.sessionNumber}>
-                          Session {s.sessionNumber} ({s.components.join(", ") || "TLE"})
+                          Session {s.sessionNumber} (
+                          {s.components.join(", ") || "TLE"})
                         </option>
                       ))}
                     </select>
@@ -570,30 +318,44 @@ export function QuizWorkspace({
               )
             ) : sourceKind === "dlp" ? (
               dlps.length === 0 ? (
-                <p className="hint">
-                  No saved DLPs yet. Create one in <a href="#dlp">DLP Builder</a>.
+                <p className="font-body text-body-sm text-on-surface-variant">
+                  No saved DLPs yet. Create one in{" "}
+                  <a href="#dlp" className="text-primary underline">
+                    DLP Builder
+                  </a>
+                  .
                 </p>
               ) : (
-                <div className="field">
-                  <label htmlFor={`${baseId}-src-dlp`}>Saved DLP</label>
+                <div className="flex flex-col gap-gutter-xs">
+                  <label
+                    htmlFor={`${baseId}-src-dlp`}
+                    className="font-label text-label-md text-on-surface"
+                  >
+                    Saved DLP
+                  </label>
                   <select
                     id={`${baseId}-src-dlp`}
                     value={selectedDlpId}
                     onChange={(e) => setSelectedDlpId(e.target.value)}
+                    className={INPUT_CLASS}
                   >
                     {dlps.map((item) => (
                       <option key={item.id} value={item.id}>
-                        {item.lessonTitle} — {item.learningAreas} ({item.gradeAndSection})
+                        {item.lessonTitle} — {item.learningAreas} (
+                        {item.gradeAndSection})
                       </option>
                     ))}
                   </select>
                 </div>
               )
             ) : (
-              <>
-                <div className="field">
-                  <label htmlFor={`${baseId}-grade-section`}>
-                    Grade Level and Section
+              <div className="flex flex-col gap-gutter-md">
+                <div className="flex flex-col gap-gutter-xs">
+                  <label
+                    htmlFor={`${baseId}-grade-section`}
+                    className="font-label text-label-md text-on-surface"
+                  >
+                    Grade Level and Section *
                   </label>
                   <input
                     id={`${baseId}-grade-section`}
@@ -602,6 +364,7 @@ export function QuizWorkspace({
                     value={gradeAndSection}
                     onChange={(e) => setGradeAndSection(e.target.value)}
                     placeholder="e.g. Grade 7 - Rizal"
+                    className={INPUT_CLASS}
                   />
                   {sections.length > 0 && (
                     <select
@@ -610,8 +373,11 @@ export function QuizWorkspace({
                       onChange={(e) => {
                         if (e.target.value) setGradeAndSection(e.target.value);
                       }}
+                      className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface"
                     >
-                      <option value="">Quick-fill from Class Sections...</option>
+                      <option value="">
+                        Quick-fill from Class Sections...
+                      </option>
                       {sections.map((sec) => {
                         const label = `Grade ${sec.gradeLevel} - ${sec.sectionName}`;
                         return (
@@ -631,33 +397,40 @@ export function QuizWorkspace({
                   onPickCompetencyId={setPickedCompetencyId}
                 />
 
-                <div className="actions-row">
+                <div>
                   <button
                     type="button"
-                    className="btn-secondary btn-compact"
                     disabled={!pickedCompetencyId}
                     onClick={addCompetency}
+                    className="px-gutter-md py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-primary hover:bg-surface-container disabled:opacity-50"
                   >
                     + Add Learning Competency
                   </button>
                 </div>
 
                 {selectedCompetencyIds.length === 0 ? (
-                  <p className="hint">No Learning Competency selected yet.</p>
+                  <p className="font-body text-body-sm text-on-surface-variant">
+                    No Learning Competency selected yet.
+                  </p>
                 ) : (
-                  <ul className="dll-assigned-list">
+                  <ul className="flex flex-col gap-gutter-xs">
                     {selectedCompetencyIds.map((cid) => {
                       const comp = competencyMap.get(cid);
                       return (
-                        <li key={cid} className="dll-assigned-item">
-                          <span>
-                            <span className="badge">{comp?.component ?? "TLE"}</span>{" "}
+                        <li
+                          key={cid}
+                          className="p-gutter-sm rounded bg-surface-container-low border border-outline-variant flex items-center justify-between gap-gutter-sm"
+                        >
+                          <span className="font-body text-body-sm text-on-surface">
+                            <span className="inline-block px-1.5 py-0.5 mr-2 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
+                              {comp?.component ?? "TLE"}
+                            </span>
                             {comp?.learningCompetency ?? cid}
                           </span>
                           <button
                             type="button"
-                            className="btn-secondary btn-compact"
                             onClick={() => removeCompetency(cid)}
+                            className="shrink-0 font-label text-label-sm text-error hover:underline"
                           >
                             Remove
                           </button>
@@ -666,30 +439,42 @@ export function QuizWorkspace({
                     })}
                   </ul>
                 )}
-              </>
+              </div>
             )}
           </fieldset>
 
-          <fieldset className="settings-fieldset">
-            <legend>2. Question Types, Item Counts &amp; Prompt Notes</legend>
+          <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
+            <legend className="font-title text-title-lg text-on-surface px-1">
+              2. Question Types, Item Counts &amp; Prompt Notes
+            </legend>
 
-            <div className="field">
-              <label htmlFor={`${baseId}-title`}>Quiz Title (optional)</label>
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-title`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Quiz Title (optional)
+              </label>
               <input
                 id={`${baseId}-title`}
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Leave blank for AI-generated title"
+                className={INPUT_CLASS}
               />
             </div>
 
-            <div className="quiz-counts-grid">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-gutter-md">
               {QUIZ_QUESTION_TYPES.map((type) => (
-                <div key={type} className="field">
-                  <label htmlFor={`${baseId}-count-${type}`}>
+                <label
+                  key={type}
+                  htmlFor={`${baseId}-count-${type}`}
+                  className="p-gutter-sm rounded bg-surface-container-low border border-outline-variant flex items-center justify-between gap-gutter-sm"
+                >
+                  <span className="font-label text-label-md text-on-surface">
                     {QUIZ_SECTION_META[type].title}
-                  </label>
+                  </span>
                   <input
                     id={`${baseId}-count-${type}`}
                     type="number"
@@ -697,262 +482,406 @@ export function QuizWorkspace({
                     max={50}
                     value={itemCounts[type]}
                     onChange={(e) => updateCount(type, e.target.value)}
+                    className="w-16 px-gutter-xs py-gutter-xs rounded-sm bg-surface-container-lowest border border-outline-variant font-mono text-mono-md text-on-surface tabular-nums text-center focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
                   />
-                </div>
+                </label>
               ))}
             </div>
 
-            <div className="field">
-              <label htmlFor={`${baseId}-prompt-notes`}>Prompt Notes (optional)</label>
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-prompt-notes`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Prompt Notes (optional)
+              </label>
               <textarea
                 id={`${baseId}-prompt-notes`}
+                rows={2}
                 value={promptNotes}
                 onChange={(e) => setPromptNotes(e.target.value)}
                 placeholder="e.g. Focus on tool safety, Grade 7 reading level..."
+                className={INPUT_CLASS}
               />
             </div>
           </fieldset>
 
-          <div className="actions-row">
+          <div className="flex justify-end">
             <button
               type="submit"
-              className="btn-primary"
               disabled={
                 generating ||
-                (sourceKind === "dll" && (!selectedDllId || !selectedSourceSession)) ||
+                (sourceKind === "dll" &&
+                  (!selectedDllId || !selectedSourceSession)) ||
                 (sourceKind === "dlp" && !selectedDlpId)
               }
+              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
             >
-              {generating ? "Generating Quiz..." : "Generate Quiz"}
+              <span
+                className="material-symbols-outlined text-title-md"
+                aria-hidden="true"
+              >
+                auto_awesome
+              </span>
+              <span>{generating ? "Generating Quiz..." : "Generate Quiz"}</span>
             </button>
           </div>
         </form>
       ) : (
-        <div className="dll-editor-stack">
-          <div className="card dll-toolbar">
-            <div>
-              <h2>{draftQuiz.title}</h2>
-              <div className="curriculum-badges">
-                <span className="badge badge-bow">{draftQuiz.learningAreas}</span>
-                <span className="badge">{draftQuiz.gradeAndSection}</span>
-                {draftQuiz.source.kind === "dll" && (
-                  <span className="badge">
-                    Linked to DLL Session {draftQuiz.source.sessionNumber}
-                  </span>
-                )}
-                {draftQuiz.source.kind === "dlp" && (
-                  <span className="badge">Linked to DLP</span>
-                )}
-              </div>
+        /* Editing / Previewing Saved Quiz */
+        <div className="flex flex-col gap-gutter-lg">
+          {/* Metadata Pills & Sync/Delete */}
+          <div className="flex flex-wrap items-center justify-between gap-gutter-sm">
+            <div className="flex flex-wrap items-center gap-gutter-xs">
+              <span className="px-gutter-sm py-0.5 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
+                {draftQuiz.learningAreas}
+              </span>
+              <span className="px-gutter-sm py-0.5 rounded-full bg-surface-variant text-on-surface-variant font-label text-label-sm">
+                {draftQuiz.gradeAndSection}
+              </span>
+              {draftQuiz.source.kind === "dll" && (
+                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
+                  Linked to DLL Session {draftQuiz.source.sessionNumber}
+                </span>
+              )}
+              {draftQuiz.source.kind === "dlp" && (
+                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
+                  Linked to DLP
+                </span>
+              )}
             </div>
 
-            <div className="actions-row">
-              <div className="classroom-tablist" role="tablist" aria-label="Quiz View Mode">
-                <button
-                  type="button"
-                  role="tab"
-                  className="classroom-tab"
-                  aria-selected={viewMode === "markdown"}
-                  onClick={() => setViewMode("markdown")}
-                >
-                  Markdown View
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  className="classroom-tab"
-                  aria-selected={viewMode === "edit"}
-                  onClick={() => setViewMode("edit")}
-                >
-                  Inline Editor
-                </button>
-              </div>
-
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={saving}
-                onClick={handleSaveEdits}
-              >
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
-
+            <div className="flex flex-wrap items-center gap-gutter-sm">
               {draftQuiz.source.kind !== "standalone" && (
                 <button
                   type="button"
-                  className="btn-secondary"
                   disabled={syncing}
-                  onClick={handleSyncToLesson}
+                  onClick={() => void handleSyncToLesson()}
+                  className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border border-outline-variant bg-surface-container-lowest font-label text-label-md text-on-surface hover:bg-surface-container-low disabled:opacity-60"
                 >
-                  {syncing ? "Syncing..." : "Sync to Lesson Formative Assessment"}
+                  <span
+                    className="material-symbols-outlined text-title-md text-primary"
+                    aria-hidden="true"
+                  >
+                    sync
+                  </span>
+                  <span>
+                    {syncing
+                      ? "Syncing..."
+                      : "Sync to Lesson Formative Assessment"}
+                  </span>
                 </button>
               )}
 
               <button
                 type="button"
-                className="btn-secondary"
-                disabled={downloading}
-                onClick={handleDownloadDocx}
+                onClick={() => void handleDeleteQuiz()}
+                className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border border-outline-variant bg-surface-container-lowest font-label text-label-md text-error hover:bg-error-container/30"
               >
-                {downloading ? "Preparing DOCX..." : "Download DOCX"}
-              </button>
-
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={handleDeleteQuiz}
-              >
-                Delete
+                <span
+                  className="material-symbols-outlined text-body-md"
+                  aria-hidden="true"
+                >
+                  delete
+                </span>
+                <span>Delete</span>
               </button>
             </div>
           </div>
 
-          {viewMode === "markdown" ? (
-            <article className="card dll-markdown-view">
-              {renderMarkdownBlocks(renderQuizMarkdown(draftQuiz))}
-            </article>
-          ) : (
-            <div className="dll-editor-stack">
-              <div className="card settings-form">
-                <h3>Quiz Header</h3>
-                <div className="dll-form-grid">
-                  <div className="field">
-                    <label htmlFor={`${baseId}-edit-title`}>Quiz Title</label>
-                    <input
-                      id={`${baseId}-edit-title`}
-                      type="text"
-                      value={draftQuiz.title}
-                      onChange={(e) =>
-                        setDraftQuiz((prev) =>
-                          prev ? { ...prev, title: e.target.value } : prev,
-                        )
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`${baseId}-edit-areas`}>Learning Area/s</label>
-                    <input
-                      id={`${baseId}-edit-areas`}
-                      type="text"
-                      value={draftQuiz.learningAreas}
-                      onChange={(e) =>
-                        setDraftQuiz((prev) =>
-                          prev ? { ...prev, learningAreas: e.target.value } : prev,
-                        )
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`${baseId}-edit-gs`}>
-                      Grade Level and Section
-                    </label>
-                    <input
-                      id={`${baseId}-edit-gs`}
-                      type="text"
-                      value={draftQuiz.gradeAndSection}
-                      onChange={(e) =>
-                        setDraftQuiz((prev) =>
-                          prev ? { ...prev, gradeAndSection: e.target.value } : prev,
-                        )
-                      }
-                    />
-                  </div>
-                </div>
+          {/* View Mode Tabs */}
+          <div className="flex flex-col gap-gutter-md">
+            <div className="flex flex-wrap items-center justify-between gap-gutter-md">
+              <div
+                role="tablist"
+                aria-label="Quiz View Mode"
+                className="inline-flex items-center gap-gutter-xs p-gutter-xs rounded bg-surface-container border border-outline-variant"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === "markdown"}
+                  onClick={() => setViewMode("markdown")}
+                  className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                    viewMode === "markdown"
+                      ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                      : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    article
+                  </span>
+                  <span>Markdown Web View</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === "edit"}
+                  onClick={() => setViewMode("edit")}
+                  className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
+                    viewMode === "edit"
+                      ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                      : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    edit_document
+                  </span>
+                  <span>Worksheet &amp; Inline Editor</span>
+                </button>
               </div>
 
-              {draftQuiz.sections.map((section, sIdx) => {
-                const roman = ROMAN_PARTS[sIdx] ?? String(sIdx + 1);
-                return (
-                  <section
-                    key={section.type}
-                    className="card settings-form"
-                    aria-label={`Part ${roman}. ${section.title}`}
-                  >
-                    <h3>
-                      Part {roman}. {section.title}
-                    </h3>
-                    <div className="field">
-                      <label htmlFor={`${baseId}-dir-${sIdx}`}>Directions</label>
+              <span className="font-mono text-mono-md text-on-surface-variant">
+                Answer Key exports on a page-separated final page
+              </span>
+            </div>
+
+            {viewMode === "markdown" ? (
+              <article className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col gap-gutter-sm max-w-prose">
+                {renderMarkdownBlocks(renderQuizMarkdown(draftQuiz))}
+              </article>
+            ) : (
+              <div className="flex flex-col gap-gutter-lg">
+                {/* Quiz Header Card */}
+                <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
+                  <h2 className="font-title text-title-lg text-primary">
+                    Quiz Header
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter-md">
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-title`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Quiz Title
+                      </label>
                       <input
-                        id={`${baseId}-dir-${sIdx}`}
+                        id={`${baseId}-edit-title`}
                         type="text"
-                        value={section.directions}
-                        onChange={(e) => updateSectionDirections(sIdx, e.target.value)}
+                        value={draftQuiz.title}
+                        onChange={(e) =>
+                          setDraftQuiz((prev) =>
+                            prev ? { ...prev, title: e.target.value } : prev,
+                          )
+                        }
+                        className={INPUT_CLASS}
                       />
                     </div>
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-areas`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Learning Area/s
+                      </label>
+                      <input
+                        id={`${baseId}-edit-areas`}
+                        type="text"
+                        value={draftQuiz.learningAreas}
+                        onChange={(e) =>
+                          setDraftQuiz((prev) =>
+                            prev
+                              ? { ...prev, learningAreas: e.target.value }
+                              : prev,
+                          )
+                        }
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-gutter-xs">
+                      <label
+                        htmlFor={`${baseId}-edit-gs`}
+                        className="font-label text-label-md text-on-surface"
+                      >
+                        Grade Level and Section
+                      </label>
+                      <input
+                        id={`${baseId}-edit-gs`}
+                        type="text"
+                        value={draftQuiz.gradeAndSection}
+                        onChange={(e) =>
+                          setDraftQuiz((prev) =>
+                            prev
+                              ? { ...prev, gradeAndSection: e.target.value }
+                              : prev,
+                          )
+                        }
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                  </div>
+                </div>
 
-                    {section.items.map((item, iIdx) => (
-                      <div key={item.id} className="quiz-item-card">
-                        <div className="field">
-                          <label htmlFor={`${baseId}-q-${sIdx}-${iIdx}`}>
-                            Item {iIdx + 1} Question
-                          </label>
-                          <textarea
-                            id={`${baseId}-q-${sIdx}-${iIdx}`}
-                            rows={2}
-                            value={item.prompt}
-                            onChange={(e) =>
-                              updateItemField(sIdx, iIdx, "prompt", e.target.value)
-                            }
-                          />
-                        </div>
+                {/* Sections & Items */}
+                {draftQuiz.sections.map((section, sIdx) => {
+                  const roman = ROMAN_PARTS[sIdx] ?? String(sIdx + 1);
+                  return (
+                    <section
+                      key={section.type}
+                      aria-label={`Part ${roman}. ${section.title}`}
+                      className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-gutter-sm pb-gutter-sm border-b border-outline-variant">
+                        <h2 className="font-title text-title-lg text-primary">
+                          Part {roman}. {section.title} ({section.items.length}{" "}
+                          {section.items.length === 1 ? "item" : "items"})
+                        </h2>
+                      </div>
 
-                        {section.type === "multipleChoice" && item.choices && (
-                          <div className="quiz-choices-grid">
-                            {item.choices.map((choice, cIdx) => (
-                              <div key={cIdx} className="field">
-                                <label htmlFor={`${baseId}-c-${sIdx}-${iIdx}-${cIdx}`}>
-                                  Choice {String.fromCharCode(65 + cIdx)}
+                      <div className="flex flex-col gap-gutter-xs">
+                        <label
+                          htmlFor={`${baseId}-dir-${sIdx}`}
+                          className="font-label text-label-md text-on-surface"
+                        >
+                          Directions
+                        </label>
+                        <input
+                          id={`${baseId}-dir-${sIdx}`}
+                          type="text"
+                          value={section.directions}
+                          onChange={(e) =>
+                            updateSectionDirections(sIdx, e.target.value)
+                          }
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-gutter-md">
+                        {section.items.map((item, iIdx) => (
+                          <div
+                            key={item.id}
+                            className="p-gutter-md rounded-md bg-surface-container-low border border-outline-variant flex flex-col gap-gutter-sm"
+                          >
+                            <div className="flex flex-col gap-gutter-xs">
+                              <label
+                                htmlFor={`${baseId}-q-${sIdx}-${iIdx}`}
+                                className="font-label text-label-md text-on-surface"
+                              >
+                                Item {iIdx + 1} Question
+                              </label>
+                              <textarea
+                                id={`${baseId}-q-${sIdx}-${iIdx}`}
+                                rows={2}
+                                value={item.prompt}
+                                onChange={(e) =>
+                                  updateItemField(
+                                    sIdx,
+                                    iIdx,
+                                    "prompt",
+                                    e.target.value,
+                                  )
+                                }
+                                className={INPUT_CLASS}
+                              />
+                            </div>
+
+                            {section.type === "multipleChoice" &&
+                              item.choices && (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter-sm">
+                                  {item.choices.map((choice, cIdx) => (
+                                    <div
+                                      key={cIdx}
+                                      className="flex flex-col gap-gutter-xs"
+                                    >
+                                      <label
+                                        htmlFor={`${baseId}-c-${sIdx}-${iIdx}-${cIdx}`}
+                                        className="font-label text-label-sm text-on-surface-variant"
+                                      >
+                                        Choice {String.fromCharCode(65 + cIdx)}
+                                      </label>
+                                      <input
+                                        id={`${baseId}-c-${sIdx}-${iIdx}-${cIdx}`}
+                                        type="text"
+                                        value={choice}
+                                        onChange={(e) =>
+                                          updateChoice(
+                                            sIdx,
+                                            iIdx,
+                                            cIdx,
+                                            e.target.value,
+                                          )
+                                        }
+                                        className={INPUT_CLASS}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                            <div className="flex flex-col gap-gutter-xs">
+                              <label
+                                htmlFor={`${baseId}-a-${sIdx}-${iIdx}`}
+                                className="font-label text-label-md text-on-surface"
+                              >
+                                Answer Key
+                              </label>
+                              <input
+                                id={`${baseId}-a-${sIdx}-${iIdx}`}
+                                type="text"
+                                value={item.answer}
+                                onChange={(e) =>
+                                  updateItemField(
+                                    sIdx,
+                                    iIdx,
+                                    "answer",
+                                    e.target.value,
+                                  )
+                                }
+                                className={INPUT_CLASS}
+                              />
+                            </div>
+
+                            {section.type === "essayRubric" && (
+                              <div className="flex flex-col gap-gutter-xs">
+                                <label
+                                  htmlFor={`${baseId}-r-${sIdx}-${iIdx}`}
+                                  className="font-label text-label-md text-on-surface"
+                                >
+                                  Rubric
                                 </label>
-                                <input
-                                  id={`${baseId}-c-${sIdx}-${iIdx}-${cIdx}`}
-                                  type="text"
-                                  value={choice}
+                                <textarea
+                                  id={`${baseId}-r-${sIdx}-${iIdx}`}
+                                  rows={2}
+                                  value={item.rubric ?? ""}
                                   onChange={(e) =>
-                                    updateChoice(sIdx, iIdx, cIdx, e.target.value)
+                                    updateItemField(
+                                      sIdx,
+                                      iIdx,
+                                      "rubric",
+                                      e.target.value,
+                                    )
                                   }
+                                  className={INPUT_CLASS}
                                 />
                               </div>
-                            ))}
+                            )}
                           </div>
-                        )}
-
-                        <div className="field">
-                          <label htmlFor={`${baseId}-a-${sIdx}-${iIdx}`}>
-                            Answer Key
-                          </label>
-                          <input
-                            id={`${baseId}-a-${sIdx}-${iIdx}`}
-                            type="text"
-                            value={item.answer}
-                            onChange={(e) =>
-                              updateItemField(sIdx, iIdx, "answer", e.target.value)
-                            }
-                          />
-                        </div>
-
-                        {section.type === "essayRubric" && (
-                          <div className="field">
-                            <label htmlFor={`${baseId}-r-${sIdx}-${iIdx}`}>
-                              Rubric
-                            </label>
-                            <textarea
-                              id={`${baseId}-r-${sIdx}-${iIdx}`}
-                              rows={2}
-                              value={item.rubric ?? ""}
-                              onChange={(e) =>
-                                updateItemField(sIdx, iIdx, "rubric", e.target.value)
-                              }
-                            />
-                          </div>
-                        )}
+                        ))}
                       </div>
-                    ))}
-                  </section>
-                );
-              })}
-            </div>
-          )}
+                    </section>
+                  );
+                })}
+
+                <div className="py-gutter-sm px-gutter-md rounded bg-surface-container border border-dashed border-outline-variant flex items-center justify-center gap-gutter-sm text-on-surface-variant">
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    insert_page_break
+                  </span>
+                  <span className="font-mono text-mono-md">
+                    Hard Page Break — Answer Key prints on final .docx page
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>

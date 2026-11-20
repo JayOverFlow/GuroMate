@@ -13,10 +13,18 @@ function renderInlineMarkdown(text: string): ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*|_[^_]+_)/g);
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={idx}>{part.slice(2, -2)}</strong>;
+      return (
+        <strong key={idx} className="font-semibold text-on-surface">
+          {part.slice(2, -2)}
+        </strong>
+      );
     }
     if (part.startsWith("_") && part.endsWith("_")) {
-      return <em key={idx}>{part.slice(1, -1)}</em>;
+      return (
+        <em key={idx} className="italic">
+          {part.slice(1, -1)}
+        </em>
+      );
     }
     return part;
   });
@@ -30,7 +38,10 @@ export function renderMarkdownBlocks(markdown: string): ReactNode[] {
   const flushList = (keyPrefix: number) => {
     if (listItems.length === 0) return;
     blocks.push(
-      <ul key={`ul-${keyPrefix}`}>
+      <ul
+        key={`ul-${keyPrefix}`}
+        className="list-disc list-inside flex flex-col gap-gutter-xs font-body text-body-md text-on-surface-variant pl-2"
+      >
         {listItems.map((item, i) => (
           <li key={i}>{renderInlineMarkdown(item)}</li>
         ))}
@@ -47,13 +58,38 @@ export function renderMarkdownBlocks(markdown: string): ReactNode[] {
     flushList(idx);
     if (!line.trim()) return;
     if (line.startsWith("# ")) {
-      blocks.push(<h2 key={idx}>{renderInlineMarkdown(line.slice(2))}</h2>);
+      blocks.push(
+        <h2
+          key={idx}
+          className="font-headline text-headline-md text-on-surface mt-2"
+        >
+          {renderInlineMarkdown(line.slice(2))}
+        </h2>,
+      );
     } else if (line.startsWith("## ")) {
-      blocks.push(<h3 key={idx}>{renderInlineMarkdown(line.slice(3))}</h3>);
+      blocks.push(
+        <h3
+          key={idx}
+          className="font-title text-title-lg text-primary mt-3 pt-2 border-t border-outline-variant"
+        >
+          {renderInlineMarkdown(line.slice(3))}
+        </h3>,
+      );
     } else if (line.startsWith("### ")) {
-      blocks.push(<h4 key={idx}>{renderInlineMarkdown(line.slice(4))}</h4>);
+      blocks.push(
+        <h4
+          key={idx}
+          className="font-title text-title-md text-on-surface mt-2"
+        >
+          {renderInlineMarkdown(line.slice(4))}
+        </h4>,
+      );
     } else {
-      blocks.push(<p key={idx}>{renderInlineMarkdown(line)}</p>);
+      blocks.push(
+        <p key={idx} className="font-body text-body-md text-on-surface">
+          {renderInlineMarkdown(line)}
+        </p>,
+      );
     }
   });
   flushList(lines.length);

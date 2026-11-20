@@ -1,35 +1,28 @@
 :root {
   color-scheme: light;
-  --bg: #f6f7f5;
+  --bg: #fff8f5;
   --surface: #ffffff;
-  --surface-muted: #eef1ec;
-  --border: #c5cdc2;
-  --border-strong: #5c6659;
-  --text: #182018;
-  --text-muted: #4b574b;
-  --accent: #14532d;
-  --accent-hover: #0f3f22;
-  --accent-soft: #e3efe7;
-  --error: #b42318;
-  --error-bg: #fef3f2;
-  --success: #166534;
-  --success-bg: #ecfdf3;
+  --surface-muted: #f6ece6;
+  --border: #c0c9be;
+  --border-strong: #717970;
+  --text: #1f1b17;
+  --text-muted: #414941;
+  --accent: #003e1c;
+  --accent-hover: #1e5631;
+  --accent-soft: #dce5da;
+  --error: #ba1a1a;
+  --error-bg: #ffdad5;
+  --success: #006d30;
+  --success-bg: #95f8a7;
   --focus-ring: #0b57d0;
   --radius: 0.5rem;
 }
 
+@layer components {
 *,
 *::before,
 *::after {
   box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.5;
-  color: var(--text);
-  background: var(--bg);
 }
 
 .visually-hidden:where(:not(:focus-within, :active)) {
@@ -1107,4 +1100,5 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
+}
 }
