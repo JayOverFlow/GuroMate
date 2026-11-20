@@ -192,10 +192,65 @@ export interface GenerateDllInput {
   sessions: DllSessionConfig[];
 }
 
-export interface DllDocxExport {
+export interface DocxExport {
   filename: string;
   buffer: Buffer;
 }
+
+export type DllDocxExport = DocxExport;
+
+export interface DlpActivityPair {
+  teacherActivity: string;
+  studentActivity: string;
+}
+
+export interface DlpIntentions {
+  learningCompetencies: string[];
+  contentStandards: string[];
+  performanceStandards: string[];
+  learningObjectives: string;
+  learnerContext: string;
+}
+
+export interface DailyLessonPlan {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  sourceDllId?: string;
+  sourceSessionNumber?: SessionNumber;
+  competencyIds: string[];
+  lessonTitle: string;
+  learningAreas: string;
+  gradeAndSection: string;
+  references: string;
+  promptNotes: string;
+  intentions: DlpIntentions;
+  preLesson: DlpActivityPair;
+  lessonFlow: DlpActivityPair;
+  learningResources: DlpActivityPair;
+  integrationAndContextualization: DlpActivityPair;
+  formativeAssessment: DlpActivityPair;
+  extendedLearningOpportunities: DlpActivityPair;
+  reflections: DlpActivityPair;
+}
+
+export type GenerateDlpInput =
+  | {
+      mode: "derive";
+      dllId: string;
+      sessionNumber: SessionNumber;
+      lessonTitle?: string;
+      references?: string;
+      promptNotes?: string;
+    }
+  | {
+      mode: "scratch";
+      lessonTitle?: string;
+      gradeAndSection: string;
+      references?: string;
+      promptNotes?: string;
+      competencyIds: string[];
+    };
 
 export interface GuroMateEngine {
   readonly dataDir: string;
@@ -223,5 +278,12 @@ export interface GuroMateEngine {
   saveDll(dll: DailyLessonLog): Promise<DailyLessonLog>;
   deleteDll(id: string): Promise<void>;
   renderDllMarkdown(dll: DailyLessonLog): string;
-  exportDllDocx(id: string): Promise<DllDocxExport>;
+  exportDllDocx(id: string): Promise<DocxExport>;
+  listDlps(): Promise<DailyLessonPlan[]>;
+  getDlp(id: string): Promise<DailyLessonPlan>;
+  generateDlp(input: GenerateDlpInput): Promise<DailyLessonPlan>;
+  saveDlp(dlp: DailyLessonPlan): Promise<DailyLessonPlan>;
+  deleteDlp(id: string): Promise<void>;
+  renderDlpMarkdown(dlp: DailyLessonPlan): string;
+  exportDlpDocx(id: string): Promise<DocxExport>;
 }

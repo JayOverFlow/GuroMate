@@ -5,24 +5,20 @@ import {
   useMemo,
   useState,
   type FormEvent,
-  type ReactNode,
 } from "react";
 import { renderDllMarkdown } from "../engine/dll";
 import {
-  GRADE_LEVELS,
-  QUARTERS,
   SESSION_NUMBERS,
-  TLE_COMPONENTS,
   type ClassSection,
   type CurriculumCompetency,
   type DailyLessonLog,
   type DllIntentions,
   type DllSessionConfig,
-  type GradeLevel,
-  type QuarterNumber,
   type SessionNumber,
   type TleComponent,
 } from "../engine/types";
+import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
+import { readErrorMessage, renderMarkdownBlocks } from "./lessonViewHelpers";
 
 type ViewMode = "edit" | "markdown";
 
@@ -115,67 +111,11 @@ function createInitialSessionConfigs(): DllSessionConfig[] {
   }));
 }
 
-async function readErrorMessage(res: Response): Promise<string> {
-  try {
-    const data = (await res.json()) as { error?: string; message?: string };
-    return data.error || data.message || `Request failed (HTTP ${res.status}).`;
-  } catch {
-    return `Request failed (HTTP ${res.status}).`;
-  }
+interface DllWorkspaceProps {
+  onDeriveDlp?: (dllId: string, sessionNumber: SessionNumber) => void;
 }
 
-function renderInlineMarkdown(text: string): ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|_[^_]+_)/g);
-  return parts.map((part, idx) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={idx}>{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith("_") && part.endsWith("_")) {
-      return <em key={idx}>{part.slice(1, -1)}</em>;
-    }
-    return part;
-  });
-}
-
-function renderMarkdownBlocks(markdown: string): ReactNode[] {
-  const lines = markdown.split(/\r?\n/);
-  const blocks: ReactNode[] = [];
-  let listItems: string[] = [];
-
-  const flushList = (keyPrefix: number) => {
-    if (listItems.length === 0) return;
-    blocks.push(
-      <ul key={`ul-${keyPrefix}`}>
-        {listItems.map((item, i) => (
-          <li key={i}>{renderInlineMarkdown(item)}</li>
-        ))}
-      </ul>,
-    );
-    listItems = [];
-  };
-
-  lines.forEach((line, idx) => {
-    if (line.startsWith("- ")) {
-      listItems.push(line.slice(2));
-      return;
-    }
-    flushList(idx);
-    if (!line.trim()) return;
-    if (line.startsWith("# ")) {
-      blocks.push(<h2 key={idx}>{renderInlineMarkdown(line.slice(2))}</h2>);
-    } else if (line.startsWith("## ")) {
-      blocks.push(<h3 key={idx}>{renderInlineMarkdown(line.slice(3))}</h3>);
-    } else if (line.startsWith("### ")) {
-      blocks.push(<h4 key={idx}>{renderInlineMarkdown(line.slice(4))}</h4>);
-    } else {
-      blocks.push(<p key={idx}>{renderInlineMarkdown(line)}</p>);
-    }
-  });
-  flushList(lines.length);
-  return blocks;
-}
-
-export function DllWorkspace() {
+export function DllWorkspace({ onDeriveDlp }: DllWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
 
@@ -201,12 +141,6 @@ export function DllWorkspace() {
     createInitialSessionConfigs,
   );
   const [generating, setGenerating] = useState(false);
-
-  // Curriculum picker filters
-  const [filterGrade, setFilterGrade] = useState<GradeLevel | "">("");
-  const [filterQuarter, setFilterQuarter] = useState<QuarterNumber | "">("");
-  const [filterComponent, setFilterComponent] = useState<TleComponent | "">("");
-  const [filterQuery, setFilterQuery] = useState("");
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
 
   const loadWorkspaceData = useCallback(async () => {
@@ -262,37 +196,6 @@ export function DllWorkspace() {
     () => new Map(curriculum.map((c) => [c.id, c])),
     [curriculum],
   );
-
-  const filteredCurriculum = useMemo(() => {
-    const q = filterQuery.trim().toLowerCase();
-    return curriculum.filter((item) => {
-      if (filterGrade !== "" && !item.gradeLevels.includes(filterGrade)) {
-        return false;
-      }
-      if (filterQuarter !== "" && !item.quarters.includes(filterQuarter)) {
-        return false;
-      }
-      if (filterComponent !== "" && item.component !== filterComponent) {
-        return false;
-      }
-      if (q) {
-        const hay = `${item.learningCompetency} ${item.contentTopic} ${item.sector ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [curriculum, filterGrade, filterQuarter, filterComponent, filterQuery]);
-
-  useEffect(() => {
-    if (
-      filteredCurriculum.length > 0 &&
-      !filteredCurriculum.some((c) => c.id === pickedCompetencyId)
-    ) {
-      setPickedCompetencyId(filteredCurriculum[0]!.id);
-    } else if (filteredCurriculum.length === 0) {
-      setPickedCompetencyId("");
-    }
-  }, [filteredCurriculum, pickedCompetencyId]);
 
   const previewLearningAreas = useMemo(() => {
     const seen = new Set<TleComponent>();
@@ -615,102 +518,12 @@ export function DllWorkspace() {
           <fieldset className="settings-fieldset">
             <legend>2. Pick Learning Competencies &amp; Map Sessions 1–5</legend>
 
-            <div className="curriculum-filters">
-              <div className="field">
-                <label htmlFor={`${baseId}-f-grade`}>Grade</label>
-                <select
-                  id={`${baseId}-f-grade`}
-                  value={filterGrade}
-                  onChange={(e) =>
-                    setFilterGrade(
-                      e.target.value ? (Number(e.target.value) as GradeLevel) : "",
-                    )
-                  }
-                >
-                  <option value="">All Grades</option>
-                  {GRADE_LEVELS.map((g) => (
-                    <option key={g} value={g}>
-                      Grade {g}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor={`${baseId}-f-quarter`}>Quarter</label>
-                <select
-                  id={`${baseId}-f-quarter`}
-                  value={filterQuarter}
-                  onChange={(e) =>
-                    setFilterQuarter(
-                      e.target.value
-                        ? (Number(e.target.value) as QuarterNumber)
-                        : "",
-                    )
-                  }
-                >
-                  <option value="">All Quarters</option>
-                  {QUARTERS.map((q) => (
-                    <option key={q} value={q}>
-                      Quarter {q}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor={`${baseId}-f-comp`}>TLE Component</label>
-                <select
-                  id={`${baseId}-f-comp`}
-                  value={filterComponent}
-                  onChange={(e) =>
-                    setFilterComponent(
-                      (e.target.value as TleComponent | "") ?? "",
-                    )
-                  }
-                >
-                  <option value="">All Components</option>
-                  {TLE_COMPONENTS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor={`${baseId}-f-query`}>Search Competency</label>
-                <input
-                  id={`${baseId}-f-query`}
-                  type="search"
-                  value={filterQuery}
-                  onChange={(e) => setFilterQuery(e.target.value)}
-                  placeholder="Keyword or topic..."
-                />
-              </div>
-            </div>
-
-            <div className="field">
-              <label htmlFor={`${baseId}-pick-comp`}>
-                Learning Competency ({filteredCurriculum.length} matches)
-              </label>
-              <select
-                id={`${baseId}-pick-comp`}
-                value={pickedCompetencyId}
-                onChange={(e) => setPickedCompetencyId(e.target.value)}
-              >
-                {filteredCurriculum.length === 0 ? (
-                  <option value="">No matching competencies</option>
-                ) : (
-                  filteredCurriculum.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      [{item.component}] {item.contentTopic} —{" "}
-                      {item.learningCompetency}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
+            <CurriculumCompetencyPicker
+              baseId={baseId}
+              curriculum={curriculum}
+              pickedCompetencyId={pickedCompetencyId}
+              onPickCompetencyId={setPickedCompetencyId}
+            />
 
             <div className="actions-row">
               <button
@@ -1016,6 +829,17 @@ export function DllWorkspace() {
                           ? `(${session.components.join(", ")})`
                           : ""}
                     </h3>
+                    {session.mode === "instructional" && onDeriveDlp && (
+                      <button
+                        type="button"
+                        className="btn-secondary btn-compact"
+                        onClick={() =>
+                          onDeriveDlp(draftDll.id, session.sessionNumber)
+                        }
+                      >
+                        Derive DLP
+                      </button>
+                    )}
                   </div>
                   <div className="dll-session-fields">
                     {SESSION_ILAW_FIELDS.map((field) => (

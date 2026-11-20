@@ -359,4 +359,154 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     const missingRes = await fetch(`${baseUrl}/api/dlls/${encodeURIComponent(created.id)}`);
     expect(missingRes.status).toBe(404);
   });
+
+  it("serves DLP generation (scratch and derived), listing, inline editing, deletion, and .docx download over /api/dlps", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-dlp-"));
+    tempDirs.push(dataDir);
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "HTTP DLL Source",
+                references: "CG",
+                sessions: [1, 2, 3, 4, 5].map((n) => ({
+                  sessionNumber: n,
+                  learningObjectives: `DLL Obj ${n}`,
+                  preLesson: `Pre ${n}`,
+                  lessonFlow: `Flow ${n}`,
+                  learningResources: `Res ${n}`,
+                  integrationAndContextualization: `Int ${n}`,
+                  formativeAssessment: `Ass ${n}`,
+                  extendedLearningOpportunities: `Ext ${n}`,
+                })),
+              }),
+            };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "HTTP DLP Test",
+              references: "CG",
+              learningObjectives: "DLP Obj",
+              preLesson: { teacherActivity: "T Pre", studentActivity: "S Pre" },
+              lessonFlow: { teacherActivity: "T Flow", studentActivity: "S Flow" },
+              learningResources: { teacherActivity: "T Res", studentActivity: "S Res" },
+              integrationAndContextualization: {
+                teacherActivity: "T Int",
+                studentActivity: "S Int",
+              },
+              formativeAssessment: { teacherActivity: "T Ass", studentActivity: "S Ass" },
+              extendedLearningOpportunities: {
+                teacherActivity: "T Ext",
+                studentActivity: "S Ext",
+              },
+            }),
+          };
+        },
+      },
+    });
+    const middleware = createGuroMateMiddleware(engine);
+    const server = createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 404;
+        res.end("Not Found");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const emptyRes = await fetch(`${baseUrl}/api/dlps`);
+    expect(emptyRes.status).toBe(200);
+    expect(await emptyRes.json()).toEqual([]);
+
+    const badRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "scratch", gradeAndSection: "", competencyIds: [] }),
+    });
+    expect(badRes.status).toBe(400);
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const scratchRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "scratch",
+        gradeAndSection: "7-Rizal",
+        competencyIds: [ict.id],
+        promptNotes: "Lab note",
+      }),
+    });
+    expect(scratchRes.status).toBe(201);
+    const created = (await scratchRes.json()) as {
+      id: string;
+      lessonTitle: string;
+      preLesson: { teacherActivity: string; studentActivity: string };
+    };
+    expect(created.lessonTitle).toBe("HTTP DLP Test");
+    expect(created.preLesson.studentActivity).toBe("S Pre");
+
+    const dll = await engine.generateDll({
+      gradeAndSection: "7-Rizal",
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [ict.id],
+      })),
+    });
+    const deriveRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "derive",
+        dllId: dll.id,
+        sessionNumber: 2,
+      }),
+    });
+    expect(deriveRes.status).toBe(201);
+    const derived = (await deriveRes.json()) as {
+      sourceDllId: string;
+      sourceSessionNumber: number;
+      intentions: { learningObjectives: string };
+    };
+    expect(derived.sourceDllId).toBe(dll.id);
+    expect(derived.sourceSessionNumber).toBe(2);
+    expect(derived.intentions.learningObjectives).toBe("DLL Obj 2");
+
+    const getRes = await fetch(`${baseUrl}/api/dlps/${encodeURIComponent(created.id)}`);
+    expect(getRes.status).toBe(200);
+
+    const putRes = await fetch(`${baseUrl}/api/dlps/${encodeURIComponent(created.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...created,
+        lessonTitle: "HTTP DLP Updated",
+      }),
+    });
+    expect(putRes.status).toBe(200);
+    expect(await putRes.json()).toMatchObject({ lessonTitle: "HTTP DLP Updated" });
+
+    const docxRes = await fetch(`${baseUrl}/api/dlps/${encodeURIComponent(created.id)}/docx`);
+    expect(docxRes.status).toBe(200);
+    expect(docxRes.headers.get("content-type")).toContain(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    expect(docxRes.headers.get("content-disposition")).toContain(".docx");
+    const docxBytes = Buffer.from(await docxRes.arrayBuffer());
+    expect(docxBytes.subarray(0, 2).toString("ascii")).toBe("PK");
+
+    const delRes = await fetch(`${baseUrl}/api/dlps/${encodeURIComponent(created.id)}`, {
+      method: "DELETE",
+    });
+    expect(delRes.status).toBe(200);
+
+    const missingRes = await fetch(`${baseUrl}/api/dlps/${encodeURIComponent(created.id)}`);
+    expect(missingRes.status).toBe(404);
+  });
 });

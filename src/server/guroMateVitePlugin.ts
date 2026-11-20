@@ -8,6 +8,8 @@ import {
   CurriculumValidationError,
   DllNotFoundError,
   DllValidationError,
+  DlpNotFoundError,
+  DlpValidationError,
   SettingsValidationError,
   createGuroMateEngine,
 } from "../engine/createGuroMateEngine";
@@ -20,8 +22,10 @@ import {
   type CurriculumFilter,
   type CustomCompetencyInput,
   type DailyLessonLog,
+  type DailyLessonPlan,
   type DllSessionConfig,
   type GenerateDllInput,
+  type GenerateDlpInput,
   type GradeLevel,
   type GuroMateEngine,
   type QuarterNumber,
@@ -67,6 +71,16 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(data));
+}
+
+function sendDocx(res: ServerResponse, filename: string, buffer: Buffer): void {
+  res.statusCode = 200;
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.end(buffer);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -219,6 +233,37 @@ function parseGenerateDllBody(body: unknown): GenerateDllInput {
   };
 }
 
+function parseGenerateDlpBody(body: unknown): GenerateDlpInput {
+  if (!isRecord(body)) {
+    throw new HttpError(400, "DLP generation payload must be a JSON object.");
+  }
+  const optional = {
+    ...(typeof body.lessonTitle === "string" ? { lessonTitle: body.lessonTitle } : {}),
+    ...(typeof body.references === "string" ? { references: body.references } : {}),
+    ...(typeof body.promptNotes === "string" ? { promptNotes: body.promptNotes } : {}),
+  };
+  if (body.mode === "derive") {
+    if (typeof body.dllId !== "string" || !body.dllId.trim()) {
+      throw new HttpError(400, "dllId is required when deriving from a DLL Session.");
+    }
+    return {
+      mode: "derive",
+      dllId: body.dllId,
+      sessionNumber: Number(body.sessionNumber) as SessionNumber,
+      ...optional,
+    };
+  }
+  return {
+    mode: "scratch",
+    gradeAndSection:
+      typeof body.gradeAndSection === "string" ? body.gradeAndSection : "",
+    competencyIds: Array.isArray(body.competencyIds)
+      ? body.competencyIds.filter((s): s is string => typeof s === "string")
+      : [],
+    ...optional,
+  };
+}
+
 /** Creates the HTTP middleware exposing GuroMate Engine operations under `/api`. */
 export function createGuroMateMiddleware(
   engine: GuroMateEngine,
@@ -348,16 +393,7 @@ export function createGuroMateMiddleware(
       if (req.method === "GET" && dllDocxMatch) {
         const id = decodeURIComponent(dllDocxMatch[1]!);
         const { filename, buffer } = await engine.exportDllDocx(id);
-        res.statusCode = 200;
-        res.setHeader(
-          "Content-Type",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        );
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="${filename}"`,
-        );
-        res.end(buffer);
+        sendDocx(res, filename, buffer);
         return;
       }
 
@@ -387,6 +423,51 @@ export function createGuroMateMiddleware(
         }
       }
 
+      if (req.method === "GET" && urlPath === "/api/dlps") {
+        sendJson(res, 200, await engine.listDlps());
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/api/dlps/generate") {
+        const input = parseGenerateDlpBody(await readJsonBody(req));
+        sendJson(res, 201, await engine.generateDlp(input));
+        return;
+      }
+
+      const dlpDocxMatch = urlPath.match(/^\/api\/dlps\/([^/]+)\/docx$/);
+      if (req.method === "GET" && dlpDocxMatch) {
+        const id = decodeURIComponent(dlpDocxMatch[1]!);
+        const { filename, buffer } = await engine.exportDlpDocx(id);
+        sendDocx(res, filename, buffer);
+        return;
+      }
+
+      const dlpMatch = urlPath.match(/^\/api\/dlps\/([^/]+)$/);
+      if (dlpMatch) {
+        const id = decodeURIComponent(dlpMatch[1]!);
+        if (req.method === "GET") {
+          sendJson(res, 200, await engine.getDlp(id));
+          return;
+        }
+        if (req.method === "PUT") {
+          const body = await readJsonBody(req);
+          if (!isRecord(body)) {
+            throw new HttpError(400, "DLP payload must be a JSON object.");
+          }
+          const updated = await engine.saveDlp({
+            ...(body as unknown as DailyLessonPlan),
+            id,
+          });
+          sendJson(res, 200, updated);
+          return;
+        }
+        if (req.method === "DELETE") {
+          await engine.deleteDlp(id);
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+      }
+
       sendJson(res, 404, { error: `Unknown API route: ${req.method} ${urlPath}` });
     })().catch((err) => {
       if (err instanceof HttpError) {
@@ -397,7 +478,8 @@ export function createGuroMateMiddleware(
         err instanceof SettingsValidationError ||
         err instanceof CurriculumValidationError ||
         err instanceof ClassSectionValidationError ||
-        err instanceof DllValidationError
+        err instanceof DllValidationError ||
+        err instanceof DlpValidationError
       ) {
         sendJson(res, 400, { error: err.message });
         return;
@@ -405,7 +487,8 @@ export function createGuroMateMiddleware(
       if (
         err instanceof CurriculumNotFoundError ||
         err instanceof ClassSectionNotFoundError ||
-        err instanceof DllNotFoundError
+        err instanceof DllNotFoundError ||
+        err instanceof DlpNotFoundError
       ) {
         sendJson(res, 404, { error: err.message });
         return;

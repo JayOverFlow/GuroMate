@@ -1081,3 +1081,13 @@ button:disabled {
 .dll-markdown-view h4 {
   margin-block: 0.75rem 0.375rem;
 }
+
+.dlp-activity-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.dlp-derive-preview {
+  grid-column: 1 / -1;
+}

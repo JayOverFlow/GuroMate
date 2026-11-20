@@ -61,7 +61,7 @@ function buildParagraph(pPr: string, rPr: string, lineText: string): string {
   return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(lineText)}</w:t></w:r></w:p>`;
 }
 
-function replaceCellText(tcXml: string, text: string): string {
+export function replaceCellText(tcXml: string, text: string): string {
   const openEnd = tcXml.indexOf(">") + 1;
   const openTag = tcXml.slice(0, openEnd);
   const tcPr = extractFirstMatch(tcXml, /<w:tcPr\b[\s\S]*?<\/w:tcPr>/);
@@ -88,9 +88,15 @@ function mapSessionRow(
   );
 }
 
-function buildIntentionsStandardsCell(
+export interface IntentionsStandards {
+  learningCompetencies: string[];
+  contentStandards: string[];
+  performanceStandards: string[];
+}
+
+export function buildIntentionsStandardsCell(
   tcXml: string,
-  dll: DailyLessonLog,
+  intentions: IntentionsStandards,
 ): string {
   const openEnd = tcXml.indexOf(">") + 1;
   const openTag = tcXml.slice(0, openEnd);
@@ -104,15 +110,15 @@ function buildIntentionsStandardsCell(
   if (paragraphs.length < 10) {
     const combined = [
       "Learning Competency:",
-      ...dll.intentions.learningCompetencies.map((c) => `- ${c}`),
+      ...intentions.learningCompetencies.map((c) => `- ${c}`),
       "",
       "Content Standards:",
       "The learners should have knowledge and understanding of:",
-      ...dll.intentions.contentStandards.map((c) => `- ${c}`),
+      ...intentions.contentStandards.map((c) => `- ${c}`),
       "",
       "Performance Standards:",
       "By the end of the term, the learners are able to:",
-      ...dll.intentions.performanceStandards.map((c) => `- ${c}`),
+      ...intentions.performanceStandards.map((c) => `- ${c}`),
     ].join("\n");
     return replaceCellText(tcXml, combined);
   }
@@ -126,15 +132,15 @@ function buildIntentionsStandardsCell(
 
   const parts = [
     paragraphs[0]!,
-    bulletP(paragraphs[1]!, dll.intentions.learningCompetencies),
+    bulletP(paragraphs[1]!, intentions.learningCompetencies),
     paragraphs[2]!,
     paragraphs[3]!,
     paragraphs[4]!,
-    bulletP(paragraphs[5]!, dll.intentions.contentStandards),
+    bulletP(paragraphs[5]!, intentions.contentStandards),
     paragraphs[6]!,
     paragraphs[7]!,
     paragraphs[8]!,
-    bulletP(paragraphs[9]!, dll.intentions.performanceStandards),
+    bulletP(paragraphs[9]!, intentions.performanceStandards),
   ];
 
   return `${openTag}${tcPr}${parts.join("")}</w:tc>`;
@@ -171,19 +177,36 @@ function updateTableCells(
   return out;
 }
 
+export function applyTableUpdates(
+  documentXml: string,
+  tableUpdates: Array<Map<string, (tc: string) => string>>,
+  templateLabel: string,
+): string {
+  const tableSpans = findTopLevelTagSpans(documentXml, "w:tbl");
+  if (tableSpans.length < tableUpdates.length) {
+    throw new Error(
+      `Unexpected ${templateLabel} template layout: expected at least ${tableUpdates.length} tables, found ${tableSpans.length}.`,
+    );
+  }
+
+  let out = documentXml;
+  for (let ti = tableUpdates.length - 1; ti >= 0; ti--) {
+    const span = tableSpans[ti]!;
+    const updatedTable = updateTableCells(
+      out.slice(span.start, span.end),
+      tableUpdates[ti]!,
+    );
+    out = out.slice(0, span.start) + updatedTable + out.slice(span.end);
+  }
+  return out;
+}
+
 /** Injects Daily Lesson Log fields and Teacher Profile signatories into `word/document.xml`. */
 export function injectDllIntoDocumentXml(
   documentXml: string,
   dll: DailyLessonLog,
   profile: TeacherProfileSettings,
 ): string {
-  const tableSpans = findTopLevelTagSpans(documentXml, "w:tbl");
-  if (tableSpans.length < 7) {
-    throw new Error(
-      `Unexpected DLL template layout: expected at least 7 tables, found ${tableSpans.length}.`,
-    );
-  }
-
   const tableUpdates: Array<Map<string, (tc: string) => string>> = [
     // Table 0: Header metadata
     new Map([
@@ -198,7 +221,7 @@ export function injectDllIntoDocumentXml(
     ]),
     // Table 1: Intentions (Standards, per-session Learning Objectives, blank Learner Context)
     new Map([
-      ["1:1", (tc) => buildIntentionsStandardsCell(tc, dll)],
+      ["1:1", (tc) => buildIntentionsStandardsCell(tc, dll.intentions)],
       ...mapSessionRow(3, dll.sessions, (s) => s.learningObjectives),
       ["4:1", (tc) => replaceCellText(tc, "")],
     ]),
@@ -226,16 +249,7 @@ export function injectDllIntoDocumentXml(
     ]),
   ];
 
-  let out = documentXml;
-  for (let ti = tableUpdates.length - 1; ti >= 0; ti--) {
-    const span = tableSpans[ti]!;
-    const updatedTable = updateTableCells(
-      out.slice(span.start, span.end),
-      tableUpdates[ti]!,
-    );
-    out = out.slice(0, span.start) + updatedTable + out.slice(span.end);
-  }
-  return out;
+  return applyTableUpdates(documentXml, tableUpdates, "DLL");
 }
 
 /** Extracts plain text per table, row, and cell from `word/document.xml` for verification. */

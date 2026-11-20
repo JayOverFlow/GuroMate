@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import type { SessionNumber } from "./engine/types";
 import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
 import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
 import { DllWorkspace } from "./workspaces/DllWorkspace";
+import { DlpWorkspace, type DeriveDlpTarget } from "./workspaces/DlpWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
 type WorkspaceId =
@@ -66,6 +68,7 @@ export function App() {
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(
     () => parseWorkspaceFromHash() ?? "settings",
   );
+  const [deriveTarget, setDeriveTarget] = useState<DeriveDlpTarget | null>(null);
   const [isWide, setIsWide] = useState(false);
 
   const headerRef = useRef<HTMLElement>(null);
@@ -162,6 +165,12 @@ export function App() {
     }
   }
 
+  function handleDeriveDlp(dllId: string, sessionNumber: SessionNumber) {
+    setDeriveTarget({ dllId, sessionNumber });
+    setActiveWorkspace("dlp");
+    window.location.hash = "dlp";
+  }
+
   return (
     <>
       <header ref={headerRef} className={`site-header${isWide ? " is-wide" : ""}`}>
@@ -226,7 +235,12 @@ export function App() {
 
       <main id="main-content" className="app-main">
         {activeWorkspace === "dll" ? (
-          <DllWorkspace />
+          <DllWorkspace onDeriveDlp={handleDeriveDlp} />
+        ) : activeWorkspace === "dlp" ? (
+          <DlpWorkspace
+            initialDeriveTarget={deriveTarget}
+            onConsumeDeriveTarget={() => setDeriveTarget(null)}
+          />
         ) : activeWorkspace === "settings" ? (
           <SettingsWorkspace />
         ) : activeWorkspace === "curriculum" ? (
