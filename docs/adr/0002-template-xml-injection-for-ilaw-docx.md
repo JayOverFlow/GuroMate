@@ -1,0 +1,3 @@
+# Direct XML Cell Injection into Official ILAW DOCX Templates
+
+We generate Daily Lesson Log (DLL) and Daily Lesson Plan (DLP) `.docx` files by cloning the official [DLL_ILAW_template.docx](../../DLL_ILAW_template.docx) and [DLP_ILAW_template.docx](../../DLP_ILAW_template.docx) archives and injecting structured ILAW field values directly into their target table cells in `word/document.xml`, intentionally leaving the **Learner Context** and **Reflections** cells blank for manual completion. This guarantees exact fidelity with the institution's required table layout, left-column pedagogical prompts, borders, and signatory blocks, which generic Markdown-to-DOCX conversion cannot preserve.
