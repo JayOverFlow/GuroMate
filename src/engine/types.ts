@@ -132,6 +132,71 @@ export interface ClassSectionInput {
   students: string[];
 }
 
+export const SESSION_NUMBERS = [1, 2, 3, 4, 5] as const;
+export type SessionNumber = (typeof SESSION_NUMBERS)[number];
+
+export interface DllSessionConfig {
+  sessionNumber: SessionNumber;
+  mode: "instructional" | "non-instructional";
+  competencyIds: string[];
+  nonInstructionalReason?: string;
+}
+
+export interface DllSessionPlan {
+  sessionNumber: SessionNumber;
+  mode: "instructional" | "non-instructional";
+  competencyIds: string[];
+  components: TleComponent[];
+  nonInstructionalReason?: string;
+  learningObjectives: string;
+  preLesson: string;
+  lessonFlow: string;
+  learningResources: string;
+  integrationAndContextualization: string;
+  formativeAssessment: string;
+  extendedLearningOpportunities: string;
+  reflections: string;
+}
+
+export interface DllIntentions {
+  learningCompetencies: string[];
+  contentStandards: string[];
+  performanceStandards: string[];
+  learnerContext: string;
+}
+
+export interface DailyLessonLog {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  lessonTitle: string;
+  learningAreas: string;
+  gradeAndSection: string;
+  references: string;
+  promptNotes: string;
+  intentions: DllIntentions;
+  sessions: [
+    DllSessionPlan,
+    DllSessionPlan,
+    DllSessionPlan,
+    DllSessionPlan,
+    DllSessionPlan,
+  ];
+}
+
+export interface GenerateDllInput {
+  lessonTitle?: string;
+  gradeAndSection: string;
+  references?: string;
+  promptNotes?: string;
+  sessions: DllSessionConfig[];
+}
+
+export interface DllDocxExport {
+  filename: string;
+  buffer: Buffer;
+}
+
 export interface GuroMateEngine {
   readonly dataDir: string;
   readonly templatesDir: string;
@@ -152,4 +217,11 @@ export interface GuroMateEngine {
   listClassSections(): Promise<ClassSection[]>;
   saveClassSection(input: ClassSectionInput): Promise<ClassSection>;
   deleteClassSection(id: string): Promise<void>;
+  listDlls(): Promise<DailyLessonLog[]>;
+  getDll(id: string): Promise<DailyLessonLog>;
+  generateDll(input: GenerateDllInput): Promise<DailyLessonLog>;
+  saveDll(dll: DailyLessonLog): Promise<DailyLessonLog>;
+  deleteDll(id: string): Promise<void>;
+  renderDllMarkdown(dll: DailyLessonLog): string;
+  exportDllDocx(id: string): Promise<DllDocxExport>;
 }
