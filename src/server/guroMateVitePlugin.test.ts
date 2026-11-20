@@ -94,4 +94,92 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     });
     expect(badJsonRes.status).toBe(400);
   });
+
+  it("serves curriculum catalog filtering, custom competency CRUD, and BoW note persistence over /api/curriculum", async () => {
+    const baseUrl = await startTestServer();
+
+    const listRes = await fetch(
+      `${baseUrl}/api/curriculum?gradeLevel=7&quarter=1&component=ICT`,
+    );
+    expect(listRes.status).toBe(200);
+    const items = (await listRes.json()) as Array<{ id: string }>;
+    expect(items).toHaveLength(9);
+
+    const termRes = await fetch(
+      `${baseUrl}/api/curriculum?gradeLevel=7&component=ICT&term=${encodeURIComponent("Second Term")}`,
+    );
+    expect(termRes.status).toBe(200);
+    const termItems = (await termRes.json()) as Array<{ id: string }>;
+    expect(termItems).toHaveLength(3);
+
+    const badFilterRes = await fetch(
+      `${baseUrl}/api/curriculum?gradeLevel=11`,
+    );
+    expect(badFilterRes.status).toBe(400);
+
+    const createRes = await fetch(`${baseUrl}/api/curriculum/custom`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeLevels: [9, 10],
+        quarters: [1, 3],
+        component: "ICT",
+        sector: "COMPUTER PROGRAMMING",
+        contentTopic: "Git Basics",
+        contentStandard: "The learners demonstrate understanding of version control.",
+        performanceStandard: "The learners manage source revisions.",
+        learningCompetency: "commit changes cleanly to a local repository",
+      }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string; source: string };
+    expect(created.source).toBe("custom");
+
+    const noteRes = await fetch(
+      `${baseUrl}/api/curriculum/${encodeURIComponent("cg-g7-ict-q1-01")}/notes`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customNotes: "Use local ICT sector chart." }),
+      },
+    );
+    expect(noteRes.status).toBe(200);
+    const noted = (await noteRes.json()) as { customNotes?: string };
+    expect(noted.customNotes).toBe("Use local ICT sector chart.");
+
+    const updateRes = await fetch(
+      `${baseUrl}/api/curriculum/custom/${encodeURIComponent(created.id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gradeLevels: [9, 10],
+          quarters: [1, 3],
+          component: "ICT",
+          sector: "COMPUTER PROGRAMMING",
+          contentTopic: "Git Basics",
+          contentStandard: "The learners demonstrate understanding of version control.",
+          performanceStandard: "The learners manage source revisions.",
+          learningCompetency: "stage and commit changes to a local repository",
+        }),
+      },
+    );
+    expect(updateRes.status).toBe(200);
+
+    const delRes = await fetch(
+      `${baseUrl}/api/curriculum/custom/${encodeURIComponent(created.id)}`,
+      { method: "DELETE" },
+    );
+    expect(delRes.status).toBe(200);
+
+    const missingNoteRes = await fetch(
+      `${baseUrl}/api/curriculum/does-not-exist/notes`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customNotes: "x" }),
+      },
+    );
+    expect(missingNoteRes.status).toBe(404);
+  });
 });

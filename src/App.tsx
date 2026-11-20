@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
 type WorkspaceId =
@@ -224,6 +225,8 @@ export function App() {
       <main id="main-content" className="app-main">
         {activeWorkspace === "settings" ? (
           <SettingsWorkspace />
+        ) : activeWorkspace === "curriculum" ? (
+          <CurriculumWorkspace />
         ) : (
           <section className="card" aria-labelledby="workspace-heading">
             <div className="workspace-header">
