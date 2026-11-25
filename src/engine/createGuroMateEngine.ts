@@ -14,6 +14,7 @@ import {
   resolveDllSessions,
 } from "./dll";
 import {
+  DLP_SYSTEM_INSTRUCTION,
   DlpNotFoundError,
   DlpValidationError,
   buildDlpPrompt,
@@ -843,6 +844,7 @@ export function createGuroMateEngine(
     });
     const settings = await getSettings();
     const aiResult = await aiAdapter.generateText({
+      systemInstruction: DLP_SYSTEM_INSTRUCTION,
       prompt,
       settings: settings.ai,
     });
