@@ -13,6 +13,13 @@ export interface TeacherProfileSettings {
   aiDeclaration: string;
 }
 
+export interface AiModelOption {
+  id: string;
+  label: string;
+  isFree?: boolean;
+  freeBadge?: string;
+}
+
 export interface AiProviderSettings {
   aiProvider: AiProviderType;
   apiKey: string;
