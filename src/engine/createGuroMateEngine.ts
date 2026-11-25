@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import rawCatalog from "./curriculumCatalog.json";
 import {
+  DLL_SYSTEM_INSTRUCTION,
   DllNotFoundError,
   DllValidationError,
   assembleGeneratedSessions,
@@ -13,6 +14,7 @@ import {
   resolveDllSessions,
 } from "./dll";
 import {
+  DLP_SYSTEM_INSTRUCTION,
   DlpNotFoundError,
   DlpValidationError,
   buildDlpPrompt,
@@ -40,7 +42,11 @@ import {
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
 import { createLiveAiAdapter } from "./liveAiAdapter";
-import { AI_PROVIDER_MAP } from "./providers";
+import {
+  AI_PROVIDER_MAP,
+  getCuratedModels,
+  sortModelsFreeFirst,
+} from "./providers";
 import { buildQuizDocxBuffer } from "./quizDocx";
 import { readZipEntry, replaceZipEntry } from "./zip";
 import {
@@ -48,6 +54,7 @@ import {
   QUARTERS,
   TLE_COMPONENTS,
   type AiConnectionCheckResult,
+  type AiModelListResult,
   type AiProviderSettings,
   type BudgetOfWorkInfo,
   type ClassSection,
@@ -480,6 +487,73 @@ export function createGuroMateEngine(
     }
   }
 
+  async function listAiModels(
+    aiOverride?: Partial<AiProviderSettings>,
+  ): Promise<AiModelListResult> {
+    const curatedFallback = (
+      provider: AiProviderSettings["aiProvider"],
+      detail: string,
+    ): AiModelListResult => ({
+      models: getCuratedModels(provider),
+      source: "curated",
+      message: `${detail} Showing curated presets.`,
+    });
+
+    const current = await getSettings();
+    let settings: AiProviderSettings;
+    try {
+      settings = aiOverride
+        ? normalizeAiSettings(current.ai, aiOverride)
+        : current.ai;
+    } catch (err) {
+      const fallbackProvider =
+        aiOverride?.aiProvider && AI_PROVIDER_MAP.has(aiOverride.aiProvider)
+          ? aiOverride.aiProvider
+          : current.ai.aiProvider;
+      const reason = err instanceof Error ? err.message : String(err);
+      return curatedFallback(fallbackProvider, reason);
+    }
+
+    const providerMeta = AI_PROVIDER_MAP.get(settings.aiProvider);
+    const providerLabel = providerMeta?.label ?? settings.aiProvider;
+
+    if (providerMeta?.requiresKey && !settings.apiKey) {
+      return curatedFallback(
+        settings.aiProvider,
+        `API key is required for ${providerLabel}.`,
+      );
+    }
+
+    if (!aiAdapter.listModels) {
+      return curatedFallback(
+        settings.aiProvider,
+        "Live model discovery is unavailable.",
+      );
+    }
+
+    try {
+      const liveModels = await aiAdapter.listModels(settings);
+      if (liveModels.length === 0) {
+        return curatedFallback(
+          settings.aiProvider,
+          `No models returned by ${providerLabel}.`,
+        );
+      }
+      const sorted = sortModelsFreeFirst(liveModels);
+      return {
+        models: sorted,
+        source: "live",
+        message: `Loaded ${sorted.length} live model${sorted.length === 1 ? "" : "s"} from ${providerLabel}.`,
+      };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return curatedFallback(
+        settings.aiProvider,
+        `Could not fetch live models (${reason}).`,
+      );
+    }
+  }
+
   async function listCurriculum(
     filter?: CurriculumFilter,
   ): Promise<CurriculumCompetency[]> {
@@ -725,6 +799,7 @@ export function createGuroMateEngine(
 
     const settings = await getSettings();
     const aiResult = await aiAdapter.generateText({
+      systemInstruction: DLL_SYSTEM_INSTRUCTION,
       prompt,
       settings: settings.ai,
     });
@@ -841,6 +916,7 @@ export function createGuroMateEngine(
     });
     const settings = await getSettings();
     const aiResult = await aiAdapter.generateText({
+      systemInstruction: DLP_SYSTEM_INSTRUCTION,
       prompt,
       settings: settings.ai,
     });
@@ -1029,6 +1105,7 @@ export function createGuroMateEngine(
     getSettings,
     saveSettings,
     testAiConnection,
+    listAiModels,
     listCurriculum,
     saveCustomCompetency,
     saveCompetencyNotes,

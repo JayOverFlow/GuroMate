@@ -265,6 +265,222 @@ describe("createGuroMateEngine", () => {
     ]);
   });
 
+  it("lists live AI models with free-first sorting and falls back to curated presets on missing credentials or errors", async () => {
+    const dataDir = await makeTempDir();
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText() {
+        return { text: "OK" };
+      },
+      async listModels(settings) {
+        if (settings.baseUrl.includes("offline.example")) {
+          throw new Error("ECONNREFUSED");
+        }
+        return [
+          { id: "paid/model-a", label: "Paid Model A" },
+          {
+            id: "free/model-b:free",
+            label: "Free Model B",
+            isFree: true,
+            freeBadge: "Free",
+          },
+        ];
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    // Missing required API key -> curated fallback
+    const missingKey = await engine.listAiModels({
+      aiProvider: "openrouter",
+      apiKey: "",
+      baseUrl: "https://openrouter.ai/api/v1",
+    });
+    expect(missingKey.source).toBe("curated");
+    expect(missingKey.models.length).toBeGreaterThan(0);
+    expect(missingKey.message).toMatch(/api key is required/i);
+
+    // Live success -> free-first sorted
+    const live = await engine.listAiModels({
+      aiProvider: "openrouter",
+      apiKey: "or-key",
+      baseUrl: "https://openrouter.ai/api/v1",
+    });
+    expect(live.source).toBe("live");
+    expect(live.models.map((m) => m.id)).toEqual([
+      "free/model-b:free",
+      "paid/model-a",
+    ]);
+
+    // Network/provider failure -> curated fallback
+    const offline = await engine.listAiModels({
+      aiProvider: "openrouter",
+      apiKey: "or-key",
+      baseUrl: "https://offline.example/v1",
+    });
+    expect(offline.source).toBe("curated");
+    expect(offline.models.length).toBeGreaterThan(0);
+    expect(offline.message).toContain("ECONNREFUSED");
+
+    // Local Ollama without API key -> live success
+    const ollama = await engine.listAiModels({
+      aiProvider: "ollama",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+    });
+    expect(ollama.source).toBe("live");
+  });
+
+  it("sends native system-role payloads across all five providers when systemInstruction is provided and omits them otherwise", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+
+    const stubFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      calls.push({ url, body });
+
+      if (url.includes(":generateContent")) {
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: "OK" }] } }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/messages")) {
+        return new Response(
+          JSON.stringify({
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "OK" }],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          model: "test-model",
+          choices: [{ message: { content: "OK" } }],
+        }),
+        { status: 200 },
+      );
+    };
+
+    const adapter = createLiveAiAdapter(stubFetch);
+    const sys = "Follow the DepEd MATATAG ILAW Framework.";
+
+    await adapter.generateText({
+      systemInstruction: sys,
+      prompt: "User prompt",
+      settings: {
+        aiProvider: "gemini",
+        apiKey: "gem-key",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        modelId: "gemini-2.5-flash",
+      },
+    });
+    await adapter.generateText({
+      systemInstruction: sys,
+      prompt: "User prompt",
+      settings: {
+        aiProvider: "anthropic",
+        apiKey: "ant-key",
+        baseUrl: "https://api.anthropic.com/v1",
+        modelId: "claude-sonnet-4-5",
+      },
+    });
+    await adapter.generateText({
+      systemInstruction: sys,
+      prompt: "User prompt",
+      settings: {
+        aiProvider: "openai-compatible",
+        apiKey: "sk-key",
+        baseUrl: "https://api.openai.com/v1",
+        modelId: "gpt-4o-mini",
+      },
+    });
+    await adapter.generateText({
+      systemInstruction: sys,
+      prompt: "User prompt",
+      settings: {
+        aiProvider: "openrouter",
+        apiKey: "or-key",
+        baseUrl: "https://openrouter.ai/api/v1",
+        modelId: "google/gemini-2.5-flash",
+      },
+    });
+    await adapter.generateText({
+      systemInstruction: sys,
+      prompt: "User prompt",
+      settings: {
+        aiProvider: "ollama",
+        apiKey: "",
+        baseUrl: "http://localhost:11434/v1",
+        modelId: "llama3.2",
+      },
+    });
+
+    // Without systemInstruction (and whitespace-only)
+    await adapter.generateText({
+      prompt: "Plain Gemini",
+      settings: {
+        aiProvider: "gemini",
+        apiKey: "gem-key",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        modelId: "gemini-2.5-flash",
+      },
+    });
+    await adapter.generateText({
+      systemInstruction: "   ",
+      prompt: "Plain Anthropic",
+      settings: {
+        aiProvider: "anthropic",
+        apiKey: "ant-key",
+        baseUrl: "https://api.anthropic.com/v1",
+        modelId: "claude-sonnet-4-5",
+      },
+    });
+    await adapter.generateText({
+      prompt: "Plain OpenAI",
+      settings: {
+        aiProvider: "openai-compatible",
+        apiKey: "sk-key",
+        baseUrl: "https://api.openai.com/v1",
+        modelId: "gpt-4o-mini",
+      },
+    });
+
+    // 0: Gemini with systemInstruction
+    expect(calls[0]!.body).toEqual({
+      systemInstruction: { parts: [{ text: sys }] },
+      contents: [{ role: "user", parts: [{ text: "User prompt" }] }],
+    });
+
+    // 1: Anthropic with system + large max_tokens for 5-session plans
+    expect(calls[1]!.body.system).toBe(sys);
+    expect(calls[1]!.body.max_tokens).toBeGreaterThanOrEqual(4096);
+    expect(calls[1]!.body.messages).toEqual([
+      { role: "user", content: "User prompt" },
+    ]);
+
+    // 2, 3, 4: OpenAI-Compatible, OpenRouter, Ollama with system message first
+    for (const idx of [2, 3, 4]) {
+      expect(calls[idx]!.body.messages).toEqual([
+        { role: "system", content: sys },
+        { role: "user", content: "User prompt" },
+      ]);
+    }
+
+    // 5, 6, 7: Omitted when absent or whitespace-only
+    expect(calls[5]!.body).not.toHaveProperty("systemInstruction");
+    expect(calls[6]!.body).not.toHaveProperty("system");
+    expect(calls[7]!.body.messages).toEqual([
+      { role: "user", content: "Plain OpenAI" },
+    ]);
+  });
+
   it("lists and filters Grades 7-10 MATATAG TLE Curriculum Guide competencies across components, quarters, sectors, and search queries", async () => {
     const dataDir = await makeTempDir();
     const engine = createGuroMateEngine({

@@ -13,6 +13,13 @@ export interface TeacherProfileSettings {
   aiDeclaration: string;
 }
 
+export interface AiModelOption {
+  id: string;
+  label: string;
+  isFree?: boolean;
+  freeBadge?: string;
+}
+
 export interface AiProviderSettings {
   aiProvider: AiProviderType;
   apiKey: string;
@@ -27,6 +34,7 @@ export interface GuroMateSettings {
 
 export interface AiGenerateRequest {
   prompt: string;
+  systemInstruction?: string;
   settings: AiProviderSettings;
 }
 
@@ -35,8 +43,15 @@ export interface AiGenerateResult {
   model?: string;
 }
 
+export interface AiModelListResult {
+  models: AiModelOption[];
+  source: "live" | "curated";
+  message?: string;
+}
+
 export interface AiProviderAdapter {
   generateText(request: AiGenerateRequest): Promise<AiGenerateResult>;
+  listModels?(settings: AiProviderSettings): Promise<AiModelOption[]>;
 }
 
 export interface AiConnectionCheckResult {
@@ -333,6 +348,9 @@ export interface GuroMateEngine {
   testAiConnection(
     aiOverride?: Partial<AiProviderSettings>,
   ): Promise<AiConnectionCheckResult>;
+  listAiModels(
+    aiOverride?: Partial<AiProviderSettings>,
+  ): Promise<AiModelListResult>;
   listCurriculum(filter?: CurriculumFilter): Promise<CurriculumCompetency[]>;
   saveCustomCompetency(
     input: CustomCompetencyInput,

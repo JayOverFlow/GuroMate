@@ -1,7 +1,8 @@
 import { useId } from "react";
-import { AI_PROVIDERS } from "../engine/providers";
+import { AI_PROVIDERS, formatModelOptionLabel } from "../engine/providers";
 import type { GuroMateSettings } from "../engine/types";
 import {
+  CUSTOM_MODEL_OPTION,
   SIGNATORY_FIELDS,
   useSettingsWorkspace,
 } from "../hooks/useSettingsWorkspace";
@@ -20,17 +21,22 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
     loadError,
     saving,
     checking,
+    refreshingModels,
     showApiKey,
     setShowApiKey,
+    isCustomModel,
+    availableModels,
     status,
     invalidFields,
     activeProvider,
     syncFieldValidity,
     updateProfileField,
     updateProvider,
+    selectModelOption,
     updateAiField,
     handleSave,
     handleCheckConnection,
+    handleRefreshModels,
   } = useSettingsWorkspace(onSettingsSaved);
 
   if (loadError) {
@@ -318,41 +324,114 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                 id={`${baseId}-modelId-hint`}
                 className="font-body text-body-sm text-on-surface-variant"
               >
-                Example:{" "}
-                <code className="font-mono text-mono-md">
-                  {activeProvider.modelExample}
-                </code>
-              </span>
-              <input
-                id={`${baseId}-modelId`}
-                name="modelId"
-                type="text"
-                required
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                value={settings.ai.modelId}
-                className={inputClass("modelId", true)}
-                aria-invalid={invalidFields.modelId ? "true" : "false"}
-                aria-describedby={describedBy(
-                  `${baseId}-modelId-hint`,
-                  `${baseId}-modelId-err`,
-                  "modelId",
+                {isCustomModel ? (
+                  <>
+                    Example:{" "}
+                    <code className="font-mono text-mono-md">
+                      {activeProvider.modelExample}
+                    </code>
+                  </>
+                ) : settings.ai.modelId ? (
+                  <>
+                    Selected:{" "}
+                    <code className="font-mono text-mono-md">
+                      {settings.ai.modelId}
+                    </code>
+                  </>
+                ) : (
+                  `Choose a model for ${activeProvider.label} or enter a custom ID.`
                 )}
-                onChange={(e) => {
-                  updateAiField("modelId", e.target.value);
-                  if (invalidFields.modelId) {
-                    syncFieldValidity(e.currentTarget);
+              </span>
+              <div className="flex gap-gutter-sm">
+                <select
+                  id={`${baseId}-modelId`}
+                  name={isCustomModel ? "modelPreset" : "modelId"}
+                  required={!isCustomModel}
+                  value={
+                    isCustomModel ? CUSTOM_MODEL_OPTION : settings.ai.modelId
                   }
-                }}
-                onBlur={(e) => syncFieldValidity(e.currentTarget)}
-              />
+                  className={`${inputClass(isCustomModel ? "modelPreset" : "modelId")} flex-1 min-w-0`}
+                  aria-invalid={
+                    !isCustomModel && invalidFields.modelId ? "true" : "false"
+                  }
+                  aria-describedby={
+                    isCustomModel
+                      ? `${baseId}-modelId-hint`
+                      : describedBy(
+                          `${baseId}-modelId-hint`,
+                          `${baseId}-modelId-err`,
+                          "modelId",
+                        )
+                  }
+                  onChange={(e) => selectModelOption(e.target.value)}
+                  onBlur={(e) => {
+                    if (!isCustomModel) syncFieldValidity(e.currentTarget);
+                  }}
+                >
+                  <option value="" disabled>
+                    Select a model...
+                  </option>
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {formatModelOptionLabel(model)}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_MODEL_OPTION}>Custom model ID...</option>
+                </select>
+                <button
+                  type="button"
+                  disabled={refreshingModels}
+                  onClick={() => void handleRefreshModels()}
+                  className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    refresh
+                  </span>
+                  <span>
+                    {refreshingModels ? "Refreshing..." : "Refresh Models"}
+                  </span>
+                </button>
+              </div>
+              {isCustomModel && (
+                <input
+                  id={`${baseId}-customModelId`}
+                  name="modelId"
+                  type="text"
+                  required
+                  placeholder={activeProvider.modelExample}
+                  aria-label="Custom Model ID"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={settings.ai.modelId}
+                  className={inputClass("modelId", true)}
+                  aria-invalid={invalidFields.modelId ? "true" : "false"}
+                  aria-describedby={describedBy(
+                    `${baseId}-modelId-hint`,
+                    `${baseId}-modelId-err`,
+                    "modelId",
+                  )}
+                  onChange={(e) => {
+                    updateAiField("modelId", e.target.value);
+                    if (invalidFields.modelId) {
+                      syncFieldValidity(e.currentTarget);
+                    }
+                  }}
+                  onBlur={(e) => syncFieldValidity(e.currentTarget)}
+                />
+              )}
               {invalidFields.modelId && (
                 <div
                   id={`${baseId}-modelId-err`}
                   className="font-body text-body-sm text-error"
                 >
-                  Error: Enter a model ID.
+                  Error:{" "}
+                  {isCustomModel
+                    ? "Enter a custom model ID."
+                    : "Select a model ID."}
                 </div>
               )}
             </div>

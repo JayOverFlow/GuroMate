@@ -158,6 +158,21 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(sentPrompt).toContain(fcsComp.contentTopic);
     expect(sentPrompt).toContain(ictComp.budgetOfWork!.suggestedActivities);
 
+    const systemInstruction = requests[0]!.systemInstruction ?? "";
+    expect(systemInstruction).toContain("ILAW Framework");
+    expect(systemInstruction).toMatch(/4As.*5Es.*DepEd DO 42/i);
+    expect(systemInstruction).toMatch(/OSH|PPE/i);
+    expect(systemInstruction).toMatch(/Budget of Work/i);
+    expect(systemInstruction).toMatch(/3.*SMART/i);
+    expect(systemInstruction).toMatch(/Cognitive.*Psychomotor.*Affective/i);
+    expect(systemInstruction).toContain("• ");
+    expect(systemInstruction).toContain("Pre-lesson activity:");
+    expect(systemInstruction).toMatch(/N\/A/);
+    expect(systemInstruction).toMatch(/5-item multiple-choice quiz/i);
+    expect(systemInstruction).toContain("Prompt Notes");
+    expect(systemInstruction).toContain("Learner Context");
+    expect(systemInstruction).toContain("Reflections");
+
     const engine2 = createGuroMateEngine({
       dataDir,
       templatesDir: process.cwd(),

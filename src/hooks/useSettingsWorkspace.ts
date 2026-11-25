@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AI_PROVIDERS, AI_PROVIDER_MAP } from "../engine/providers";
+import {
+  AI_PROVIDERS,
+  AI_PROVIDER_MAP,
+  getCuratedModels,
+  isCustomModelId,
+  resolveModelIdOnProviderChange,
+} from "../engine/providers";
 import type {
   AiConnectionCheckResult,
+  AiModelListResult,
+  AiModelOption,
   AiProviderType,
   GuroMateSettings,
 } from "../engine/types";
+
+export const CUSTOM_MODEL_OPTION = "__custom__";
 
 const DEFAULT_BASE_URL_SET = new Set(
   AI_PROVIDERS.map((option) => option.defaultBaseUrl),
@@ -63,7 +73,10 @@ export function useSettingsWorkspace(
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const [liveModels, setLiveModels] = useState<AiModelOption[] | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [isCustomModel, setIsCustomModel] = useState(false);
   const [status, setStatus] = useState<SettingsStatusState | null>(null);
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>(
     {},
@@ -77,7 +90,12 @@ export function useSettingsWorkspace(
         return (await res.json()) as GuroMateSettings;
       })
       .then((data) => {
-        if (active) setSettings(data);
+        if (active) {
+          setSettings(data);
+          setIsCustomModel(
+            isCustomModelId(data.ai.aiProvider, data.ai.modelId),
+          );
+        }
       })
       .catch((err) => {
         if (active) {
@@ -90,7 +108,7 @@ export function useSettingsWorkspace(
   }, []);
 
   function syncFieldValidity(
-    el: HTMLInputElement | HTMLTextAreaElement,
+    el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
   ): void {
     const fieldName = el.name;
     const isInvalid = !el.validity.valid;
@@ -110,22 +128,51 @@ export function useSettingsWorkspace(
 
   function updateProvider(nextProvider: AiProviderType): void {
     const option = AI_PROVIDER_MAP.get(nextProvider);
-    if (!option) return;
+    if (!option || !settings) return;
 
-    setSettings((prev) => {
-      if (!prev) return prev;
-      const currentUrl = prev.ai.baseUrl.trim();
-      const shouldSwapUrl = !currentUrl || DEFAULT_BASE_URL_SET.has(currentUrl);
-      return {
-        ...prev,
-        ai: {
-          ...prev.ai,
-          aiProvider: nextProvider,
-          baseUrl: shouldSwapUrl ? option.defaultBaseUrl : prev.ai.baseUrl,
-        },
-      };
-    });
-    setInvalidFields((prev) => ({ ...prev, apiKey: false }));
+    const currentUrl = settings.ai.baseUrl.trim();
+    const shouldSwapUrl = !currentUrl || DEFAULT_BASE_URL_SET.has(currentUrl);
+    const nextModelId = resolveModelIdOnProviderChange(
+      settings.ai.modelId,
+      nextProvider,
+      liveModels?.map((m) => m.id),
+    );
+
+    setSettings((prev) =>
+      prev
+        ? {
+            ...prev,
+            ai: {
+              ...prev.ai,
+              aiProvider: nextProvider,
+              baseUrl: shouldSwapUrl ? option.defaultBaseUrl : prev.ai.baseUrl,
+              modelId: nextModelId,
+            },
+          }
+        : prev,
+    );
+    setLiveModels(null);
+    setIsCustomModel(isCustomModelId(nextProvider, nextModelId));
+    setInvalidFields((prev) => ({ ...prev, apiKey: false, modelId: false }));
+  }
+
+  function selectModelOption(value: string): void {
+    if (!settings) return;
+    if (value === CUSTOM_MODEL_OPTION) {
+      setIsCustomModel(true);
+      const trimmed = settings.ai.modelId.trim();
+      if (trimmed && availableModels.some((m) => m.id === trimmed)) {
+        updateAiField("modelId", "");
+      }
+      setInvalidFields((prev) => ({ ...prev, modelId: false }));
+      return;
+    }
+
+    setIsCustomModel(false);
+    updateAiField("modelId", value);
+    if (value.trim()) {
+      setInvalidFields((prev) => ({ ...prev, modelId: false }));
+    }
   }
 
   function updateAiField(
@@ -148,7 +195,8 @@ export function useSettingsWorkspace(
       for (const control of Array.from(form.elements)) {
         if (
           control instanceof HTMLInputElement ||
-          control instanceof HTMLTextAreaElement
+          control instanceof HTMLTextAreaElement ||
+          control instanceof HTMLSelectElement
         ) {
           if (!control.validity.valid) {
             nextInvalid[control.name] = true;
@@ -222,9 +270,58 @@ export function useSettingsWorkspace(
     }
   }
 
+  async function handleRefreshModels(): Promise<void> {
+    if (!settings) return;
+    setRefreshingModels(true);
+    setStatus(null);
+    try {
+      const res = await fetch("/api/settings/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ai: settings.ai }),
+      });
+      if (!res.ok) {
+        throw new Error(await readErrorMessage(res));
+      }
+      const result = (await res.json()) as AiModelListResult;
+      const nextModels =
+        result.source === "live"
+          ? result.models
+          : getCuratedModels(settings.ai.aiProvider);
+      setLiveModels(result.source === "live" ? result.models : null);
+
+      const trimmedId = settings.ai.modelId.trim();
+      setIsCustomModel(
+        Boolean(trimmedId) && !nextModels.some((m) => m.id === trimmedId),
+      );
+
+      setStatus({
+        tone: result.source === "live" ? "success" : "error",
+        text:
+          result.message ??
+          (result.source === "live"
+            ? `Loaded ${result.models.length} live models.`
+            : "Showing curated presets."),
+      });
+    } catch (err) {
+      setLiveModels(null);
+      setIsCustomModel(
+        isCustomModelId(settings.ai.aiProvider, settings.ai.modelId),
+      );
+      setStatus({
+        tone: "error",
+        text: `Error: ${err instanceof Error ? err.message : String(err)} Showing curated presets.`,
+      });
+    } finally {
+      setRefreshingModels(false);
+    }
+  }
+
   const activeProvider = settings
     ? (AI_PROVIDER_MAP.get(settings.ai.aiProvider) ?? AI_PROVIDERS[0]!)
     : AI_PROVIDERS[0]!;
+  const curatedModels = getCuratedModels(activeProvider.value);
+  const availableModels = liveModels ?? curatedModels;
 
   return {
     formRef,
@@ -232,16 +329,21 @@ export function useSettingsWorkspace(
     loadError,
     saving,
     checking,
+    refreshingModels,
     showApiKey,
     setShowApiKey,
+    isCustomModel,
+    availableModels,
     status,
     invalidFields,
     activeProvider,
     syncFieldValidity,
     updateProfileField,
     updateProvider,
+    selectModelOption,
     updateAiField,
     handleSave,
     handleCheckConnection,
+    handleRefreshModels,
   };
 }

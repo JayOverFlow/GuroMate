@@ -127,6 +127,22 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(requests[0]!.prompt).toContain(comp1.learningCompetency);
     expect(requests[0]!.prompt).toContain(comp2.learningCompetency);
 
+    const systemInstruction = requests[0]!.systemInstruction ?? "";
+    expect(systemInstruction).toContain("ILAW Framework");
+    expect(systemInstruction).toMatch(/4As.*5Es.*DepEd DO 42/i);
+    expect(systemInstruction).toMatch(/Teacher's Activity.*Student's Activity/i);
+    expect(systemInstruction).toMatch(/3.*SMART/i);
+    expect(systemInstruction).toMatch(/Cognitive.*Psychomotor.*Affective/i);
+    expect(systemInstruction).toContain("• ");
+    expect(systemInstruction).toMatch(/greet.*prayer.*attendance/i);
+    expect(systemInstruction).toMatch(/verbatim|restate/i);
+    expect(systemInstruction).toMatch(/line-by-line/i);
+    expect(systemInstruction).toMatch(/N\/A/);
+    expect(systemInstruction).toMatch(/5-item multiple-choice quiz/i);
+    expect(systemInstruction).toContain("Prompt Notes");
+    expect(systemInstruction).toContain("Learner Context");
+    expect(systemInstruction).toContain("Reflections");
+
     const engine2 = createGuroMateEngine({
       dataDir,
       templatesDir: process.cwd(),
@@ -147,11 +163,11 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
 
   it("derives a DLP from an active DLL Session, rejects non-instructional sessions, and supports getDlp, saveDlp, and deleteDlp", async () => {
     const dataDir = await makeTempDir();
-    const prompts: string[] = [];
+    const requests: AiGenerateRequest[] = [];
 
     const fakeAdapter: AiProviderAdapter = {
       async generateText(req) {
-        prompts.push(req.prompt);
+        requests.push(req);
         if (req.prompt.includes("Daily Lesson Log (DLL)")) {
           return {
             text: JSON.stringify({
@@ -253,10 +269,15 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(derived.intentions.contentStandards).toEqual([fcs.contentStandard]);
     expect(derived.intentions.performanceStandards).toEqual([fcs.performanceStandard]);
     expect(derived.intentions.learningObjectives).toBe("Unpacked Objective S3");
+    expect(derived.intentions.learnerContext).toBe("");
 
-    const dlpPrompt = prompts[1]!;
-    expect(dlpPrompt).toContain("DLL Lesson Flow S3");
-    expect(dlpPrompt).toContain("Use paired lab stations for 40 learners.");
+    const dlpRequest = requests[1]!;
+    expect(dlpRequest.prompt).toContain("DLL Lesson Flow S3");
+    expect(dlpRequest.prompt).toContain("Use paired lab stations for 40 learners.");
+    expect(dlpRequest.systemInstruction).toContain("Daily Lesson Plan (DLP)");
+    expect(dlpRequest.systemInstruction).toContain("ILAW Framework");
+    expect(dlpRequest.systemInstruction).toMatch(/greet.*prayer.*attendance/i);
+    expect(dlpRequest.systemInstruction).toMatch(/5-item multiple-choice quiz/i);
 
     const edited = await engine.saveDlp({
       ...derived,

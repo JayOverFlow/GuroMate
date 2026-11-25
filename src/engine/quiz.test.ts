@@ -144,6 +144,7 @@ describe("GuroMateEngine Formative Quiz Maker", () => {
     expect(created.sections[3]!.items[0]!.rubric).toContain("2 pts");
 
     expect(requests).toHaveLength(1);
+    expect(requests[0]!.systemInstruction).toBeUndefined();
     expect(requests[0]!.prompt).toContain(promptNotes);
     expect(requests[0]!.prompt).toContain(ict.learningCompetency);
 
