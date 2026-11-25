@@ -83,6 +83,28 @@ describe("AI provider curated model presets", () => {
     expect(
       resolveModelIdOnProviderChange("my-org/custom-tle-model", "anthropic"),
     ).toBe("my-org/custom-tle-model");
+
+    // Previous provider's live-discovered model -> next provider's top preset
+    const previousLiveModels = [
+      "mistralai/mistral-7b-instruct:free",
+      "nvidia/nemotron-nano-8b:free",
+    ];
+    expect(
+      resolveModelIdOnProviderChange(
+        "mistralai/mistral-7b-instruct:free",
+        "gemini",
+        previousLiveModels,
+      ),
+    ).toBe("gemini-2.5-flash");
+
+    // User-entered custom model ID is still preserved when previous live models are provided
+    expect(
+      resolveModelIdOnProviderChange(
+        "my-org/custom-tle-model",
+        "gemini",
+        previousLiveModels,
+      ),
+    ).toBe("my-org/custom-tle-model");
   });
 
   it("detects custom model IDs accurately for initial load and custom mode", () => {

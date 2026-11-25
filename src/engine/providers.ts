@@ -148,9 +148,16 @@ const ALL_CURATED_MODEL_IDS = new Set(
   AI_PROVIDERS.flatMap((provider) => provider.models.map((m) => m.id)),
 );
 
+export function sortModelsFreeFirst<T extends { isFree?: boolean }>(
+  models: readonly T[],
+): T[] {
+  return [...models].sort(
+    (a, b) => Number(Boolean(b.isFree)) - Number(Boolean(a.isFree)),
+  );
+}
+
 export function getCuratedModels(provider: AiProviderType): AiModelOption[] {
-  const models = AI_PROVIDER_MAP.get(provider)?.models ?? [];
-  return [...models].sort((a, b) => Number(Boolean(b.isFree)) - Number(Boolean(a.isFree)));
+  return sortModelsFreeFirst(AI_PROVIDER_MAP.get(provider)?.models ?? []);
 }
 
 export function formatModelOptionLabel(model: AiModelOption): string {
@@ -170,6 +177,7 @@ export function isCustomModelId(
 export function resolveModelIdOnProviderChange(
   currentModelId: string,
   nextProvider: AiProviderType,
+  previousKnownModelIds?: Iterable<string>,
 ): string {
   const trimmed = currentModelId.trim();
   const nextModels = getCuratedModels(nextProvider);
@@ -178,5 +186,10 @@ export function resolveModelIdOnProviderChange(
   if (!trimmed) return topPreset;
   if (nextModels.some((m) => m.id === trimmed)) return trimmed;
   if (ALL_CURATED_MODEL_IDS.has(trimmed)) return topPreset;
+  if (previousKnownModelIds) {
+    for (const id of previousKnownModelIds) {
+      if (id === trimmed) return topPreset;
+    }
+  }
   return currentModelId;
 }

@@ -1,3 +1,4 @@
+import { sortModelsFreeFirst } from "./providers";
 import type {
   AiGenerateRequest,
   AiGenerateResult,
@@ -23,9 +24,7 @@ function finalizeModels(models: AiModelOption[]): AiModelOption[] {
     seen.add(id);
     deduped.push({ ...model, id, label: model.label.trim() || id });
   }
-  return deduped.sort(
-    (a, b) => Number(Boolean(b.isFree)) - Number(Boolean(a.isFree)),
-  );
+  return sortModelsFreeFirst(deduped);
 }
 
 function extractErrorMessage(status: number, bodyText: string): string {
@@ -48,11 +47,8 @@ function extractErrorMessage(status: number, bodyText: string): string {
 export function createLiveAiAdapter(
   fetchFn: FetchLike = fetch,
 ): AiProviderAdapter {
-  async function getJson(
-    url: string,
-    headers: Record<string, string>,
-  ): Promise<unknown> {
-    const res = await fetchFn(url, { method: "GET", headers });
+  async function requestJson(url: string, init: RequestInit): Promise<unknown> {
+    const res = await fetchFn(url, init);
     const raw = await res.text();
     if (!res.ok) {
       throw new Error(extractErrorMessage(res.status, raw));
@@ -60,21 +56,23 @@ export function createLiveAiAdapter(
     return raw ? (JSON.parse(raw) as unknown) : {};
   }
 
-  async function postJson(
+  function getJson(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<unknown> {
+    return requestJson(url, { method: "GET", headers });
+  }
+
+  function postJson(
     url: string,
     headers: Record<string, string>,
     body: unknown,
   ): Promise<unknown> {
-    const res = await fetchFn(url, {
+    return requestJson(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
     });
-    const raw = await res.text();
-    if (!res.ok) {
-      throw new Error(extractErrorMessage(res.status, raw));
-    }
-    return raw ? (JSON.parse(raw) as unknown) : {};
   }
 
   return {

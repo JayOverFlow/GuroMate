@@ -135,6 +135,7 @@ export function useSettingsWorkspace(
     const nextModelId = resolveModelIdOnProviderChange(
       settings.ai.modelId,
       nextProvider,
+      liveModels?.map((m) => m.id),
     );
 
     setSettings((prev) =>
@@ -290,9 +291,9 @@ export function useSettingsWorkspace(
       setLiveModels(result.source === "live" ? result.models : null);
 
       const trimmedId = settings.ai.modelId.trim();
-      if (trimmedId) {
-        setIsCustomModel(!nextModels.some((m) => m.id === trimmedId));
-      }
+      setIsCustomModel(
+        Boolean(trimmedId) && !nextModels.some((m) => m.id === trimmedId),
+      );
 
       setStatus({
         tone: result.source === "live" ? "success" : "error",
@@ -304,6 +305,9 @@ export function useSettingsWorkspace(
       });
     } catch (err) {
       setLiveModels(null);
+      setIsCustomModel(
+        isCustomModelId(settings.ai.aiProvider, settings.ai.modelId),
+      );
       setStatus({
         tone: "error",
         text: `Error: ${err instanceof Error ? err.message : String(err)} Showing curated presets.`,
