@@ -265,6 +265,75 @@ describe("createGuroMateEngine", () => {
     ]);
   });
 
+  it("lists live AI models with free-first sorting and falls back to curated presets on missing credentials or errors", async () => {
+    const dataDir = await makeTempDir();
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText() {
+        return { text: "OK" };
+      },
+      async listModels(settings) {
+        if (settings.baseUrl.includes("offline.example")) {
+          throw new Error("ECONNREFUSED");
+        }
+        return [
+          { id: "paid/model-a", label: "Paid Model A" },
+          {
+            id: "free/model-b:free",
+            label: "Free Model B",
+            isFree: true,
+            freeBadge: "Free",
+          },
+        ];
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    // Missing required API key -> curated fallback
+    const missingKey = await engine.listAiModels({
+      aiProvider: "openrouter",
+      apiKey: "",
+      baseUrl: "https://openrouter.ai/api/v1",
+    });
+    expect(missingKey.source).toBe("curated");
+    expect(missingKey.models.length).toBeGreaterThan(0);
+    expect(missingKey.message).toMatch(/api key is required/i);
+
+    // Live success -> free-first sorted
+    const live = await engine.listAiModels({
+      aiProvider: "openrouter",
+      apiKey: "or-key",
+      baseUrl: "https://openrouter.ai/api/v1",
+    });
+    expect(live.source).toBe("live");
+    expect(live.models.map((m) => m.id)).toEqual([
+      "free/model-b:free",
+      "paid/model-a",
+    ]);
+
+    // Network/provider failure -> curated fallback
+    const offline = await engine.listAiModels({
+      aiProvider: "openrouter",
+      apiKey: "or-key",
+      baseUrl: "https://offline.example/v1",
+    });
+    expect(offline.source).toBe("curated");
+    expect(offline.models.length).toBeGreaterThan(0);
+    expect(offline.message).toContain("ECONNREFUSED");
+
+    // Local Ollama without API key -> live success
+    const ollama = await engine.listAiModels({
+      aiProvider: "ollama",
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+    });
+    expect(ollama.source).toBe("live");
+  });
+
   it("lists and filters Grades 7-10 MATATAG TLE Curriculum Guide competencies across components, quarters, sectors, and search queries", async () => {
     const dataDir = await makeTempDir();
     const engine = createGuroMateEngine({

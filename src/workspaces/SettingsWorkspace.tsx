@@ -21,10 +21,11 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
     loadError,
     saving,
     checking,
+    refreshingModels,
     showApiKey,
     setShowApiKey,
     isCustomModel,
-    curatedModels,
+    availableModels,
     status,
     invalidFields,
     activeProvider,
@@ -35,6 +36,7 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
     updateAiField,
     handleSave,
     handleCheckConnection,
+    handleRefreshModels,
   } = useSettingsWorkspace(onSettingsSaved);
 
   if (loadError) {
@@ -340,39 +342,59 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                   `Choose a model for ${activeProvider.label} or enter a custom ID.`
                 )}
               </span>
-              <select
-                id={`${baseId}-modelId`}
-                name={isCustomModel ? "modelPreset" : "modelId"}
-                required={!isCustomModel}
-                value={isCustomModel ? CUSTOM_MODEL_OPTION : settings.ai.modelId}
-                className={inputClass(isCustomModel ? "modelPreset" : "modelId")}
-                aria-invalid={
-                  !isCustomModel && invalidFields.modelId ? "true" : "false"
-                }
-                aria-describedby={
-                  isCustomModel
-                    ? `${baseId}-modelId-hint`
-                    : describedBy(
-                        `${baseId}-modelId-hint`,
-                        `${baseId}-modelId-err`,
-                        "modelId",
-                      )
-                }
-                onChange={(e) => selectModelOption(e.target.value)}
-                onBlur={(e) => {
-                  if (!isCustomModel) syncFieldValidity(e.currentTarget);
-                }}
-              >
-                <option value="" disabled>
-                  Select a model...
-                </option>
-                {curatedModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {formatModelOptionLabel(model)}
+              <div className="flex gap-gutter-sm">
+                <select
+                  id={`${baseId}-modelId`}
+                  name={isCustomModel ? "modelPreset" : "modelId"}
+                  required={!isCustomModel}
+                  value={
+                    isCustomModel ? CUSTOM_MODEL_OPTION : settings.ai.modelId
+                  }
+                  className={`${inputClass(isCustomModel ? "modelPreset" : "modelId")} flex-1 min-w-0`}
+                  aria-invalid={
+                    !isCustomModel && invalidFields.modelId ? "true" : "false"
+                  }
+                  aria-describedby={
+                    isCustomModel
+                      ? `${baseId}-modelId-hint`
+                      : describedBy(
+                          `${baseId}-modelId-hint`,
+                          `${baseId}-modelId-err`,
+                          "modelId",
+                        )
+                  }
+                  onChange={(e) => selectModelOption(e.target.value)}
+                  onBlur={(e) => {
+                    if (!isCustomModel) syncFieldValidity(e.currentTarget);
+                  }}
+                >
+                  <option value="" disabled>
+                    Select a model...
                   </option>
-                ))}
-                <option value={CUSTOM_MODEL_OPTION}>Custom model ID...</option>
-              </select>
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {formatModelOptionLabel(model)}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_MODEL_OPTION}>Custom model ID...</option>
+                </select>
+                <button
+                  type="button"
+                  disabled={refreshingModels}
+                  onClick={() => void handleRefreshModels()}
+                  className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    refresh
+                  </span>
+                  <span>
+                    {refreshingModels ? "Refreshing..." : "Refresh Models"}
+                  </span>
+                </button>
+              </div>
               {isCustomModel && (
                 <input
                   id={`${baseId}-customModelId`}

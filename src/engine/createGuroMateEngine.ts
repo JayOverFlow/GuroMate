@@ -40,7 +40,7 @@ import {
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
 import { createLiveAiAdapter } from "./liveAiAdapter";
-import { AI_PROVIDER_MAP } from "./providers";
+import { AI_PROVIDER_MAP, getCuratedModels } from "./providers";
 import { buildQuizDocxBuffer } from "./quizDocx";
 import { readZipEntry, replaceZipEntry } from "./zip";
 import {
@@ -48,6 +48,7 @@ import {
   QUARTERS,
   TLE_COMPONENTS,
   type AiConnectionCheckResult,
+  type AiModelListResult,
   type AiProviderSettings,
   type BudgetOfWorkInfo,
   type ClassSection,
@@ -476,6 +477,74 @@ export function createGuroMateEngine(
       return {
         ok: false,
         message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  async function listAiModels(
+    aiOverride?: Partial<AiProviderSettings>,
+  ): Promise<AiModelListResult> {
+    const current = await getSettings();
+    let settings: AiProviderSettings;
+    try {
+      settings = aiOverride
+        ? normalizeAiSettings(current.ai, aiOverride)
+        : current.ai;
+    } catch (err) {
+      const fallbackProvider =
+        aiOverride?.aiProvider && AI_PROVIDER_MAP.has(aiOverride.aiProvider)
+          ? aiOverride.aiProvider
+          : current.ai.aiProvider;
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        models: getCuratedModels(fallbackProvider),
+        source: "curated",
+        message: `${reason} Showing curated presets.`,
+      };
+    }
+
+    const providerMeta = AI_PROVIDER_MAP.get(settings.aiProvider);
+    const providerLabel = providerMeta?.label ?? settings.aiProvider;
+
+    if (providerMeta?.requiresKey && !settings.apiKey) {
+      return {
+        models: getCuratedModels(settings.aiProvider),
+        source: "curated",
+        message: `API key is required for ${providerLabel}. Showing curated presets.`,
+      };
+    }
+
+    if (!aiAdapter.listModels) {
+      return {
+        models: getCuratedModels(settings.aiProvider),
+        source: "curated",
+        message: "Live model discovery is unavailable. Showing curated presets.",
+      };
+    }
+
+    try {
+      const liveModels = await aiAdapter.listModels(settings);
+      if (liveModels.length === 0) {
+        return {
+          models: getCuratedModels(settings.aiProvider),
+          source: "curated",
+          message: `No models returned by ${providerLabel}. Showing curated presets.`,
+        };
+      }
+      const sorted = [...liveModels].sort(
+        (a, b) => Number(Boolean(b.isFree)) - Number(Boolean(a.isFree)),
+      );
+      return {
+        models: sorted,
+        source: "live",
+        message: `Loaded ${sorted.length} live model${sorted.length === 1 ? "" : "s"} from ${providerLabel}.`,
+      };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        models: getCuratedModels(settings.aiProvider),
+        source: "curated",
+        message: `Could not fetch live models (${reason}). Showing curated presets.`,
       };
     }
   }
@@ -1029,6 +1098,7 @@ export function createGuroMateEngine(
     getSettings,
     saveSettings,
     testAiConnection,
+    listAiModels,
     listCurriculum,
     saveCustomCompetency,
     saveCompetencyNotes,

@@ -42,8 +42,15 @@ export interface AiGenerateResult {
   model?: string;
 }
 
+export interface AiModelListResult {
+  models: AiModelOption[];
+  source: "live" | "curated";
+  message?: string;
+}
+
 export interface AiProviderAdapter {
   generateText(request: AiGenerateRequest): Promise<AiGenerateResult>;
+  listModels?(settings: AiProviderSettings): Promise<AiModelOption[]>;
 }
 
 export interface AiConnectionCheckResult {
@@ -340,6 +347,9 @@ export interface GuroMateEngine {
   testAiConnection(
     aiOverride?: Partial<AiProviderSettings>,
   ): Promise<AiConnectionCheckResult>;
+  listAiModels(
+    aiOverride?: Partial<AiProviderSettings>,
+  ): Promise<AiModelListResult>;
   listCurriculum(filter?: CurriculumFilter): Promise<CurriculumCompetency[]>;
   saveCustomCompetency(
     input: CustomCompetencyInput,
