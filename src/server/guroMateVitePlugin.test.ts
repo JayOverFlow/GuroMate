@@ -21,6 +21,20 @@ describe("guroMateVitePlugin HTTP middleware", () => {
         async generateText(req) {
           return { text: "OK", model: req.settings.modelId };
         },
+        async listModels(settings) {
+          if (settings.baseUrl.includes("fail.example")) {
+            throw new Error("Upstream unreachable");
+          }
+          return [
+            { id: "paid-model", label: "Paid Model" },
+            {
+              id: "free-model:free",
+              label: "Free Model",
+              isFree: true,
+              freeBadge: "Free",
+            },
+          ];
+        },
       },
     });
     const middleware = createGuroMateMiddleware(engine);
@@ -93,6 +107,60 @@ describe("guroMateVitePlugin HTTP middleware", () => {
       body: "{bad",
     });
     expect(badJsonRes.status).toBe(400);
+  });
+
+  it("serves POST /api/settings/models with live free-first results and curated fallback", async () => {
+    const baseUrl = await startTestServer();
+
+    const liveRes = await fetch(`${baseUrl}/api/settings/models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ai: {
+          aiProvider: "openrouter",
+          apiKey: "or-key",
+          baseUrl: "https://openrouter.ai/api/v1",
+        },
+      }),
+    });
+    expect(liveRes.status).toBe(200);
+    const liveJson = (await liveRes.json()) as {
+      source: string;
+      models: Array<{ id: string }>;
+    };
+    expect(liveJson.source).toBe("live");
+    expect(liveJson.models.map((m) => m.id)).toEqual([
+      "free-model:free",
+      "paid-model",
+    ]);
+
+    const fallbackRes = await fetch(`${baseUrl}/api/settings/models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ai: {
+          aiProvider: "openrouter",
+          apiKey: "or-key",
+          baseUrl: "https://fail.example/v1",
+        },
+      }),
+    });
+    expect(fallbackRes.status).toBe(200);
+    const fallbackJson = (await fallbackRes.json()) as {
+      source: string;
+      models: Array<{ id: string }>;
+      message?: string;
+    };
+    expect(fallbackJson.source).toBe("curated");
+    expect(fallbackJson.models.length).toBeGreaterThan(0);
+    expect(fallbackJson.message).toContain("Upstream unreachable");
+
+    const badRes = await fetch(`${baseUrl}/api/settings/models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "[]",
+    });
+    expect(badRes.status).toBe(400);
   });
 
   it("serves curriculum catalog filtering, custom competency CRUD, and BoW note persistence over /api/curriculum", async () => {

@@ -370,6 +370,19 @@ export function createGuroMateMiddleware(
         return;
       }
 
+      if (req.method === "POST" && urlPath === "/api/settings/models") {
+        const body = await readJsonBody(req);
+        if (!isRecord(body)) {
+          throw new HttpError(400, "Model list payload must be an object.");
+        }
+        const aiOverride = isRecord(body.ai)
+          ? (body.ai as Partial<AiProviderSettings>)
+          : undefined;
+        const result = await engine.listAiModels(aiOverride);
+        sendJson(res, 200, result);
+        return;
+      }
+
       if (req.method === "GET" && urlPath === "/api/curriculum") {
         const filter = parseCurriculumFilter(req.url ?? "");
         const items = await engine.listCurriculum(filter);
