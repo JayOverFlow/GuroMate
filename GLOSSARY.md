@@ -46,6 +46,10 @@ _Avoid_: Student profile, class background
 Optional teacher instructions (e.g., period duration, available lab/shop equipment, activity constraints) passed to the AI during generation and excluded from the exported document's **Learner Context** cell.
 _Avoid_: Learner context, system prompt
 
+**System Instructions**:
+Built-in DepEd MATATAG and **ILAW Framework** pedagogical and formatting directives sent via the AI provider's native system role during **Daily Lesson Log (DLL)** or **Daily Lesson Plan (DLP)** generation; distinct from per-lesson teacher **Prompt Notes**.
+_Avoid_: Prompt notes, user prompt, custom notes
+
 **Reflections**:
 The teacher's manually written post-session notes on instructional adjustments, learner interests, and coaching points under **Ways Forward**; left blank in generated documents for manual completion.
 _Avoid_: Remarks, post-lesson notes

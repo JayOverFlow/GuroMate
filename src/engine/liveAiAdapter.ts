@@ -47,6 +47,7 @@ export function createLiveAiAdapter(
     async generateText(request: AiGenerateRequest): Promise<AiGenerateResult> {
       const { aiProvider, apiKey, baseUrl, modelId } = request.settings;
       const base = baseUrl.replace(/\/+$/, "");
+      const system = request.systemInstruction?.trim();
 
       if (aiProvider === "gemini") {
         const url = `${base}/models/${encodeURIComponent(modelId)}:generateContent`;
@@ -54,6 +55,7 @@ export function createLiveAiAdapter(
           url,
           { "x-goog-api-key": apiKey },
           {
+            ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
             contents: [{ role: "user", parts: [{ text: request.prompt }] }],
           },
         )) as {
@@ -78,7 +80,8 @@ export function createLiveAiAdapter(
           },
           {
             model: modelId,
-            max_tokens: 1024,
+            max_tokens: 8192,
+            ...(system ? { system } : {}),
             messages: [{ role: "user", content: request.prompt }],
           },
         )) as {
@@ -99,7 +102,10 @@ export function createLiveAiAdapter(
 
       const payload = (await postJson(`${base}/chat/completions`, headers, {
         model: modelId,
-        messages: [{ role: "user", content: request.prompt }],
+        messages: [
+          ...(system ? [{ role: "system", content: system }] : []),
+          { role: "user", content: request.prompt },
+        ],
       })) as {
         model?: string;
         choices?: Array<{ message?: { content?: string } }>;

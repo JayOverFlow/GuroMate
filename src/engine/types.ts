@@ -27,6 +27,7 @@ export interface GuroMateSettings {
 
 export interface AiGenerateRequest {
   prompt: string;
+  systemInstruction?: string;
   settings: AiProviderSettings;
 }
 

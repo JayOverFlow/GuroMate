@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import rawCatalog from "./curriculumCatalog.json";
 import {
+  DLL_SYSTEM_INSTRUCTION,
   DllNotFoundError,
   DllValidationError,
   assembleGeneratedSessions,
@@ -725,6 +726,7 @@ export function createGuroMateEngine(
 
     const settings = await getSettings();
     const aiResult = await aiAdapter.generateText({
+      systemInstruction: DLL_SYSTEM_INSTRUCTION,
       prompt,
       settings: settings.ai,
     });
