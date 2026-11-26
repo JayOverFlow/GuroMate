@@ -68,3 +68,45 @@ export function buildDeleteCustomCompetencyPrompt(
     busyLabel: "Deleting...",
   };
 }
+
+export function buildDeleteDlpPrompt(title: string): ConfirmPrompt {
+  const label = title.trim() || "this Daily Lesson Plan";
+  return {
+    title: "Delete Daily Lesson Plan?",
+    body: `Permanently delete "${label}" from local storage? This cannot be undone.`,
+    confirmLabel: "Delete DLP",
+    busyLabel: "Deleting...",
+  };
+}
+
+export function buildDeleteQuizPrompt(title: string): ConfirmPrompt {
+  const label = title.trim() || "this Quiz";
+  return {
+    title: "Delete Quiz?",
+    body: `Permanently delete "${label}" from local storage? This cannot be undone.`,
+    confirmLabel: "Delete Quiz",
+    busyLabel: "Deleting...",
+  };
+}
+
+export function buildRemoveDlpCompetencyPrompt(
+  competency: string,
+): ConfirmPrompt {
+  const label = competency.trim() || "this Learning Competency";
+  return {
+    title: "Remove Learning Competency?",
+    body: `Remove "${label}" from this Daily Lesson Plan? You can add it back anytime.`,
+    confirmLabel: "Remove",
+  };
+}
+
+export function buildRemoveQuizCompetencyPrompt(
+  competency: string,
+): ConfirmPrompt {
+  const label = competency.trim() || "this Learning Competency";
+  return {
+    title: "Remove Learning Competency?",
+    body: `Remove "${label}" from this Quiz? You can add it back anytime.`,
+    confirmLabel: "Remove",
+  };
+}
