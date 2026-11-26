@@ -15,6 +15,7 @@ import {
 } from "../engine/types";
 import {
   CUSTOM_COMPETENCY_FIELDS,
+  updateFieldError,
   validateCustomCompetencyField,
   validateCustomCompetencyForm,
   type CustomCompetencyFieldKey,
@@ -333,16 +334,7 @@ export function useCurriculumWorkspace() {
     field: CustomCompetencyFieldKey,
     nextError: string | undefined,
   ): void {
-    setCustomFieldErrors((prev) => {
-      if (prev[field] === nextError) return prev;
-      const next: FieldErrors<CustomCompetencyFieldKey> = { ...prev };
-      if (nextError) {
-        next[field] = nextError;
-      } else {
-        delete next[field];
-      }
-      return next;
-    });
+    setCustomFieldErrors((prev) => updateFieldError(prev, field, nextError));
   }
 
   function validateCustomField(field: CustomCompetencyFieldKey): void {

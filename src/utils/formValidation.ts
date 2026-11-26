@@ -10,6 +10,32 @@ import {
 
 export type FieldErrors<K extends string> = Partial<Record<K, string>>;
 
+export function updateFieldError<K extends string>(
+  prev: FieldErrors<K>,
+  field: K,
+  nextError: string | undefined,
+): FieldErrors<K> {
+  if (!nextError) {
+    if (!(field in prev)) return prev;
+    const next = { ...prev };
+    delete next[field];
+    return next;
+  }
+  return prev[field] === nextError ? prev : { ...prev, [field]: nextError };
+}
+
+export function validateFields<K extends string>(
+  fields: readonly K[],
+  validate: (field: K) => string | undefined,
+): FieldErrors<K> {
+  const errors: FieldErrors<K> = {};
+  for (const field of fields) {
+    const message = validate(field);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}
+
 export type SettingsFieldKey =
   | "studentTeacherName"
   | "cooperatingTeacherName"
@@ -121,12 +147,9 @@ export function validateSettingsForm(
   scope: SettingsValidationScope = "save",
   options?: SettingsValidationOptions,
 ): FieldErrors<SettingsFieldKey> {
-  const errors: FieldErrors<SettingsFieldKey> = {};
-  for (const field of SETTINGS_SCOPE_FIELDS[scope]) {
-    const message = validateSettingsField(field, settings, options);
-    if (message) errors[field] = message;
-  }
-  return errors;
+  return validateFields(SETTINGS_SCOPE_FIELDS[scope], (field) =>
+    validateSettingsField(field, settings, options),
+  );
 }
 
 export type CustomCompetencyFieldKey =
@@ -190,12 +213,9 @@ export function validateCustomCompetencyField(
 export function validateCustomCompetencyForm(
   input: CustomCompetencyFormInput,
 ): FieldErrors<CustomCompetencyFieldKey> {
-  const errors: FieldErrors<CustomCompetencyFieldKey> = {};
-  for (const field of CUSTOM_COMPETENCY_FIELDS) {
-    const message = validateCustomCompetencyField(field, input);
-    if (message) errors[field] = message;
-  }
-  return errors;
+  return validateFields(CUSTOM_COMPETENCY_FIELDS, (field) =>
+    validateCustomCompetencyField(field, input),
+  );
 }
 
 export function parseRosterText(text: string): string[] {
@@ -236,12 +256,9 @@ export function validateClassSectionField(
 export function validateClassSectionForm(
   input: ClassSectionFormInput,
 ): FieldErrors<ClassSectionFieldKey> {
-  const errors: FieldErrors<ClassSectionFieldKey> = {};
-  for (const field of CLASS_SECTION_FIELDS) {
-    const message = validateClassSectionField(field, input);
-    if (message) errors[field] = message;
-  }
-  return errors;
+  return validateFields(CLASS_SECTION_FIELDS, (field) =>
+    validateClassSectionField(field, input),
+  );
 }
 
 export type CustomTimerFieldKey = "minutes" | "seconds" | "duration";
@@ -257,30 +274,42 @@ export const CUSTOM_TIMER_FIELDS: readonly CustomTimerFieldKey[] = [
   "duration",
 ];
 
-function parseStrictInteger(value: string | number): number | null {
+const TIMER_MAX_MINUTES = 180;
+const TIMER_MAX_SECONDS = 59;
+
+function parseIntegerInRange(
+  value: string | number,
+  min: number,
+  max: number,
+): number | null {
+  let parsed: number;
   if (typeof value === "number") {
-    return Number.isInteger(value) ? value : null;
+    parsed = value;
+  } else {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    parsed = Number(trimmed);
   }
-  const trimmed = value.trim();
-  if (!/^[+-]?\d+$/.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max
+    ? parsed
+    : null;
+}
+
+function parseTimerParts(input: CustomTimerFormInput): {
+  minutes: number | null;
+  seconds: number | null;
+} {
+  return {
+    minutes: parseIntegerInRange(input.minutes, 0, TIMER_MAX_MINUTES),
+    seconds: parseIntegerInRange(input.seconds, 0, TIMER_MAX_SECONDS),
+  };
 }
 
 export function parseCustomTimerDuration(
   input: CustomTimerFormInput,
 ): { minutes: number; seconds: number } | null {
-  const minutes = parseStrictInteger(input.minutes);
-  const seconds = parseStrictInteger(input.seconds);
-  if (
-    minutes === null ||
-    seconds === null ||
-    minutes < 0 ||
-    minutes > 180 ||
-    seconds < 0 ||
-    seconds > 59 ||
-    minutes * 60 + seconds <= 0
-  ) {
+  const { minutes, seconds } = parseTimerParts(input);
+  if (minutes === null || seconds === null || minutes * 60 + seconds <= 0) {
     return null;
   }
   return { minutes, seconds };
@@ -290,48 +319,30 @@ export function validateCustomTimerField(
   field: CustomTimerFieldKey,
   input: CustomTimerFormInput,
 ): string | undefined {
+  const { minutes, seconds } = parseTimerParts(input);
   switch (field) {
-    case "minutes": {
-      const minutes = parseStrictInteger(input.minutes);
-      return minutes !== null && minutes >= 0 && minutes <= 180
+    case "minutes":
+      return minutes !== null
         ? undefined
-        : "Enter a whole number from 0 to 180.";
-    }
-    case "seconds": {
-      const seconds = parseStrictInteger(input.seconds);
-      return seconds !== null && seconds >= 0 && seconds <= 59
+        : `Enter a whole number from 0 to ${TIMER_MAX_MINUTES}.`;
+    case "seconds":
+      return seconds !== null
         ? undefined
-        : "Enter a whole number from 0 to 59.";
-    }
-    case "duration": {
-      const minutes = parseStrictInteger(input.minutes);
-      const seconds = parseStrictInteger(input.seconds);
-      if (
-        minutes === null ||
-        seconds === null ||
-        minutes < 0 ||
-        minutes > 180 ||
-        seconds < 0 ||
-        seconds > 59
-      ) {
-        return undefined;
-      }
+        : `Enter a whole number from 0 to ${TIMER_MAX_SECONDS}.`;
+    case "duration":
+      if (minutes === null || seconds === null) return undefined;
       return minutes * 60 + seconds > 0
         ? undefined
         : "Enter a duration greater than 00:00.";
-    }
   }
 }
 
 export function validateCustomTimerForm(
   input: CustomTimerFormInput,
 ): FieldErrors<CustomTimerFieldKey> {
-  const errors: FieldErrors<CustomTimerFieldKey> = {};
-  for (const field of CUSTOM_TIMER_FIELDS) {
-    const message = validateCustomTimerField(field, input);
-    if (message) errors[field] = message;
-  }
-  return errors;
+  return validateFields(CUSTOM_TIMER_FIELDS, (field) =>
+    validateCustomTimerField(field, input),
+  );
 }
 
 export type DllSessionFieldKey = `session-${SessionNumber}`;
@@ -362,6 +373,14 @@ export function dllSessionFieldKey(
   return `session-${sessionNumber}`;
 }
 
+export function parseDllSessionFieldKey(
+  field: DllBuilderFieldKey,
+): SessionNumber | null {
+  if (!field.startsWith("session-")) return null;
+  const parsed = parseIntegerInRange(field.slice("session-".length), 1, 5);
+  return parsed as SessionNumber | null;
+}
+
 export function validateDllBuilderField(
   field: DllBuilderFieldKey,
   input: DllBuilderFormInput,
@@ -381,7 +400,8 @@ export function validateDllBuilderField(
       : "Keep at least one Session as Instructional with a Learning Competency.";
   }
 
-  const sessionNumber = Number(field.slice("session-".length)) as SessionNumber;
+  const sessionNumber = parseDllSessionFieldKey(field);
+  if (sessionNumber === null) return undefined;
   const session = input.sessions.find(
     (cfg) => cfg.sessionNumber === sessionNumber,
   );
@@ -397,12 +417,9 @@ export function validateDllBuilderField(
 export function validateDllBuilderForm(
   input: DllBuilderFormInput,
 ): FieldErrors<DllBuilderFieldKey> {
-  const errors: FieldErrors<DllBuilderFieldKey> = {};
-  for (const field of DLL_BUILDER_FIELDS) {
-    const message = validateDllBuilderField(field, input);
-    if (message) errors[field] = message;
-  }
-  return errors;
+  return validateFields(DLL_BUILDER_FIELDS, (field) =>
+    validateDllBuilderField(field, input),
+  );
 }
 
 export type DlpBuilderFieldKey = "gradeAndSection" | "selectedCompetencyIds";
@@ -438,12 +455,9 @@ export function validateDlpBuilderField(
 export function validateDlpBuilderForm(
   input: DlpBuilderFormInput,
 ): FieldErrors<DlpBuilderFieldKey> {
-  const errors: FieldErrors<DlpBuilderFieldKey> = {};
-  for (const field of DLP_BUILDER_FIELDS) {
-    const message = validateDlpBuilderField(field, input);
-    if (message) errors[field] = message;
-  }
-  return errors;
+  return validateFields(DLP_BUILDER_FIELDS, (field) =>
+    validateDlpBuilderField(field, input),
+  );
 }
 
 export type QuizBuilderFieldKey =
@@ -466,46 +480,44 @@ export const QUIZ_BUILDER_FIELDS: readonly QuizBuilderFieldKey[] = [
   "itemCounts",
 ];
 
+const QUIZ_MAX_ITEMS_PER_TYPE = 50;
+
 export function parseQuizItemCount(value: string | number): number | null {
-  if (typeof value === "number") {
-    return Number.isInteger(value) && value >= 0 && value <= 50 ? value : null;
+  return parseIntegerInRange(value, 0, QUIZ_MAX_ITEMS_PER_TYPE);
+}
+
+function analyzeQuizItemCounts(drafts: QuizItemCountDrafts): {
+  counts: QuizItemCounts;
+  invalidTypes: QuizQuestionType[];
+  total: number;
+} {
+  const counts = {} as QuizItemCounts;
+  const invalidTypes: QuizQuestionType[] = [];
+  let total = 0;
+  for (const type of QUIZ_QUESTION_TYPES) {
+    const parsed = parseQuizItemCount(drafts[type]);
+    if (parsed === null) {
+      invalidTypes.push(type);
+    } else {
+      counts[type] = parsed;
+      total += parsed;
+    }
   }
-  const trimmed = value.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 50
-    ? parsed
-    : null;
+  return { counts, invalidTypes, total };
 }
 
 export function parseQuizItemCounts(
   drafts: QuizItemCountDrafts,
 ): QuizItemCounts | null {
-  const counts = {} as QuizItemCounts;
-  let total = 0;
-  for (const type of QUIZ_QUESTION_TYPES) {
-    const parsed = parseQuizItemCount(drafts[type]);
-    if (parsed === null) return null;
-    counts[type] = parsed;
-    total += parsed;
-  }
-  return total >= 1 ? counts : null;
+  const { counts, invalidTypes, total } = analyzeQuizItemCounts(drafts);
+  return invalidTypes.length === 0 && total >= 1 ? counts : null;
 }
 
 export function getInvalidQuizCountTypes(
   drafts: QuizItemCountDrafts,
 ): QuizQuestionType[] {
-  const invalid: QuizQuestionType[] = [];
-  let total = 0;
-  for (const type of QUIZ_QUESTION_TYPES) {
-    const parsed = parseQuizItemCount(drafts[type]);
-    if (parsed === null) {
-      invalid.push(type);
-    } else {
-      total += parsed;
-    }
-  }
-  if (invalid.length > 0) return invalid;
+  const { invalidTypes, total } = analyzeQuizItemCounts(drafts);
+  if (invalidTypes.length > 0) return invalidTypes;
   return total >= 1 ? [] : [...QUIZ_QUESTION_TYPES];
 }
 
@@ -525,13 +537,9 @@ export function validateQuizBuilderField(
         ? undefined
         : "Select at least one Learning Competency.";
     case "itemCounts": {
-      let total = 0;
-      for (const type of QUIZ_QUESTION_TYPES) {
-        const parsed = parseQuizItemCount(input.itemCounts[type]);
-        if (parsed === null) {
-          return "Enter whole numbers from 0 to 50 for each question type.";
-        }
-        total += parsed;
+      const { invalidTypes, total } = analyzeQuizItemCounts(input.itemCounts);
+      if (invalidTypes.length > 0) {
+        return `Enter whole numbers from 0 to ${QUIZ_MAX_ITEMS_PER_TYPE} for each question type.`;
       }
       return total >= 1
         ? undefined
@@ -543,10 +551,7 @@ export function validateQuizBuilderField(
 export function validateQuizBuilderForm(
   input: QuizBuilderFormInput,
 ): FieldErrors<QuizBuilderFieldKey> {
-  const errors: FieldErrors<QuizBuilderFieldKey> = {};
-  for (const field of QUIZ_BUILDER_FIELDS) {
-    const message = validateQuizBuilderField(field, input);
-    if (message) errors[field] = message;
-  }
-  return errors;
+  return validateFields(QUIZ_BUILDER_FIELDS, (field) =>
+    validateQuizBuilderField(field, input),
+  );
 }

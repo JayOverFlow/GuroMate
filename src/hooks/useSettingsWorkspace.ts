@@ -18,6 +18,7 @@ import type {
 import {
   SETTINGS_SCOPE_FIELDS,
   isNonEmptyText,
+  updateFieldError,
   validateSettingsField,
   validateSettingsForm,
   type FieldErrors,
@@ -137,16 +138,7 @@ export function useSettingsWorkspace(
     field: SettingsFieldKey,
     nextError: string | undefined,
   ): void {
-    setFieldErrors((prev) => {
-      if (prev[field] === nextError) return prev;
-      const updated: FieldErrors<SettingsFieldKey> = { ...prev };
-      if (nextError) {
-        updated[field] = nextError;
-      } else {
-        delete updated[field];
-      }
-      return updated;
-    });
+    setFieldErrors((prev) => updateFieldError(prev, field, nextError));
   }
 
   function validateField(field: SettingsFieldKey): void {

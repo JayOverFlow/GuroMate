@@ -25,6 +25,7 @@ import {
   QUIZ_BUILDER_FIELDS,
   getInvalidQuizCountTypes,
   parseQuizItemCounts,
+  updateFieldError,
   validateQuizBuilderField,
   validateQuizBuilderForm,
   type FieldErrors,
@@ -92,6 +93,7 @@ export function useQuizWorkspace(
     FieldErrors<QuizBuilderFieldKey>
   >({});
   const formRef = useRef<HTMLFormElement>(null);
+  const interactedFieldsRef = useRef<Set<QuizBuilderFieldKey>>(new Set());
   const launchIntentRef = useRef(Boolean(initialLaunchTarget));
   const confirmDialog = useConfirmDialog();
 
@@ -164,6 +166,7 @@ export function useQuizWorkspace(
     if (!initialLaunchTarget) return;
     launchIntentRef.current = true;
     setSelectedQuizId("");
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
     if (initialLaunchTarget.sourceKind === "dll") {
       setSourceKind("dll");
@@ -186,6 +189,8 @@ export function useQuizWorkspace(
   useEffect(() => {
     const match = quizzes.find((q) => q.id === selectedQuizId) ?? null;
     setDraftQuiz(match ? structuredClone(match) : null);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
   }, [quizzes, selectedQuizId]);
 
   const competencyMap = useMemo(
@@ -235,13 +240,8 @@ export function useQuizWorkspace(
 
   function selectSourceKind(next: SourceKind) {
     setSourceKind(next);
-    setFieldErrors((prev) => {
-      if (!prev.gradeAndSection && !prev.selectedCompetencyIds) return prev;
-      const updated = { ...prev };
-      delete updated.gradeAndSection;
-      delete updated.selectedCompetencyIds;
-      return updated;
-    });
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
   }
 
   function validateField(
@@ -253,6 +253,9 @@ export function useQuizWorkspace(
       itemCounts: Record<QuizQuestionType, string>;
     }>,
   ) {
+    if (!interactedFieldsRef.current.has(field) && !fieldErrors[field]) {
+      return;
+    }
     const message = validateQuizBuilderField(field, {
       sourceKind: overrides?.sourceKind ?? sourceKind,
       gradeAndSection: overrides?.gradeAndSection ?? gradeAndSection,
@@ -260,18 +263,11 @@ export function useQuizWorkspace(
         overrides?.selectedCompetencyIds ?? selectedCompetencyIds,
       itemCounts: overrides?.itemCounts ?? itemCountDrafts,
     });
-    setFieldErrors((prev) => {
-      if (!message) {
-        if (!(field in prev)) return prev;
-        const next = { ...prev };
-        delete next[field];
-        return next;
-      }
-      return prev[field] === message ? prev : { ...prev, [field]: message };
-    });
+    setFieldErrors((prev) => updateFieldError(prev, field, message));
   }
 
   function handleGradeAndSectionChange(value: string) {
+    interactedFieldsRef.current.add("gradeAndSection");
     setGradeAndSection(value);
     if (fieldErrors.gradeAndSection) {
       validateField("gradeAndSection", { gradeAndSection: value });
@@ -280,6 +276,7 @@ export function useQuizWorkspace(
 
   function addCompetency() {
     if (!pickedCompetencyId) return;
+    interactedFieldsRef.current.add("selectedCompetencyIds");
     const nextIds = selectedCompetencyIds.includes(pickedCompetencyId)
       ? selectedCompetencyIds
       : [...selectedCompetencyIds, pickedCompetencyId];
@@ -292,6 +289,7 @@ export function useQuizWorkspace(
   }
 
   function removeCompetency(id: string) {
+    interactedFieldsRef.current.add("selectedCompetencyIds");
     setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
   }
 
@@ -303,6 +301,7 @@ export function useQuizWorkspace(
   }
 
   function updateCount(type: QuizQuestionType, value: string) {
+    interactedFieldsRef.current.add("itemCounts");
     const nextDrafts = { ...itemCountDrafts, [type]: value };
     setItemCountDrafts(nextDrafts);
     if (fieldErrors.itemCounts) {
@@ -313,6 +312,9 @@ export function useQuizWorkspace(
   async function handleGenerate(event: FormEvent) {
     event.preventDefault();
     setStatus(null);
+    for (const field of QUIZ_BUILDER_FIELDS) {
+      interactedFieldsRef.current.add(field);
+    }
     const errors = validateQuizBuilderForm({
       sourceKind,
       gradeAndSection,
@@ -339,6 +341,7 @@ export function useQuizWorkspace(
       }
       return;
     }
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
     setGenerating(true);
     try {

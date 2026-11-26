@@ -440,10 +440,17 @@ export function QuizWorkspace({
                 </div>
 
                 <div className="flex flex-col gap-gutter-xs">
+                  <span
+                    id={`${baseId}-selected-competencies-label`}
+                    className="font-label text-label-md text-on-surface"
+                  >
+                    Selected Learning Competencies *
+                  </span>
                   <div
                     data-field="selectedCompetencyIds"
                     tabIndex={-1}
-                    aria-invalid={competenciesInvalid}
+                    role="group"
+                    aria-labelledby={`${baseId}-selected-competencies-label`}
                     aria-describedby={buildDescribedBy(
                       null,
                       competenciesErrId,

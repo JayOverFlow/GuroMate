@@ -451,7 +451,10 @@ export function DlpWorkspace({
 
           {builderMode === "scratch" && (
             <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
-              <legend className="font-title text-title-lg text-on-surface px-1">
+              <legend
+                id={`${baseId}-competencies-legend`}
+                className="font-title text-title-lg text-on-surface px-1"
+              >
                 2. Select Learning Competencies
               </legend>
 
@@ -477,7 +480,8 @@ export function DlpWorkspace({
                 <div
                   data-field="selectedCompetencyIds"
                   tabIndex={-1}
-                  aria-invalid={competenciesInvalid}
+                  role="group"
+                  aria-labelledby={`${baseId}-competencies-legend`}
                   aria-describedby={buildDescribedBy(
                     null,
                     competenciesErrId,

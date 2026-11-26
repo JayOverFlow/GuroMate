@@ -57,6 +57,7 @@ import {
   CUSTOM_TIMER_FIELDS,
   parseCustomTimerDuration,
   parseRosterText,
+  updateFieldError,
   validateClassSectionField,
   validateClassSectionForm,
   validateCustomTimerField,
@@ -490,16 +491,7 @@ export function useClassroomWorkspace(
     field: ClassSectionFieldKey,
     nextError: string | undefined,
   ): void {
-    setSectionFieldErrors((prev) => {
-      if (prev[field] === nextError) return prev;
-      const next: FieldErrors<ClassSectionFieldKey> = { ...prev };
-      if (nextError) {
-        next[field] = nextError;
-      } else {
-        delete next[field];
-      }
-      return next;
-    });
+    setSectionFieldErrors((prev) => updateFieldError(prev, field, nextError));
   }
 
   function updateSectionField(
@@ -1023,16 +1015,20 @@ export function useClassroomWorkspace(
     }
     if (customTimerErrors[field] || customTimerErrors.duration) {
       setCustomTimerErrors((prev) => {
-        const next: FieldErrors<CustomTimerFieldKey> = { ...prev };
-        if (prev[field]) {
-          const fieldErr = validateCustomTimerField(field, nextInput);
-          if (fieldErr) next[field] = fieldErr;
-          else delete next[field];
+        let next = prev;
+        if (next[field]) {
+          next = updateFieldError(
+            next,
+            field,
+            validateCustomTimerField(field, nextInput),
+          );
         }
-        if (prev.duration) {
-          const durationErr = validateCustomTimerField("duration", nextInput);
-          if (durationErr) next.duration = durationErr;
-          else delete next.duration;
+        if (next.duration) {
+          next = updateFieldError(
+            next,
+            "duration",
+            validateCustomTimerField("duration", nextInput),
+          );
         }
         return next;
       });
@@ -1052,15 +1048,16 @@ export function useClassroomWorkspace(
       seconds: customSecondsInput,
     };
     setCustomTimerErrors((prev) => {
-      const next: FieldErrors<CustomTimerFieldKey> = { ...prev };
-      const fieldErr = validateCustomTimerField(field, input);
-      if (fieldErr) next[field] = fieldErr;
-      else delete next[field];
-
-      const durationErr = validateCustomTimerField("duration", input);
-      if (durationErr) next.duration = durationErr;
-      else delete next.duration;
-      return next;
+      const next = updateFieldError<CustomTimerFieldKey>(
+        prev,
+        field,
+        validateCustomTimerField(field, input),
+      );
+      return updateFieldError(
+        next,
+        "duration",
+        validateCustomTimerField("duration", input),
+      );
     });
   }
 

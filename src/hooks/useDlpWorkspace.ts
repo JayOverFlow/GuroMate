@@ -21,6 +21,7 @@ import {
 } from "../utils/confirmAction";
 import {
   DLP_BUILDER_FIELDS,
+  updateFieldError,
   validateDlpBuilderField,
   validateDlpBuilderForm,
   type DlpBuilderFieldKey,
@@ -144,6 +145,7 @@ export function useDlpWorkspace(
     FieldErrors<DlpBuilderFieldKey>
   >({});
   const formRef = useRef<HTMLFormElement>(null);
+  const interactedFieldsRef = useRef<Set<DlpBuilderFieldKey>>(new Set());
   const launchIntentRef = useRef(Boolean(initialLaunchTarget));
   const confirmDialog = useConfirmDialog();
 
@@ -205,6 +207,7 @@ export function useDlpWorkspace(
     if (!initialLaunchTarget) return;
     launchIntentRef.current = true;
     setSelectedDlpId("");
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
     if (initialLaunchTarget.mode === "derive") {
       setBuilderMode("derive");
@@ -224,6 +227,8 @@ export function useDlpWorkspace(
   useEffect(() => {
     const match = dlps.find((d) => d.id === selectedDlpId) ?? null;
     setDraftDlp(match ? structuredClone(match) : null);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
   }, [dlps, selectedDlpId]);
 
   const competencyMap = useMemo(
@@ -262,6 +267,7 @@ export function useDlpWorkspace(
 
   function selectBuilderMode(mode: BuilderMode) {
     setBuilderMode(mode);
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
   }
 
@@ -273,24 +279,20 @@ export function useDlpWorkspace(
       selectedCompetencyIds: readonly string[];
     }>,
   ) {
+    if (!interactedFieldsRef.current.has(field) && !fieldErrors[field]) {
+      return;
+    }
     const message = validateDlpBuilderField(field, {
       mode: overrides?.mode ?? builderMode,
       gradeAndSection: overrides?.gradeAndSection ?? gradeAndSection,
       selectedCompetencyIds:
         overrides?.selectedCompetencyIds ?? selectedCompetencyIds,
     });
-    setFieldErrors((prev) => {
-      if (!message) {
-        if (!(field in prev)) return prev;
-        const next = { ...prev };
-        delete next[field];
-        return next;
-      }
-      return prev[field] === message ? prev : { ...prev, [field]: message };
-    });
+    setFieldErrors((prev) => updateFieldError(prev, field, message));
   }
 
   function handleGradeAndSectionChange(value: string) {
+    interactedFieldsRef.current.add("gradeAndSection");
     setGradeAndSection(value);
     if (fieldErrors.gradeAndSection) {
       validateField("gradeAndSection", { gradeAndSection: value });
@@ -299,6 +301,7 @@ export function useDlpWorkspace(
 
   function addScratchCompetency() {
     if (!pickedCompetencyId) return;
+    interactedFieldsRef.current.add("selectedCompetencyIds");
     const nextIds = selectedCompetencyIds.includes(pickedCompetencyId)
       ? selectedCompetencyIds
       : [...selectedCompetencyIds, pickedCompetencyId];
@@ -311,6 +314,7 @@ export function useDlpWorkspace(
   }
 
   function removeScratchCompetency(id: string) {
+    interactedFieldsRef.current.add("selectedCompetencyIds");
     setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
   }
 
@@ -324,6 +328,9 @@ export function useDlpWorkspace(
   async function handleGenerate(event: FormEvent) {
     event.preventDefault();
     setStatus(null);
+    for (const field of DLP_BUILDER_FIELDS) {
+      interactedFieldsRef.current.add(field);
+    }
     const errors = validateDlpBuilderForm({
       mode: builderMode,
       gradeAndSection,
@@ -341,6 +348,7 @@ export function useDlpWorkspace(
       }
       return;
     }
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
     setGenerating(true);
     try {

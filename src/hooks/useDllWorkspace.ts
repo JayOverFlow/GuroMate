@@ -17,6 +17,8 @@ import {
 } from "../engine/types";
 import {
   DLL_BUILDER_FIELDS,
+  parseDllSessionFieldKey,
+  updateFieldError,
   validateDllBuilderField,
   validateDllBuilderForm,
   type DllBuilderFieldKey,
@@ -149,6 +151,7 @@ export function useDllWorkspace(
     Partial<Record<SessionNumber, HTMLElement | null>>
   >({});
   const sessionsGroupRef = useRef<HTMLDivElement>(null);
+  const interactedFieldsRef = useRef<Set<DllBuilderFieldKey>>(new Set());
   const launchIntentRef = useRef(Boolean(initialLaunchTarget));
 
   const loadWorkspaceData = useCallback(async () => {
@@ -200,6 +203,7 @@ export function useDllWorkspace(
     launchIntentRef.current = true;
     setSelectedDllId("");
     setSessionConfigs((prev) => applyDllLaunchTarget(prev, initialLaunchTarget));
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
     const trimmed = initialLaunchTarget.competencyId.trim();
     if (trimmed) setPickedCompetencyId(trimmed);
@@ -209,6 +213,7 @@ export function useDllWorkspace(
   useEffect(() => {
     const match = dlls.find((d) => d.id === selectedDllId) ?? null;
     setDraftDll(match ? structuredClone(match) : null);
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
   }, [dlls, selectedDllId]);
 
@@ -220,10 +225,10 @@ export function useDllWorkspace(
     } else if (field === "sessions") {
       sessionsGroupRef.current?.focus();
     } else {
-      const sessionNumber = Number(
-        field.slice("session-".length),
-      ) as SessionNumber;
-      sessionCardRefs.current[sessionNumber]?.focus();
+      const sessionNumber = parseDllSessionFieldKey(field);
+      if (sessionNumber !== null) {
+        sessionCardRefs.current[sessionNumber]?.focus();
+      }
     }
   }, [focusRequest]);
 
@@ -245,6 +250,7 @@ export function useDllWorkspace(
   }, [sessionConfigs, competencyMap]);
 
   function updateGradeAndSection(value: string) {
+    interactedFieldsRef.current.add("gradeAndSection");
     setGradeAndSection(value);
     setFieldErrors((prev) => {
       if (!prev.gradeAndSection) return prev;
@@ -252,47 +258,38 @@ export function useDllWorkspace(
         gradeAndSection: value,
         sessions: sessionConfigs,
       });
-      if (nextMsg === prev.gradeAndSection) return prev;
-      const next = { ...prev };
-      if (nextMsg) next.gradeAndSection = nextMsg;
-      else delete next.gradeAndSection;
-      return next;
+      return updateFieldError(prev, "gradeAndSection", nextMsg);
     });
   }
 
   function validateGradeAndSectionOnBlur() {
+    if (
+      !interactedFieldsRef.current.has("gradeAndSection") &&
+      !fieldErrors.gradeAndSection
+    ) {
+      return;
+    }
     const nextMsg = validateDllBuilderField("gradeAndSection", {
       gradeAndSection,
       sessions: sessionConfigs,
     });
-    setFieldErrors((prev) => {
-      if (nextMsg === prev.gradeAndSection) return prev;
-      const next = { ...prev };
-      if (nextMsg) next.gradeAndSection = nextMsg;
-      else delete next.gradeAndSection;
-      return next;
-    });
+    setFieldErrors((prev) =>
+      updateFieldError(prev, "gradeAndSection", nextMsg),
+    );
   }
 
   function syncActiveSessionErrors(nextSessions: DllSessionConfig[]) {
     setFieldErrors((prev) => {
-      let changed = false;
-      const next = { ...prev };
+      let next = prev;
       for (const field of DLL_BUILDER_FIELDS) {
-        if (field === "gradeAndSection" || !prev[field]) continue;
+        if (field === "gradeAndSection" || !next[field]) continue;
         const nextMsg = validateDllBuilderField(field, {
           gradeAndSection,
           sessions: nextSessions,
         });
-        if (!nextMsg) {
-          delete next[field];
-          changed = true;
-        } else if (nextMsg !== prev[field]) {
-          next[field] = nextMsg;
-          changed = true;
-        }
+        next = updateFieldError(next, field, nextMsg);
       }
-      return changed ? next : prev;
+      return next;
     });
   }
 
@@ -368,6 +365,9 @@ export function useDllWorkspace(
 
   async function handleGenerate(event: FormEvent) {
     event.preventDefault();
+    for (const field of DLL_BUILDER_FIELDS) {
+      interactedFieldsRef.current.add(field);
+    }
     const errors = validateDllBuilderForm({
       gradeAndSection,
       sessions: sessionConfigs,
@@ -387,6 +387,7 @@ export function useDllWorkspace(
       return;
     }
 
+    interactedFieldsRef.current.clear();
     setFieldErrors({});
     setStatus(null);
     setGenerating(true);

@@ -7,9 +7,11 @@ import {
   isNonEmptyText,
   isValidHttpUrl,
   parseCustomTimerDuration,
+  parseDllSessionFieldKey,
   parseQuizItemCount,
   parseQuizItemCounts,
   parseRosterText,
+  updateFieldError,
   validateClassSectionField,
   validateClassSectionForm,
   validateCustomCompetencyField,
@@ -28,6 +30,7 @@ import {
   type CustomCompetencyFormInput,
   type DllBuilderFormInput,
   type DlpBuilderFormInput,
+  type FieldErrors,
   type QuizBuilderFormInput,
 } from "./formValidation";
 
@@ -67,6 +70,31 @@ describe("buildDescribedBy", () => {
     expect(buildDescribedBy(null, "name-err", false)).toBeUndefined();
     expect(buildDescribedBy(null, "name-err", true)).toBe("name-err");
     expect(buildDescribedBy("   ", "name-err", false)).toBeUndefined();
+  });
+});
+
+describe("updateFieldError and parseDllSessionFieldKey", () => {
+  it("sets, updates, clears, and preserves identity when field errors do not change", () => {
+    const empty: FieldErrors<"a" | "b"> = {};
+    expect(updateFieldError(empty, "a", undefined)).toBe(empty);
+
+    const withA = updateFieldError(empty, "a", "Required.");
+    expect(withA).toEqual({ a: "Required." });
+    expect(updateFieldError(withA, "a", "Required.")).toBe(withA);
+
+    const updatedA = updateFieldError(withA, "a", "Too short.");
+    expect(updatedA).toEqual({ a: "Too short." });
+
+    const cleared = updateFieldError(updatedA, "a", undefined);
+    expect(cleared).toEqual({});
+    expect("a" in cleared).toBe(false);
+  });
+
+  it("parses valid DLL session field keys and returns null for non-session fields", () => {
+    expect(parseDllSessionFieldKey("session-1")).toBe(1);
+    expect(parseDllSessionFieldKey("session-5")).toBe(5);
+    expect(parseDllSessionFieldKey("gradeAndSection")).toBeNull();
+    expect(parseDllSessionFieldKey("sessions")).toBeNull();
   });
 });
 
