@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  loadClassroomPreferences,
+  shouldPlayClassroomCue,
+} from "../engine/classroomPreferences";
+import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 export const TIMER_PRESET_MINUTES = [1, 3, 5, 10, 15] as const;
+
+export function shouldPlayTimerAlarm(
+  soundEnabled: boolean,
+  prefersReducedMotion: boolean,
+): boolean {
+  return shouldPlayClassroomCue({
+    soundEnabled,
+    prefersReducedMotion,
+    isInstant: false,
+  });
+}
 
 export function formatClock(totalSeconds: number): string {
   const clamped = Math.max(0, Math.floor(totalSeconds));
@@ -60,9 +76,11 @@ export interface ClassroomTimerState {
   resetTimer: () => void;
   selectPreset: (minutes: number) => void;
   applyCustomTime: () => void;
+  setSoundEnabled: (enabled: boolean) => void;
 }
 
 export function useClassroomTimer(): ClassroomTimerState {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [durationSeconds, setDurationSeconds] = useState<number>(5 * 60);
   const [remainingSeconds, setRemainingSeconds] = useState<number>(5 * 60);
   const [timerRunning, setTimerRunning] = useState(false);
@@ -71,6 +89,15 @@ export function useClassroomTimer(): ClassroomTimerState {
   const [customSeconds, setCustomSeconds] = useState(30);
   const endTimeRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const soundEnabledRef = useRef<boolean>(
+    loadClassroomPreferences().soundEnabled,
+  );
+  const prefersReducedMotionRef = useRef<boolean>(prefersReducedMotion);
+  prefersReducedMotionRef.current = prefersReducedMotion;
+
+  const setSoundEnabled = useCallback((enabled: boolean) => {
+    soundEnabledRef.current = enabled;
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -92,7 +119,14 @@ export function useClassroomTimer(): ClassroomTimerState {
         endTimeRef.current = null;
         setTimerRunning(false);
         setTimerExpired(true);
-        playAlarmChime(audioCtxRef.current);
+        if (
+          shouldPlayTimerAlarm(
+            soundEnabledRef.current,
+            prefersReducedMotionRef.current,
+          )
+        ) {
+          playAlarmChime(audioCtxRef.current);
+        }
       }
     };
 
@@ -178,5 +212,6 @@ export function useClassroomTimer(): ClassroomTimerState {
     resetTimer,
     selectPreset,
     applyCustomTime,
+    setSoundEnabled,
   };
 }

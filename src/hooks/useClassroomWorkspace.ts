@@ -34,7 +34,6 @@ import {
   advanceGroupPlayback,
   INITIAL_GROUP_PLAYBACK_STATE,
   isGroupSwapAllowed,
-  resolveActiveGroupAnimationMode,
   shouldPlayCardDealTick,
   skipGroupPlayback,
   startGroupPlayback,
@@ -44,7 +43,6 @@ import {
   commitPendingDraw,
   createInitialPickerState,
   isPickerLocked,
-  normalizeAvailablePickerMode,
   resetPickerPool,
   sampleCardFlipFrame,
   sampleSlotReelWindow,
@@ -194,7 +192,6 @@ export function useClassroomWorkspace(
   );
   const [groupGenerationCount, setGroupGenerationCount] = useState(0);
   const groupRafRef = useRef<number | null>(null);
-  const canPlayCueRef = useRef<(isInstant?: boolean) => boolean>(() => false);
 
   const [projectorOverlayTab, setProjectorOverlayTab] =
     useState<ToolTab | null>(null);
@@ -202,6 +199,13 @@ export function useClassroomWorkspace(
     useState<ToolTab | null>(null);
 
   const isGroupAnimating = groupPlayback.phase === "animating";
+  const isGroupAnimatingRef = useRef(isGroupAnimating);
+  isGroupAnimatingRef.current = isGroupAnimating;
+
+  const { setSoundEnabled: setTimerSoundEnabled } = timer;
+  useEffect(() => {
+    setTimerSoundEnabled(preferences.soundEnabled);
+  }, [setTimerSoundEnabled, preferences.soundEnabled]);
 
   const cancelGroupAnimation = useCallback(() => {
     if (groupRafRef.current !== null) {
@@ -253,6 +257,7 @@ export function useClassroomWorkspace(
 
   const setGroupAnimationMode = useCallback(
     (groupModePref: GroupAnimationMode) => {
+      if (isGroupAnimatingRef.current) return;
       updatePreferences((prev) => ({ ...prev, groupMode: groupModePref }));
     },
     [updatePreferences],
@@ -285,7 +290,9 @@ export function useClassroomWorkspace(
   }, []);
 
   const setSelectedSectionId = useCallback((id: string) => {
-    if (isPickerLocked(pickerStateRef.current)) return;
+    if (isPickerLocked(pickerStateRef.current) || isGroupAnimatingRef.current) {
+      return;
+    }
     setSelectedSectionIdState(id);
   }, []);
 
@@ -357,6 +364,7 @@ export function useClassroomWorkspace(
   const pickedStudent = pickerState.pickedStudent;
   const poolExhausted = pickerState.poolExhausted;
   const isPickerAnimating = isPickerLocked(pickerState);
+  const isAnyPlaybackActive = isPickerAnimating || isGroupAnimating;
 
   const remainingInPoolCount = useMemo(() => {
     if (!removePickedFromPool) return presentStudents.length;
@@ -424,7 +432,9 @@ export function useClassroomWorkspace(
 
   async function handleSaveSection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isPickerLocked(pickerStateRef.current)) return;
+    if (isPickerLocked(pickerStateRef.current) || isGroupAnimatingRef.current) {
+      return;
+    }
     setSavingSection(true);
     setStatus(null);
     try {
@@ -464,7 +474,13 @@ export function useClassroomWorkspace(
   }
 
   async function handleDeleteSection() {
-    if (!activeSection || isPickerLocked(pickerStateRef.current)) return;
+    if (
+      !activeSection ||
+      isPickerLocked(pickerStateRef.current) ||
+      isGroupAnimatingRef.current
+    ) {
+      return;
+    }
     setStatus(null);
     try {
       const res = await fetch(
@@ -484,8 +500,19 @@ export function useClassroomWorkspace(
     }
   }
 
+  function clearAfterAttendanceChange() {
+    setPoolExhausted(false);
+    setPickerLastLandedWindow(null);
+    setPickerRevealedCard(null);
+    setGroups([]);
+    setSwapSelection(null);
+    setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
+  }
+
   function toggleAbsent(index: number) {
-    if (isPickerLocked(pickerStateRef.current) || isGroupAnimating) return;
+    if (isPickerLocked(pickerStateRef.current) || isGroupAnimatingRef.current) {
+      return;
+    }
     setAbsentIndices((prev) => {
       const next = new Set(prev);
       if (next.has(index)) {
@@ -495,23 +522,15 @@ export function useClassroomWorkspace(
       }
       return next;
     });
-    setPoolExhausted(false);
-    setPickerLastLandedWindow(null);
-    setPickerRevealedCard(null);
-    setGroups([]);
-    setSwapSelection(null);
-    setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
+    clearAfterAttendanceChange();
   }
 
   function resetAllAttendance() {
-    if (isPickerLocked(pickerStateRef.current) || isGroupAnimating) return;
+    if (isPickerLocked(pickerStateRef.current) || isGroupAnimatingRef.current) {
+      return;
+    }
     setAbsentIndices(new Set());
-    setPoolExhausted(false);
-    setPickerLastLandedWindow(null);
-    setPickerRevealedCard(null);
-    setGroups([]);
-    setSwapSelection(null);
-    setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
+    clearAfterAttendanceChange();
   }
 
   const canPlayClassroomCue = useCallback(
@@ -525,7 +544,6 @@ export function useClassroomWorkspace(
   );
   const canPlayClassroomCueRef = useRef(canPlayClassroomCue);
   canPlayClassroomCueRef.current = canPlayClassroomCue;
-  canPlayCueRef.current = canPlayClassroomCue;
 
   const finalizePickerDraw = useCallback(
     (expectedDrawId?: number, playChime = true) => {
@@ -695,8 +713,7 @@ export function useClassroomWorkspace(
       preferences.pickerMode,
       prefersReducedMotion,
     );
-    const playbackMode = normalizeAvailablePickerMode(effectiveMode);
-    if (canPlayClassroomCue(playbackMode === "instant")) {
+    if (canPlayClassroomCue(effectiveMode === "instant")) {
       classroomAudio.unlock();
     }
 
@@ -737,11 +754,6 @@ export function useClassroomWorkspace(
     triggerPickerDraw(slotIndex);
   }
 
-  function handleResetCardSpread() {
-    if (isPickerLocked(pickerStateRef.current)) return;
-    setPickerRevealedCard(null);
-  }
-
   function handleSkipPicker() {
     finalizePickerDraw(undefined, true);
   }
@@ -773,12 +785,12 @@ export function useClassroomWorkspace(
 
     setGroupGenerationCount((count) => count + 1);
 
-    const activeMode = resolveActiveGroupAnimationMode(
+    const activeMode = resolveEffectiveGroupMode(
       preferences.groupMode,
       prefersReducedMotion,
     );
     const isInstant = activeMode === "instant";
-    if (!isInstant && canPlayCueRef.current(false)) {
+    if (!isInstant && canPlayClassroomCueRef.current(false)) {
       classroomAudio.unlock();
     }
 
@@ -810,7 +822,7 @@ export function useClassroomWorkspace(
           lastTickAt,
         )
       ) {
-        if (canPlayCueRef.current(false)) {
+        if (canPlayClassroomCueRef.current(false)) {
           classroomAudio.playCardDeal(
             nextState.revealedCount / currentState.plan.totalCards,
           );
@@ -822,7 +834,7 @@ export function useClassroomWorkspace(
         nextState.mingleBeat === "cluster" &&
         nextState.phase === "animating"
       ) {
-        if (canPlayCueRef.current(false)) {
+        if (canPlayClassroomCueRef.current(false)) {
           classroomAudio.playClusterCue();
         }
       }
@@ -840,7 +852,7 @@ export function useClassroomWorkspace(
 
       if (nextState.phase === "settled") {
         groupRafRef.current = null;
-        if (canPlayCueRef.current(false)) {
+        if (canPlayClassroomCueRef.current(false)) {
           classroomAudio.playRevealChime();
         }
         return;
@@ -955,10 +967,6 @@ export function useClassroomWorkspace(
     preferences.pickerMode,
     prefersReducedMotion,
   );
-  const effectiveGroupMode = resolveEffectiveGroupMode(
-    preferences.groupMode,
-    prefersReducedMotion,
-  );
 
   return {
     stageRefs,
@@ -966,13 +974,11 @@ export function useClassroomWorkspace(
     preferences,
     prefersReducedMotion,
     effectivePickerMode,
-    effectiveGroupMode,
     soundEnabled: preferences.soundEnabled,
     setPickerAnimationMode,
     setGroupAnimationMode,
     toggleSound,
     classroomAudio,
-    canPlayClassroomCue,
     sections,
     selectedSectionId,
     setSelectedSectionId,
@@ -997,6 +1003,7 @@ export function useClassroomWorkspace(
     setPoolExhausted,
     remainingInPoolCount,
     isPickerAnimating,
+    isAnyPlaybackActive,
     isPickerSingleSpotlight:
       pickerState.pendingDraw?.mode === "slot" &&
       pickerState.pendingDraw.plan.isSingleStudentSpotlight,
@@ -1028,14 +1035,12 @@ export function useClassroomWorkspace(
     groupGenerationCount,
     projectorTab,
     projectorOverlayTab,
-    isProjectorActive: projectorTab !== null,
     handleSaveSection,
     handleDeleteSection,
     toggleAbsent,
     resetAllAttendance,
     handlePickStudent,
     handlePickCardSlot,
-    handleResetCardSpread,
     handleSkipPicker,
     handleResetPool,
     handleGenerateGroups,
@@ -1043,7 +1048,6 @@ export function useClassroomWorkspace(
     handleGroupStudentClick,
     handleCustomDurationSubmit,
     toggleProjectorView,
-    exitProjectorView,
     handleTabKeyDown,
   };
 }

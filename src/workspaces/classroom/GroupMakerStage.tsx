@@ -1,5 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { GroupAnimationMode } from "../../engine/classroomPreferences";
+import {
+  resolveEffectiveGroupMode,
+  type GroupAnimationMode,
+} from "../../engine/classroomPreferences";
 import type {
   GroupGenerationOptions,
   GroupSlot,
@@ -8,13 +11,10 @@ import type {
 import {
   getRemainingDeckCount,
   isGroupCardRevealed,
-  resolveActiveGroupAnimationMode,
   type ChipDensityTier,
   type GroupPlaybackState,
 } from "../../engine/groupAnimation";
-
-const OVERLAY_STAGE_CLASS =
-  "fixed inset-0 z-50 rounded-none border-0 overflow-auto bg-surface p-gutter-xl";
+import { OVERLAY_STAGE_CLASS } from "./projectorStyles";
 
 const GROUP_MODE_OPTIONS: ReadonlyArray<{
   value: GroupAnimationMode;
@@ -112,7 +112,7 @@ export function GroupMakerStage({
   projectorToggle,
 }: GroupMakerStageProps) {
   const selectedUiMode = animationMode;
-  const effectiveMode = resolveActiveGroupAnimationMode(
+  const effectiveMode = resolveEffectiveGroupMode(
     animationMode,
     prefersReducedMotion,
   );
@@ -171,7 +171,7 @@ export function GroupMakerStage({
                     e.target.value as GroupGenerationOptions["mode"],
                   )
                 }
-                className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
               >
                 <option value="count">Number of Groups</option>
                 <option value="size">Students per Group</option>
@@ -199,7 +199,7 @@ export function GroupMakerStage({
                     Math.max(1, Number.parseInt(e.target.value || "1", 10)),
                   )
                 }
-                className="w-28 px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-mono text-mono-md text-on-surface tabular-nums focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                className="w-28 px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-mono text-mono-md text-on-surface tabular-nums focus:border-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
               />
             </div>
 
@@ -221,7 +221,7 @@ export function GroupMakerStage({
                       aria-pressed={isSelected}
                       disabled={isAnimating}
                       onClick={() => onAnimationModeChange(option.value)}
-                      className={`inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded-sm font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 ${
+                      className={`inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded-sm font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${
                         isSelected
                           ? "bg-primary text-on-primary"
                           : "text-on-surface-variant hover:text-on-surface"
@@ -246,7 +246,7 @@ export function GroupMakerStage({
               type="button"
               disabled={presentCount === 0 || isAnimating}
               onClick={onGenerateGroups}
-              className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+              className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
             >
               <span
                 className="material-symbols-outlined text-title-md"
@@ -334,7 +334,7 @@ export function GroupMakerStage({
                   <button
                     type="button"
                     onClick={onSkipAnimation}
-                    className="shrink-0 inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-surface-container-lowest border border-secondary text-secondary font-label text-label-md hover:bg-secondary/10 focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+                    className="shrink-0 inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-surface-container-lowest border border-secondary text-secondary font-label text-label-md hover:bg-secondary/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
                   >
                     <span
                       className="material-symbols-outlined text-title-md"
@@ -546,7 +546,7 @@ export function GroupMakerStage({
                                       studentIndex,
                                     })
                                   }
-                                  className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${sizeClass} ${
+                                  className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${sizeClass} ${
                                     isAnimating && effectiveMode === "card-deal"
                                       ? "classroom-card-deal-in"
                                       : ""

@@ -13,6 +13,7 @@ import {
 } from "../hooks/useClassroomWorkspace";
 import { GroupMakerStage } from "./classroom/GroupMakerStage";
 import { PickerStage } from "./classroom/PickerStage";
+import { OVERLAY_STAGE_CLASS } from "./classroom/projectorStyles";
 
 interface ClassroomWorkspaceProps {
   timer: ClassroomTimerState;
@@ -20,10 +21,7 @@ interface ClassroomWorkspaceProps {
 }
 
 const INPUT_CLASS =
-  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
-
-const OVERLAY_STAGE_CLASS =
-  "fixed inset-0 z-50 rounded-none border-0 overflow-auto bg-surface p-gutter-xl";
+  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50";
 
 export function ClassroomWorkspace({
   timer,
@@ -67,6 +65,7 @@ export function ClassroomWorkspace({
     setPoolExhausted,
     remainingInPoolCount,
     isPickerAnimating,
+    isAnyPlaybackActive,
     isPickerSingleSpotlight,
     pickerReelWindow,
     pickerLastLandedWindow,
@@ -93,7 +92,6 @@ export function ClassroomWorkspace({
     resetAllAttendance,
     handlePickStudent,
     handlePickCardSlot,
-    handleResetCardSpread,
     handleSkipPicker,
     handleResetPool,
     handleGenerateGroups,
@@ -157,9 +155,9 @@ export function ClassroomWorkspace({
               id={`${baseId}-active-section`}
               aria-label="Active Class Section"
               value={selectedSectionId}
-              disabled={isPickerAnimating || isGroupAnimating}
+              disabled={isAnyPlaybackActive}
               onChange={(e) => setSelectedSectionId(e.target.value)}
-              className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+              className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
             >
               {sections.map((section) => (
                 <option key={section.id} value={section.id}>
@@ -174,12 +172,12 @@ export function ClassroomWorkspace({
             <>
               <button
                 type="button"
-                disabled={isPickerAnimating || isGroupAnimating}
+                disabled={isAnyPlaybackActive}
                 onClick={() => {
                   setSectionForm(formFromSection(activeSection));
                   setShowSectionForm(true);
                 }}
-                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
               >
                 <span
                   className="material-symbols-outlined text-title-md"
@@ -191,9 +189,9 @@ export function ClassroomWorkspace({
               </button>
               <button
                 type="button"
-                disabled={isPickerAnimating || isGroupAnimating}
+                disabled={isAnyPlaybackActive}
                 onClick={() => void handleDeleteSection()}
-                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-error disabled:opacity-50"
+                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:opacity-50"
               >
                 <span
                   className="material-symbols-outlined text-title-md"
@@ -208,14 +206,14 @@ export function ClassroomWorkspace({
 
           <button
             type="button"
-            disabled={isPickerAnimating || isGroupAnimating}
+            disabled={isAnyPlaybackActive}
             onClick={() => {
               setSectionForm(emptySectionForm());
               setShowSectionForm((prev) =>
                 prev && !sectionForm.id ? false : true,
               );
             }}
-            className="shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
+            className="shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
           >
             <span
               className="material-symbols-outlined text-title-md"
@@ -272,6 +270,7 @@ export function ClassroomWorkspace({
               </label>
               <select
                 id={`${baseId}-section-grade`}
+                disabled={savingSection || isAnyPlaybackActive}
                 value={String(sectionForm.gradeLevel)}
                 onChange={(e) =>
                   setSectionForm((prev) => ({
@@ -300,6 +299,7 @@ export function ClassroomWorkspace({
                 id={`${baseId}-section-name`}
                 type="text"
                 required
+                disabled={savingSection || isAnyPlaybackActive}
                 placeholder="e.g. 7-Rizal"
                 value={sectionForm.sectionName}
                 onChange={(e) =>
@@ -330,6 +330,7 @@ export function ClassroomWorkspace({
             <textarea
               id={`${baseId}-section-roster`}
               required
+              disabled={savingSection || isAnyPlaybackActive}
               rows={7}
               aria-describedby={`${baseId}-section-roster-hint`}
               placeholder={"Dela Cruz, Juan\nReyes, Maria\nSantos, Carlo"}
@@ -347,8 +348,8 @@ export function ClassroomWorkspace({
           <div className="flex flex-wrap items-center gap-gutter-sm">
             <button
               type="submit"
-              disabled={savingSection}
-              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+              disabled={savingSection || isAnyPlaybackActive}
+              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-60"
             >
               {savingSection
                 ? "Saving..."
@@ -358,11 +359,13 @@ export function ClassroomWorkspace({
             </button>
             <button
               type="button"
+              disabled={savingSection || isAnyPlaybackActive}
               onClick={() => {
+                if (savingSection || isAnyPlaybackActive) return;
                 setShowSectionForm(false);
                 setSectionForm(emptySectionForm());
               }}
-              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary"
+              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
             >
               Cancel
             </button>
@@ -438,7 +441,7 @@ export function ClassroomWorkspace({
           <button
             type="button"
             onClick={timer.timerRunning ? timer.pauseTimer : timer.startTimer}
-            className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant text-label-md font-label text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+            className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant text-label-md font-label text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span
               className="material-symbols-outlined text-title-md text-primary"
@@ -458,7 +461,7 @@ export function ClassroomWorkspace({
           <button
             type="button"
             onClick={timer.resetTimer}
-            className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant text-label-md font-label text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+            className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant text-label-md font-label text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span
               className="material-symbols-outlined text-title-md"
@@ -471,7 +474,7 @@ export function ClassroomWorkspace({
           <button
             type="button"
             onClick={() => void toggleProjectorView("timer")}
-            className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary text-label-md font-label hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+            className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary text-label-md font-label hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span
               className="material-symbols-outlined text-title-md"
@@ -523,7 +526,7 @@ export function ClassroomWorkspace({
                   tabIndex={selected ? 0 : -1}
                   onClick={() => setActiveTab(tab.id)}
                   onKeyDown={(e) => handleTabKeyDown(e, idx)}
-                  className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+                  className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                     selected
                       ? "bg-surface-container-lowest text-primary border border-outline-variant"
                       : "text-on-surface-variant hover:text-on-surface"
@@ -594,7 +597,6 @@ export function ClassroomWorkspace({
                 revealCount={pickerRevealCount}
                 onPickStudent={handlePickStudent}
                 onPickCardSlot={handlePickCardSlot}
-                onResetCardSpread={handleResetCardSpread}
                 onSkip={handleSkipPicker}
                 onResetPool={handleResetPool}
                 soundControl={
@@ -617,7 +619,7 @@ export function ClassroomWorkspace({
                 students={activeSection.students}
                 absentIndices={absentIndices}
                 usedIndices={usedIndices}
-                disabled={isPickerAnimating}
+                disabled={isAnyPlaybackActive}
                 onToggle={toggleAbsent}
                 onResetAll={resetAllAttendance}
               />
@@ -679,7 +681,7 @@ export function ClassroomWorkspace({
                 students={activeSection.students}
                 absentIndices={absentIndices}
                 usedIndices={usedIndices}
-                disabled={isGroupAnimating}
+                disabled={isAnyPlaybackActive}
                 onToggle={toggleAbsent}
                 onResetAll={resetAllAttendance}
               />
@@ -771,7 +773,7 @@ export function ClassroomWorkspace({
                   onClick={
                     timer.timerRunning ? timer.pauseTimer : timer.startTimer
                   }
-                  className="px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary"
+                  className="px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   {timer.timerRunning
                     ? "Pause"
@@ -783,7 +785,7 @@ export function ClassroomWorkspace({
                 <button
                   type="button"
                   onClick={timer.resetTimer}
-                  className="px-gutter-lg py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary"
+                  className="px-gutter-lg py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   Reset
                 </button>
@@ -857,7 +859,7 @@ export function ClassroomWorkspace({
                 </div>
                 <button
                   type="submit"
-                  className="px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
+                  className="px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   Set Custom Time
                 </button>
@@ -892,7 +894,7 @@ function SoundToggleButton({
             : "Enable classroom sound cues"
       }
       onClick={onToggle}
-      className={`shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded border font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+      className={`shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded border font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
         soundEnabled && !prefersReducedMotion
           ? "bg-surface-container-lowest border-primary/40 text-primary hover:bg-surface-container-low"
           : "bg-surface-container-low border-outline-variant text-on-surface-variant hover:bg-surface-container"
@@ -920,7 +922,7 @@ function ProjectorToggleButton({
     <button
       type="button"
       onClick={onToggle}
-      className={`shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded border font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+      className={`shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded border font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
         active
           ? "bg-secondary text-on-secondary border-secondary hover:bg-secondary/90"
           : "bg-surface-container-lowest border-outline-variant text-on-surface hover:bg-surface-container-low"
@@ -1004,7 +1006,7 @@ function AttendancePoolGrid({
               disabled={disabled}
               aria-pressed={!isAbsent}
               onClick={() => onToggle(index)}
-              className={`p-gutter-sm rounded border text-left flex items-center justify-between gap-gutter-xs transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 ${
+              className={`p-gutter-sm rounded border text-left flex items-center justify-between gap-gutter-xs transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${
                 isAbsent
                   ? "bg-warning-container border-outline-variant text-on-warning-container"
                   : isCalled
