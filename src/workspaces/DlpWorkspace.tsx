@@ -5,16 +5,16 @@ import {
   DLP_ACTIVITY_ROWS,
   DLP_INTENTIONS_LIST_FIELDS,
   useDlpWorkspace,
-  type DeriveDlpTarget,
+  type DlpLaunchTarget,
 } from "../hooks/useDlpWorkspace";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
 import { renderMarkdownBlocks } from "./lessonViewHelpers";
 
-export type { DeriveDlpTarget };
+export type { DlpLaunchTarget };
 
 interface DlpWorkspaceProps {
-  initialDeriveTarget?: DeriveDlpTarget | null;
-  onConsumeDeriveTarget?: () => void;
+  initialLaunchTarget?: DlpLaunchTarget | null;
+  onConsumeLaunchTarget?: () => void;
   onCreateQuiz?: (dlpId: string) => void;
 }
 
@@ -22,8 +22,8 @@ const INPUT_CLASS =
   "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
 export function DlpWorkspace({
-  initialDeriveTarget,
-  onConsumeDeriveTarget,
+  initialLaunchTarget,
+  onConsumeLaunchTarget,
   onCreateQuiz,
 }: DlpWorkspaceProps) {
   const headingId = useId();
@@ -72,7 +72,7 @@ export function DlpWorkspace({
     updateDraftActivity,
     handleSaveEdits,
     handleDeleteDlp,
-  } = useDlpWorkspace(initialDeriveTarget, onConsumeDeriveTarget);
+  } = useDlpWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
 
   return (
     <section

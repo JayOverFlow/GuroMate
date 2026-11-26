@@ -18,6 +18,12 @@ import {
   type SessionNumber,
 } from "../engine/types";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
+import {
+  applyQuizLaunchTarget,
+  type QuizLaunchTarget,
+} from "./workspaceLaunchHelpers";
+
+export type { QuizLaunchTarget };
 
 export type ViewMode = "edit" | "markdown";
 export type SourceKind = "standalone" | "dll" | "dlp";
@@ -26,10 +32,6 @@ export interface QuizStatusState {
   tone: "success" | "error";
   text: string;
 }
-
-export type QuizLaunchTarget =
-  | { sourceKind: "dll"; dllId: string; sessionNumber: SessionNumber }
-  | { sourceKind: "dlp"; dlpId: string };
 
 const DEFAULT_COUNTS: QuizItemCounts = {
   multipleChoice: 5,
@@ -146,9 +148,27 @@ export function useQuizWorkspace(
       setSourceKind("dll");
       setSelectedDllId(initialLaunchTarget.dllId);
       setSelectedSessionNumber(initialLaunchTarget.sessionNumber);
-    } else {
+    } else if (initialLaunchTarget.sourceKind === "dlp") {
       setSourceKind("dlp");
       setSelectedDlpId(initialLaunchTarget.dlpId);
+    } else {
+      setSourceKind("standalone");
+      setSelectedCompetencyIds((prev) =>
+        applyQuizLaunchTarget(
+          {
+            selectedQuizId: "",
+            sourceKind: "standalone",
+            selectedDllId: "",
+            selectedSessionNumber: 1,
+            selectedDlpId: "",
+            selectedCompetencyIds: prev,
+            pickedCompetencyId: "",
+          },
+          initialLaunchTarget,
+        ).selectedCompetencyIds,
+      );
+      const trimmed = initialLaunchTarget.competencyId.trim();
+      if (trimmed) setPickedCompetencyId(trimmed);
     }
     onConsumeLaunchTarget?.();
   }, [initialLaunchTarget, onConsumeLaunchTarget]);
