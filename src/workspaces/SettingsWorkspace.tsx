@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { AI_PROVIDERS, formatModelOptionLabel } from "../engine/providers";
 import { TLE_COMPONENTS, type GuroMateSettings } from "../engine/types";
 import { COMPONENT_SHORT_LABELS } from "../hooks/useCurriculumWorkspace";
@@ -7,6 +8,7 @@ import {
   SIGNATORY_FIELDS,
   useSettingsWorkspace,
 } from "../hooks/useSettingsWorkspace";
+import { buildDescribedBy } from "../utils/formValidation";
 
 interface SettingsWorkspaceProps {
   onSettingsSaved?: (settings: GuroMateSettings) => void;
@@ -28,11 +30,11 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
     isCustomModel,
     availableModels,
     status,
-    invalidFields,
+    fieldErrors,
     activeProvider,
     catalogCoverage,
     catalogError,
-    syncFieldValidity,
+    validateField,
     updateProfileField,
     updateProvider,
     selectModelOption,
@@ -61,19 +63,10 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
     );
   }
 
-  const inputClass = (name: string, mono = false) =>
+  const inputClass = (invalid: boolean, mono = false) =>
     `w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border text-on-surface focus-visible:outline-2 focus-visible:outline-primary ${
       mono ? "font-mono text-mono-md" : "font-body text-body-md"
-    } ${
-      invalidFields[name]
-        ? "border-error bg-error-container/20"
-        : "border-outline-variant focus:border-primary"
-    }`;
-
-  const describedBy = (hintId: string | null, errId: string, name: string) => {
-    const ids = [hintId, invalidFields[name] ? errId : null].filter(Boolean);
-    return ids.length ? ids.join(" ") : undefined;
-  };
+    } ${fieldBorderClass(invalid)}`;
 
   return (
     <section
@@ -179,7 +172,8 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
             {SIGNATORY_FIELDS.map((field) => {
               const inputId = `${baseId}-${field.key}`;
               const errId = `${inputId}-err`;
-              const isInvalid = Boolean(invalidFields[field.key]);
+              const errorMessage = fieldErrors[field.key];
+              const isInvalid = Boolean(errorMessage);
               return (
                 <div key={field.key} className="flex flex-col gap-gutter-xs">
                   <label
@@ -195,25 +189,15 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                     autoComplete={field.autoComplete}
                     required
                     value={settings.profile[field.key]}
-                    className={inputClass(field.key)}
+                    className={inputClass(isInvalid)}
                     aria-invalid={isInvalid ? "true" : "false"}
-                    aria-describedby={describedBy(null, errId, field.key)}
-                    onChange={(e) => {
-                      updateProfileField(field.key, e.target.value);
-                      if (invalidFields[field.key]) {
-                        syncFieldValidity(e.currentTarget);
-                      }
-                    }}
-                    onBlur={(e) => syncFieldValidity(e.currentTarget)}
+                    aria-describedby={buildDescribedBy(null, errId, isInvalid)}
+                    onChange={(e) =>
+                      updateProfileField(field.key, e.target.value)
+                    }
+                    onBlur={() => validateField(field.key)}
                   />
-                  {isInvalid && (
-                    <div
-                      id={errId}
-                      className="font-body text-body-sm text-error"
-                    >
-                      {field.errorText}
-                    </div>
-                  )}
+                  <FieldError id={errId} message={errorMessage} />
                 </div>
               );
             })}
@@ -239,29 +223,22 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
               rows={2}
               required
               value={settings.profile.aiDeclaration}
-              className={inputClass("aiDeclaration")}
-              aria-invalid={invalidFields.aiDeclaration ? "true" : "false"}
-              aria-describedby={describedBy(
+              className={inputClass(Boolean(fieldErrors.aiDeclaration))}
+              aria-invalid={fieldErrors.aiDeclaration ? "true" : "false"}
+              aria-describedby={buildDescribedBy(
                 `${baseId}-aiDeclaration-hint`,
                 `${baseId}-aiDeclaration-err`,
-                "aiDeclaration",
+                Boolean(fieldErrors.aiDeclaration),
               )}
-              onChange={(e) => {
-                updateProfileField("aiDeclaration", e.target.value);
-                if (invalidFields.aiDeclaration) {
-                  syncFieldValidity(e.currentTarget);
-                }
-              }}
-              onBlur={(e) => syncFieldValidity(e.currentTarget)}
+              onChange={(e) =>
+                updateProfileField("aiDeclaration", e.target.value)
+              }
+              onBlur={() => validateField("aiDeclaration")}
             />
-            {invalidFields.aiDeclaration && (
-              <div
-                id={`${baseId}-aiDeclaration-err`}
-                className="font-body text-body-sm text-error"
-              >
-                Error: Enter a Declaration of AI Use statement.
-              </div>
-            )}
+            <FieldError
+              id={`${baseId}-aiDeclaration-err`}
+              message={fieldErrors.aiDeclaration}
+            />
           </div>
         </fieldset>
 
@@ -353,22 +330,22 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                   value={
                     isCustomModel ? CUSTOM_MODEL_OPTION : settings.ai.modelId
                   }
-                  className={`${inputClass(isCustomModel ? "modelPreset" : "modelId")} flex-1 min-w-0`}
+                  className={`${inputClass(!isCustomModel && Boolean(fieldErrors.modelId))} flex-1 min-w-0`}
                   aria-invalid={
-                    !isCustomModel && invalidFields.modelId ? "true" : "false"
+                    !isCustomModel && fieldErrors.modelId ? "true" : "false"
                   }
                   aria-describedby={
                     isCustomModel
                       ? `${baseId}-modelId-hint`
-                      : describedBy(
+                      : buildDescribedBy(
                           `${baseId}-modelId-hint`,
                           `${baseId}-modelId-err`,
-                          "modelId",
+                          Boolean(fieldErrors.modelId),
                         )
                   }
                   onChange={(e) => selectModelOption(e.target.value)}
-                  onBlur={(e) => {
-                    if (!isCustomModel) syncFieldValidity(e.currentTarget);
+                  onBlur={() => {
+                    if (!isCustomModel) validateField("modelId");
                   }}
                 >
                   <option value="" disabled>
@@ -410,33 +387,21 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                   autoCapitalize="none"
                   spellCheck={false}
                   value={settings.ai.modelId}
-                  className={inputClass("modelId", true)}
-                  aria-invalid={invalidFields.modelId ? "true" : "false"}
-                  aria-describedby={describedBy(
+                  className={inputClass(Boolean(fieldErrors.modelId), true)}
+                  aria-invalid={fieldErrors.modelId ? "true" : "false"}
+                  aria-describedby={buildDescribedBy(
                     `${baseId}-modelId-hint`,
                     `${baseId}-modelId-err`,
-                    "modelId",
+                    Boolean(fieldErrors.modelId),
                   )}
-                  onChange={(e) => {
-                    updateAiField("modelId", e.target.value);
-                    if (invalidFields.modelId) {
-                      syncFieldValidity(e.currentTarget);
-                    }
-                  }}
-                  onBlur={(e) => syncFieldValidity(e.currentTarget)}
+                  onChange={(e) => updateAiField("modelId", e.target.value)}
+                  onBlur={() => validateField("modelId")}
                 />
               )}
-              {invalidFields.modelId && (
-                <div
-                  id={`${baseId}-modelId-err`}
-                  className="font-body text-body-sm text-error"
-                >
-                  Error:{" "}
-                  {isCustomModel
-                    ? "Enter a custom model ID."
-                    : "Select a model ID."}
-                </div>
-              )}
+              <FieldError
+                id={`${baseId}-modelId-err`}
+                message={fieldErrors.modelId}
+              />
             </div>
 
             <div className="flex flex-col gap-gutter-xs">
@@ -464,29 +429,20 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                 autoCapitalize="none"
                 spellCheck={false}
                 value={settings.ai.baseUrl}
-                className={inputClass("baseUrl", true)}
-                aria-invalid={invalidFields.baseUrl ? "true" : "false"}
-                aria-describedby={describedBy(
+                className={inputClass(Boolean(fieldErrors.baseUrl), true)}
+                aria-invalid={fieldErrors.baseUrl ? "true" : "false"}
+                aria-describedby={buildDescribedBy(
                   `${baseId}-baseUrl-hint`,
                   `${baseId}-baseUrl-err`,
-                  "baseUrl",
+                  Boolean(fieldErrors.baseUrl),
                 )}
-                onChange={(e) => {
-                  updateAiField("baseUrl", e.target.value);
-                  if (invalidFields.baseUrl) {
-                    syncFieldValidity(e.currentTarget);
-                  }
-                }}
-                onBlur={(e) => syncFieldValidity(e.currentTarget)}
+                onChange={(e) => updateAiField("baseUrl", e.target.value)}
+                onBlur={() => validateField("baseUrl")}
               />
-              {invalidFields.baseUrl && (
-                <div
-                  id={`${baseId}-baseUrl-err`}
-                  className="font-body text-body-sm text-error"
-                >
-                  Error: Enter a valid http or https base URL.
-                </div>
-              )}
+              <FieldError
+                id={`${baseId}-baseUrl-err`}
+                message={fieldErrors.baseUrl}
+              />
             </div>
 
             <div className="flex flex-col gap-gutter-xs md:col-span-2">
@@ -520,20 +476,15 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                   autoCapitalize="none"
                   spellCheck={false}
                   value={settings.ai.apiKey}
-                  className={`${inputClass("apiKey", true)} flex-1`}
-                  aria-invalid={invalidFields.apiKey ? "true" : "false"}
-                  aria-describedby={describedBy(
+                  className={`${inputClass(Boolean(fieldErrors.apiKey), true)} flex-1`}
+                  aria-invalid={fieldErrors.apiKey ? "true" : "false"}
+                  aria-describedby={buildDescribedBy(
                     `${baseId}-apiKey-hint`,
                     `${baseId}-apiKey-err`,
-                    "apiKey",
+                    Boolean(fieldErrors.apiKey),
                   )}
-                  onChange={(e) => {
-                    updateAiField("apiKey", e.target.value);
-                    if (invalidFields.apiKey) {
-                      syncFieldValidity(e.currentTarget);
-                    }
-                  }}
-                  onBlur={(e) => syncFieldValidity(e.currentTarget)}
+                  onChange={(e) => updateAiField("apiKey", e.target.value)}
+                  onBlur={() => validateField("apiKey")}
                 />
                 <button
                   type="button"
@@ -558,14 +509,10 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
                   Warning: this displays your API key on screen.
                 </span>
               </div>
-              {invalidFields.apiKey && (
-                <div
-                  id={`${baseId}-apiKey-err`}
-                  className="font-body text-body-sm text-error"
-                >
-                  Error: Enter an API key for {activeProvider.label}.
-                </div>
-              )}
+              <FieldError
+                id={`${baseId}-apiKey-err`}
+                message={fieldErrors.apiKey}
+              />
             </div>
           </div>
 
