@@ -419,16 +419,57 @@
   }
 }
 
-/* Group Maker: Card Deal slide/flip-in transition */
+/* Group Maker: Card Deal Dealer Deck, Flying Cards & Solitaire Stacks */
+.classroom-dealer-card-back {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 248, 245, 0.08) 0,
+    rgba(255, 248, 245, 0.08) 5px,
+    transparent 5px,
+    transparent 10px
+  );
+}
+
+.classroom-deal-flight-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 76px;
+  perspective: 800px;
+  will-change: transform;
+}
+
+.classroom-deal-flight-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.classroom-deal-flight-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.classroom-deal-flight-front {
+  transform: rotateY(180deg);
+}
+
+.classroom-solitaire-card {
+  display: block;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   @keyframes classroom-card-deal-in {
     0% {
-      opacity: 0;
-      transform: translateY(-10px) scale(0.94) rotateX(-16deg);
+      opacity: 0.72;
+      transform: translate3d(0, -8px, 0) scale(0.96);
     }
     100% {
       opacity: 1;
-      transform: translateY(0) scale(1) rotateX(0deg);
+      transform: translate3d(0, 0, 0) scale(1);
     }
   }
 
@@ -449,18 +490,31 @@
     animation-fill-mode: both;
   }
 
-  @keyframes classroom-deck-float {
+  @keyframes classroom-dealer-deck-lift {
     0%,
     100% {
-      transform: translateY(0) scale(1);
+      transform: translate3d(0, 0, 0) scale(1);
     }
     50% {
-      transform: translateY(-2px) scale(1.015);
+      transform: translate3d(0, -2px, 0) scale(1.02);
     }
   }
 
-  .classroom-deck-badge {
-    animation: classroom-deck-float 800ms ease-in-out infinite;
+  .classroom-dealer-deck-top {
+    animation: classroom-dealer-deck-lift 520ms ease-in-out infinite;
+  }
+
+  .classroom-solitaire-card {
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .classroom-solitaire-card:not(:disabled):hover,
+  .classroom-solitaire-card:not(:disabled):focus-visible {
+    transform: translate3d(0, -3px, 0);
+  }
+
+  .classroom-solitaire-card.is-selected {
+    transform: translate3d(0, -4px, 0);
   }
 
   @keyframes classroom-mingle-drift {
