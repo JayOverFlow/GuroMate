@@ -70,6 +70,11 @@ export function ClassroomWorkspace({
     isPickerSingleSpotlight,
     pickerReelWindow,
     pickerLastLandedWindow,
+    pickerCardFlipPlan,
+    pickerCardFlipDrawId,
+    pickerCardFlipWinner,
+    pickerCardFlipFrame,
+    pickerRevealedCard,
     pickerRevealCount,
     groupMode,
     setGroupMode,
@@ -87,6 +92,8 @@ export function ClassroomWorkspace({
     toggleAbsent,
     resetAllAttendance,
     handlePickStudent,
+    handlePickCardSlot,
+    handleResetCardSpread,
     handleSkipPicker,
     handleResetPool,
     handleGenerateGroups,
@@ -553,7 +560,7 @@ export function ClassroomWorkspace({
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter-lg items-start">
-              {/* Random Student Picker Stage (Projector View + Slot Machine / Instant) */}
+              {/* Random Student Picker Stage (Projector View + Slot Machine / Card Flip / Instant) */}
               <PickerStage
                 stageRef={(el) => {
                   stageRefs.current.picker = el;
@@ -579,8 +586,15 @@ export function ClassroomWorkspace({
                 isSingleStudentSpotlight={isPickerSingleSpotlight}
                 reelWindow={pickerReelWindow}
                 lastLandedWindow={pickerLastLandedWindow}
+                cardFlipPlan={pickerCardFlipPlan}
+                cardFlipDrawId={pickerCardFlipDrawId}
+                cardFlipWinner={pickerCardFlipWinner}
+                cardFlipFrame={pickerCardFlipFrame}
+                revealedCard={pickerRevealedCard}
                 revealCount={pickerRevealCount}
                 onPickStudent={handlePickStudent}
+                onPickCardSlot={handlePickCardSlot}
+                onResetCardSpread={handleResetCardSpread}
                 onSkip={handleSkipPicker}
                 onResetPool={handleResetPool}
                 soundControl={

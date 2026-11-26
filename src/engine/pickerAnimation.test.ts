@@ -3,12 +3,16 @@ import { resolveEffectivePickerMode } from "./classroomPreferences";
 import { filterPresentStudents } from "./classroomTools";
 import {
   buildSlotReelPlan,
+  CARD_FLIP_AUTO_TOTAL_MS,
   commitPendingDraw,
+  createCardFlipPlan,
   createInitialPickerState,
+  getMysteryCardCount,
   isPickerLocked,
   normalizeAvailablePickerMode,
   preparePickerDraw,
   resetPickerPool,
+  sampleCardFlipFrame,
   sampleSlotReelWindow,
   SINGLE_STUDENT_SPOTLIGHT_DURATION_MS,
   SLOT_REEL_DURATION_MS,
@@ -174,10 +178,19 @@ describe("pickerAnimation", () => {
     expect(duplicate.state.usedIndices).toEqual(new Set([0]));
   });
 
-  it("reveals immediately in Instant mode or under reduced motion, handles exhausted pools, and normalizes pre-#29 card-flip mode to slot", () => {
+  it("reveals immediately in Instant mode or under reduced motion, handles exhausted pools, and activates card-flip mode", () => {
     expect(normalizeAvailablePickerMode("slot")).toBe("slot");
+    expect(normalizeAvailablePickerMode("card-flip")).toBe("card-flip");
     expect(normalizeAvailablePickerMode("instant")).toBe("instant");
-    expect(normalizeAvailablePickerMode("card-flip")).toBe("slot");
+
+    // Mystery spread card count clamps to 0..5 based on eligible students
+    expect(getMysteryCardCount(-2)).toBe(0);
+    expect(getMysteryCardCount(0)).toBe(0);
+    expect(getMysteryCardCount(1)).toBe(1);
+    expect(getMysteryCardCount(3)).toBe(3);
+    expect(getMysteryCardCount(5)).toBe(5);
+    expect(getMysteryCardCount(12)).toBe(5);
+    expect(getMysteryCardCount(48)).toBe(5);
 
     // Reduced motion resolves "slot" -> "instant" and reveals immediately
     const reducedMode = resolveEffectivePickerMode("slot", true);
@@ -193,15 +206,18 @@ describe("pickerAnimation", () => {
     expect(instantResult.state.pickedStudent).toEqual(STUDENTS[1]);
     expect(instantResult.state.usedIndices).toEqual(new Set([1]));
 
-    // Persisted "card-flip" without reduced motion runs as slot animation before #29 lands
-    const cardFlipFallback = startPickerDraw(instantResult.state, {
+    // Reduced motion also resolves "card-flip" -> "instant"
+    const reducedCardFlipMode = resolveEffectivePickerMode("card-flip", true);
+    const reducedCardFlipResult = startPickerDraw(instantResult.state, {
       presentStudents: STUDENTS,
       removeFromPool: true,
-      effectiveMode: resolveEffectivePickerMode("card-flip", false),
+      effectiveMode: reducedCardFlipMode,
       random: () => 0,
     });
-    expect(cardFlipFallback.outcome).toBe("animating");
-    expect(isPickerLocked(cardFlipFallback.state)).toBe(true);
+    expect(reducedCardFlipResult.outcome).toBe("instant-revealed");
+    expect(isPickerLocked(reducedCardFlipResult.state)).toBe(false);
+    expect(reducedCardFlipResult.state.pickedStudent).toEqual(STUDENTS[0]);
+    expect(reducedCardFlipResult.state.usedIndices).toEqual(new Set([0, 1]));
 
     // Exhausted pool transitions cleanly without starting animation
     const allUsedState = {
@@ -222,5 +238,162 @@ describe("pickerAnimation", () => {
     expect(reset.usedIndices.size).toBe(0);
     expect(reset.pickedStudent).toBeNull();
     expect(reset.poolExhausted).toBe(false);
+  });
+
+  it("plans Card Flip auto-pick (~1.8s shuffle + 3D flip) vs direct card-slot clicks with safe slot clamping", () => {
+    // Auto-pick with 10 eligible students -> 5 cards, ~1800ms total (shuffle + flip), random slot
+    const autoPlan = createCardFlipPlan({
+      eligibleCount: 10,
+      random: () => 0.6, // floor(0.6 * 5) = 3 (Card 4)
+    });
+    expect(autoPlan.cardCount).toBe(5);
+    expect(autoPlan.chosenSlotIndex).toBe(3);
+    expect(autoPlan.isDirectPick).toBe(false);
+    expect(autoPlan.shuffleDurationMs).toBeGreaterThan(0);
+    expect(autoPlan.flipDurationMs).toBeGreaterThan(0);
+    expect(autoPlan.totalDurationMs).toBe(CARD_FLIP_AUTO_TOTAL_MS);
+    expect(autoPlan.totalDurationMs).toBeGreaterThanOrEqual(1600);
+    expect(autoPlan.totalDurationMs).toBeLessThanOrEqual(2000);
+    expect(autoPlan.shuffleDurationMs + autoPlan.flipDurationMs).toBe(
+      autoPlan.totalDurationMs,
+    );
+
+    // Sampling frames moves deterministically: shuffling -> flipping -> revealed
+    const shuffleFrame = sampleCardFlipFrame(autoPlan, 200);
+    expect(shuffleFrame.phase).toBe("shuffling");
+    expect(shuffleFrame.isComplete).toBe(false);
+    expect(shuffleFrame.activeSlotIndex).toBeGreaterThanOrEqual(0);
+    expect(shuffleFrame.activeSlotIndex).toBeLessThan(autoPlan.cardCount);
+
+    const flipFrame = sampleCardFlipFrame(
+      autoPlan,
+      autoPlan.shuffleDurationMs + 100,
+    );
+    expect(flipFrame.phase).toBe("flipping");
+    expect(flipFrame.activeSlotIndex).toBe(3);
+    expect(flipFrame.isComplete).toBe(false);
+
+    const doneFrame = sampleCardFlipFrame(autoPlan, autoPlan.totalDurationMs);
+    expect(doneFrame.phase).toBe("revealed");
+    expect(doneFrame.activeSlotIndex).toBe(3);
+    expect(doneFrame.isComplete).toBe(true);
+
+    // Direct card click skips shuffle and flips that exact card slot
+    const directPlan = createCardFlipPlan({
+      eligibleCount: 4,
+      requestedSlotIndex: 2,
+      random: () => 0, // ignored for slot index when requestedSlotIndex is provided
+    });
+    expect(directPlan.cardCount).toBe(4);
+    expect(directPlan.chosenSlotIndex).toBe(2);
+    expect(directPlan.isDirectPick).toBe(true);
+    expect(directPlan.shuffleDurationMs).toBe(0);
+    expect(directPlan.totalDurationMs).toBe(directPlan.flipDurationMs);
+
+    const directStart = sampleCardFlipFrame(directPlan, 0);
+    expect(directStart.phase).toBe("flipping");
+    expect(directStart.activeSlotIndex).toBe(2);
+
+    // Out-of-bounds requestedSlotIndex clamps safely to 0 .. cardCount - 1
+    expect(
+      createCardFlipPlan({ eligibleCount: 3, requestedSlotIndex: 9 })
+        .chosenSlotIndex,
+    ).toBe(2);
+    expect(
+      createCardFlipPlan({ eligibleCount: 3, requestedSlotIndex: -4 })
+        .chosenSlotIndex,
+    ).toBe(0);
+
+    // Single remaining student -> 1 card, no shuffle needed
+    const soloPlan = createCardFlipPlan({ eligibleCount: 1 });
+    expect(soloPlan.cardCount).toBe(1);
+    expect(soloPlan.chosenSlotIndex).toBe(0);
+    expect(soloPlan.shuffleDurationMs).toBe(0);
+    expect(soloPlan.totalDurationMs).toBe(soloPlan.flipDurationMs);
+  });
+
+  it("runs Card Flip draws with uniform pre-selection, direct slot targeting, deferred Called commit, locking, and idempotent Skip", () => {
+    const initial = createInitialPickerState();
+
+    // Direct card click on Card 3 (slotIndex 2): random() = 0.5 -> index 2 -> Cara Cruz
+    const direct = startPickerDraw(initial, {
+      presentStudents: STUDENTS,
+      removeFromPool: true,
+      effectiveMode: "card-flip",
+      requestedSlotIndex: 2,
+      random: () => 0.5,
+    });
+
+    expect(direct.outcome).toBe("animating");
+    if (direct.outcome !== "animating") throw new Error("expected animating");
+    expect(direct.pendingDraw.mode).toBe("card-flip");
+    if (direct.pendingDraw.mode !== "card-flip") {
+      throw new Error("expected card-flip pending draw");
+    }
+    expect(direct.pendingDraw.winner).toEqual(STUDENTS[2]);
+    expect(direct.pendingDraw.plan.cardCount).toBe(4);
+    expect(direct.pendingDraw.plan.chosenSlotIndex).toBe(2);
+    expect(direct.pendingDraw.plan.isDirectPick).toBe(true);
+    expect(isPickerLocked(direct.state)).toBe(true);
+    // Deferred commit: Called status must NOT update before reveal
+    expect(direct.state.usedIndices.size).toBe(0);
+    expect(direct.state.pickedStudent).toBeNull();
+
+    // Clicking another card or Pick while animating must be ignored without double-drawing
+    const blockedClick = startPickerDraw(direct.state, {
+      presentStudents: STUDENTS,
+      removeFromPool: true,
+      effectiveMode: "card-flip",
+      requestedSlotIndex: 0,
+      random: () => 0,
+    });
+    expect(blockedClick.outcome).toBe("ignored-locked");
+    expect(blockedClick.state).toBe(direct.state);
+
+    // Skip commits Called exactly once and unlocks
+    const skipped = commitPendingDraw(direct.state);
+    expect(skipped.committed).toBe(true);
+    expect(skipped.winner).toEqual(STUDENTS[2]);
+    expect(isPickerLocked(skipped.state)).toBe(false);
+    expect(skipped.state.pickedStudent).toEqual(STUDENTS[2]);
+    expect(skipped.state.usedIndices).toEqual(new Set([2]));
+
+    // Duplicate commit after Skip is a no-op
+    const duplicate = commitPendingDraw(
+      skipped.state,
+      direct.pendingDraw.drawId,
+    );
+    expect(duplicate.committed).toBe(false);
+    expect(duplicate.state.usedIndices).toEqual(new Set([2]));
+
+    // Next auto-pick in card-flip mode sees 3 remaining eligible students -> 3 mystery cards
+    const seq = [0, 0.7]; // draw idx 0 (Ana Santos), slot floor(0.7 * 3) = 2 (Card 3)
+    let call = 0;
+    const autoPick = startPickerDraw(skipped.state, {
+      presentStudents: STUDENTS,
+      removeFromPool: true,
+      effectiveMode: "card-flip",
+      random: () => seq[call++] ?? 0,
+    });
+    expect(autoPick.outcome).toBe("animating");
+    if (autoPick.outcome !== "animating") throw new Error("expected animating");
+    expect(autoPick.pendingDraw.mode).toBe("card-flip");
+    if (autoPick.pendingDraw.mode !== "card-flip") {
+      throw new Error("expected card-flip pending draw");
+    }
+    expect(autoPick.pendingDraw.winner).toEqual(STUDENTS[0]);
+    expect(autoPick.pendingDraw.plan.cardCount).toBe(3);
+    expect(autoPick.pendingDraw.plan.chosenSlotIndex).toBe(2);
+    expect(autoPick.pendingDraw.plan.isDirectPick).toBe(false);
+    expect(autoPick.pendingDraw.plan.totalDurationMs).toBe(
+      CARD_FLIP_AUTO_TOTAL_MS,
+    );
+
+    const committedAuto = commitPendingDraw(
+      autoPick.state,
+      autoPick.pendingDraw.drawId,
+    );
+    expect(committedAuto.committed).toBe(true);
+    expect(committedAuto.state.usedIndices).toEqual(new Set([0, 2]));
   });
 });

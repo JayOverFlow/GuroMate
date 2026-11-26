@@ -3,9 +3,15 @@ import { drawRandomStudent, type RosterStudent } from "./classroomTools";
 
 export const SLOT_REEL_DURATION_MS = 2600;
 export const SINGLE_STUDENT_SPOTLIGHT_DURATION_MS = 600;
+export const MAX_MYSTERY_CARDS = 5;
+export const CARD_FLIP_SHUFFLE_DURATION_MS = 1050;
+export const CARD_FLIP_DURATION_MS = 750;
+export const CARD_FLIP_AUTO_TOTAL_MS =
+  CARD_FLIP_SHUFFLE_DURATION_MS + CARD_FLIP_DURATION_MS;
 const SLOT_REEL_STEPS = 30;
+const CARD_FLIP_SHUFFLE_STEPS = 5;
 
-export type AvailablePickerMode = "slot" | "instant";
+export type AvailablePickerMode = PickerAnimationMode;
 
 export interface PreparedPickerDraw {
   picked: RosterStudent | null;
@@ -35,12 +41,50 @@ export interface SlotReelWindow {
   isComplete: boolean;
 }
 
-export interface PendingPickerDraw {
+export interface CreateCardFlipPlanOptions {
+  eligibleCount: number;
+  requestedSlotIndex?: number;
+  random?: () => number;
+}
+
+export interface CardFlipPlan {
+  cardCount: number;
+  chosenSlotIndex: number;
+  isDirectPick: boolean;
+  shuffleDurationMs: number;
+  flipDurationMs: number;
+  totalDurationMs: number;
+}
+
+export type CardFlipPhase = "shuffling" | "flipping" | "revealed";
+
+export interface CardFlipFrame {
+  phase: CardFlipPhase;
+  progress: number;
+  activeSlotIndex: number;
+  shuffleStep: number;
+  isComplete: boolean;
+}
+
+export interface PendingSlotPickerDraw {
+  mode: "slot";
   drawId: number;
   winner: RosterStudent;
   pendingUsedIndices: Set<number>;
   plan: SlotReelPlan;
 }
+
+export interface PendingCardFlipPickerDraw {
+  mode: "card-flip";
+  drawId: number;
+  winner: RosterStudent;
+  pendingUsedIndices: Set<number>;
+  plan: CardFlipPlan;
+}
+
+export type PendingPickerDraw =
+  | PendingSlotPickerDraw
+  | PendingCardFlipPickerDraw;
 
 export interface PickerLifecycleState {
   usedIndices: Set<number>;
@@ -54,6 +98,7 @@ export interface StartPickerDrawOptions {
   presentStudents: readonly RosterStudent[];
   removeFromPool: boolean;
   effectiveMode: PickerAnimationMode;
+  requestedSlotIndex?: number;
   random?: () => number;
 }
 
@@ -221,10 +266,104 @@ export function sampleSlotReelWindow(
   };
 }
 
+export function getMysteryCardCount(eligibleCount: number): number {
+  if (!Number.isFinite(eligibleCount)) return 0;
+  return Math.min(MAX_MYSTERY_CARDS, Math.max(0, Math.floor(eligibleCount)));
+}
+
+export function createCardFlipPlan({
+  eligibleCount,
+  requestedSlotIndex,
+  random = Math.random,
+}: CreateCardFlipPlanOptions): CardFlipPlan {
+  const cardCount = getMysteryCardCount(eligibleCount);
+  if (cardCount === 0) {
+    return {
+      cardCount: 0,
+      chosenSlotIndex: 0,
+      isDirectPick: requestedSlotIndex !== undefined,
+      shuffleDurationMs: 0,
+      flipDurationMs: 0,
+      totalDurationMs: 0,
+    };
+  }
+
+  const isDirectPick = requestedSlotIndex !== undefined;
+  const chosenSlotIndex = isDirectPick
+    ? Math.min(
+        cardCount - 1,
+        Math.max(
+          0,
+          Math.floor(
+            Number.isFinite(requestedSlotIndex) ? requestedSlotIndex : 0,
+          ),
+        ),
+      )
+    : Math.min(cardCount - 1, Math.floor(random() * cardCount));
+
+  const shuffleDurationMs =
+    !isDirectPick && cardCount > 1 ? CARD_FLIP_SHUFFLE_DURATION_MS : 0;
+  const flipDurationMs = CARD_FLIP_DURATION_MS;
+
+  return {
+    cardCount,
+    chosenSlotIndex,
+    isDirectPick,
+    shuffleDurationMs,
+    flipDurationMs,
+    totalDurationMs: shuffleDurationMs + flipDurationMs,
+  };
+}
+
+export function sampleCardFlipFrame(
+  plan: CardFlipPlan,
+  rawElapsedMs: number,
+): CardFlipFrame {
+  const elapsedMs = Math.max(0, rawElapsedMs);
+  if (plan.totalDurationMs <= 0 || elapsedMs >= plan.totalDurationMs) {
+    return {
+      phase: "revealed",
+      progress: 1,
+      activeSlotIndex: plan.chosenSlotIndex,
+      shuffleStep: CARD_FLIP_SHUFFLE_STEPS,
+      isComplete: true,
+    };
+  }
+
+  const progress = Math.min(1, elapsedMs / plan.totalDurationMs);
+
+  if (plan.shuffleDurationMs > 0 && elapsedMs < plan.shuffleDurationMs) {
+    const shuffleRatio = elapsedMs / plan.shuffleDurationMs;
+    const shuffleStep = Math.min(
+      CARD_FLIP_SHUFFLE_STEPS - 1,
+      Math.floor(shuffleRatio * CARD_FLIP_SHUFFLE_STEPS),
+    );
+    const activeSlotIndex =
+      plan.cardCount > 0
+        ? (plan.chosenSlotIndex + shuffleStep + 1) % plan.cardCount
+        : 0;
+    return {
+      phase: "shuffling",
+      progress,
+      activeSlotIndex,
+      shuffleStep,
+      isComplete: false,
+    };
+  }
+
+  return {
+    phase: "flipping",
+    progress,
+    activeSlotIndex: plan.chosenSlotIndex,
+    shuffleStep: CARD_FLIP_SHUFFLE_STEPS,
+    isComplete: false,
+  };
+}
+
 export function normalizeAvailablePickerMode(
   mode: PickerAnimationMode,
 ): AvailablePickerMode {
-  return mode === "instant" ? "instant" : "slot";
+  return mode === "instant" || mode === "card-flip" ? mode : "slot";
 }
 
 export function createInitialPickerState(): PickerLifecycleState {
@@ -282,17 +421,34 @@ export function startPickerDraw(
     };
   }
 
-  const plan = buildSlotReelPlan(
-    prepared.eligibleStudents,
-    prepared.picked,
-    random,
-  );
-  const pendingDraw: PendingPickerDraw = {
-    drawId: state.nextDrawId,
-    winner: prepared.picked,
-    pendingUsedIndices: prepared.pendingUsedIndices,
-    plan,
-  };
+  let pendingDraw: PendingPickerDraw;
+  if (playbackMode === "card-flip") {
+    const plan = createCardFlipPlan({
+      eligibleCount: prepared.eligibleStudents.length,
+      requestedSlotIndex: options.requestedSlotIndex,
+      random,
+    });
+    pendingDraw = {
+      mode: "card-flip",
+      drawId: state.nextDrawId,
+      winner: prepared.picked,
+      pendingUsedIndices: prepared.pendingUsedIndices,
+      plan,
+    };
+  } else {
+    const plan = buildSlotReelPlan(
+      prepared.eligibleStudents,
+      prepared.picked,
+      random,
+    );
+    pendingDraw = {
+      mode: "slot",
+      drawId: state.nextDrawId,
+      winner: prepared.picked,
+      pendingUsedIndices: prepared.pendingUsedIndices,
+      plan,
+    };
+  }
 
   return {
     state: {
