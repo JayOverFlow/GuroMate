@@ -563,9 +563,8 @@
       infinite;
   }
 
-  .classroom-mingle-dot:hover,
-  .classroom-mingle-dot:focus-visible {
-    transform: scale(1.25);
+  .classroom-mingle-dot:hover {
+    transform: scale(1.08);
   }
 
   .classroom-mingle-zone {

@@ -44,16 +44,16 @@ const FLOOR_HEIGHT_CLASS: Record<
   { inline: string; projector: string }
 > = {
   comfortable: {
-    inline: "min-h-[280px] sm:min-h-[320px]",
-    projector: "min-h-[44vh]",
+    inline: "min-h-[340px] sm:min-h-[380px]",
+    projector: "min-h-[50vh]",
   },
   standard: {
-    inline: "min-h-[320px] sm:min-h-[360px]",
-    projector: "min-h-[48vh]",
+    inline: "min-h-[390px] sm:min-h-[440px]",
+    projector: "min-h-[56vh]",
   },
   compact: {
-    inline: "min-h-[360px] sm:min-h-[420px]",
-    projector: "min-h-[52vh]",
+    inline: "min-h-[450px] sm:min-h-[510px]",
+    projector: "min-h-[62vh]",
   },
 };
 
@@ -62,16 +62,34 @@ const DOT_SIZE_CLASS: Record<
   { inline: string; projector: string }
 > = {
   comfortable: {
-    inline: "w-4 h-4",
-    projector: "w-6 h-6",
-  },
-  standard: {
     inline: "w-3.5 h-3.5",
     projector: "w-5 h-5",
   },
-  compact: {
+  standard: {
     inline: "w-3 h-3",
     projector: "w-4 h-4",
+  },
+  compact: {
+    inline: "w-2.5 h-2.5",
+    projector: "w-3.5 h-3.5",
+  },
+};
+
+const DOT_LABEL_CLASS: Record<
+  ChipDensityTier,
+  { inline: string; projector: string }
+> = {
+  comfortable: {
+    inline: "text-label-sm max-w-[112px] px-1.5 py-0.5",
+    projector: "text-body-sm max-w-[160px] px-2 py-0.5",
+  },
+  standard: {
+    inline: "text-[11px] leading-tight max-w-[92px] px-1.5 py-0.5",
+    projector: "text-label-md max-w-[132px] px-1.5 py-0.5",
+  },
+  compact: {
+    inline: "text-[10px] leading-tight max-w-[78px] px-1 py-0.5",
+    projector: "text-label-sm max-w-[108px] px-1.5 py-0.5",
   },
 };
 
@@ -710,6 +728,9 @@ export function GroupMakerStage({
                   const dotSizeClass = isProjector
                     ? DOT_SIZE_CLASS[activeMingleLayout.densityTier].projector
                     : DOT_SIZE_CLASS[activeMingleLayout.densityTier].inline;
+                  const dotLabelClass = isProjector
+                    ? DOT_LABEL_CLASS[activeMingleLayout.densityTier].projector
+                    : DOT_LABEL_CLASS[activeMingleLayout.densityTier].inline;
 
                   return (
                     <div
@@ -720,23 +741,33 @@ export function GroupMakerStage({
                     >
                       <div className="classroom-mingle-anchor">
                         <span
-                          role="img"
                           title={dot.student.name}
-                          aria-label={
-                            isMingleBeat
-                              ? dot.student.name
-                              : `${dot.student.name}, Group ${dot.groupIndex + 1}`
-                          }
                           data-beat={stageBeat}
                           style={dotStyle}
-                          className={`classroom-mingle-dot pointer-events-auto block rounded-full shadow-xs cursor-default ${dotSizeClass} ${
-                            isMingleBeat
-                              ? "bg-outline ring-2 ring-surface-container-lowest"
-                              : isEmeraldZone
-                                ? "bg-primary ring-2 ring-surface-container-lowest"
-                                : "bg-secondary ring-2 ring-surface-container-lowest"
-                          }`}
-                        />
+                          className="classroom-mingle-dot pointer-events-auto inline-flex flex-col items-center gap-0.5 cursor-default"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`block rounded-full shadow-xs ${dotSizeClass} ${
+                              isMingleBeat
+                                ? "bg-outline ring-2 ring-surface-container-lowest"
+                                : isEmeraldZone
+                                  ? "bg-primary ring-2 ring-surface-container-lowest"
+                                  : "bg-secondary ring-2 ring-surface-container-lowest"
+                            }`}
+                          />
+                          <span
+                            className={`rounded-full border font-body font-medium shadow-2xs truncate ${dotLabelClass} ${
+                              isMingleBeat
+                                ? "bg-surface-container-lowest/90 border-outline-variant/80 text-on-surface"
+                                : isEmeraldZone
+                                  ? "bg-surface-container-lowest/95 border-primary/35 text-on-surface"
+                                  : "bg-surface-container-lowest/95 border-secondary/35 text-on-surface"
+                            }`}
+                          >
+                            {dot.student.name}
+                          </span>
+                        </span>
                       </div>
                     </div>
                   );
