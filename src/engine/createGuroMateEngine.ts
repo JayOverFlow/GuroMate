@@ -41,6 +41,7 @@ import {
 } from "./quiz";
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
+import { resolveLessonReferences } from "./lessonHelpers";
 import { createLiveAiAdapter } from "./liveAiAdapter";
 import {
   AI_PROVIDER_MAP,
@@ -820,6 +821,10 @@ export function createGuroMateEngine(
     const now = new Date().toISOString();
     const fallbackTitle = `${learningAreas} (${resolved.gradeAndSection})`;
 
+    const selectedCompetencies = resolved.orderedConfigs.flatMap(
+      (cfg) => resolved.sessionCompetencies.get(cfg.sessionNumber) ?? [],
+    );
+
     const dll: DailyLessonLog = {
       id: `dll-${randomUUID().slice(0, 8)}`,
       createdAt: now,
@@ -830,9 +835,11 @@ export function createGuroMateEngine(
         fallbackTitle,
       learningAreas,
       gradeAndSection: resolved.gradeAndSection,
-      references:
-        input.references?.trim() ||
-        (typeof parsed.references === "string" ? parsed.references.trim() : ""),
+      references: resolveLessonReferences(
+        input.references,
+        parsed.references,
+        selectedCompetencies,
+      ),
       promptNotes: input.promptNotes?.trim() ?? "",
       intentions: {
         learningCompetencies: resolved.learningCompetencies,
@@ -956,9 +963,11 @@ export function createGuroMateEngine(
         fallbackTitle,
       learningAreas: resolved.learningAreas,
       gradeAndSection: resolved.gradeAndSection,
-      references:
-        resolved.references ||
-        (typeof parsed.references === "string" ? parsed.references.trim() : ""),
+      references: resolveLessonReferences(
+        resolved.references,
+        parsed.references,
+        resolved.competencies,
+      ),
       promptNotes: input.promptNotes?.trim() ?? "",
       intentions: {
         learningCompetencies: resolved.learningCompetencies,

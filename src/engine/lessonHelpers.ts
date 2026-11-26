@@ -1,4 +1,4 @@
-import type { CurriculumCompetency } from "./types";
+import type { BudgetOfWorkInfo, CurriculumCompetency } from "./types";
 
 export function dedupeOrdered<T>(items: T[]): T[] {
   const seen = new Set<T>();
@@ -12,6 +12,32 @@ export function dedupeOrdered<T>(items: T[]): T[] {
   return out;
 }
 
+function formatBowLines(bow: BudgetOfWorkInfo): string[] {
+  const pacing = [
+    bow.term.trim(),
+    bow.weekRange.trim() ? `Week ${bow.weekRange.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const header = pacing ? `  Budget of Work (${pacing}):` : "  Budget of Work:";
+  const details = [
+    bow.suggestedActivities.trim()
+      ? `    Suggested Activities: ${bow.suggestedActivities.trim()}`
+      : "",
+    bow.suggestedPerformanceTasks.trim()
+      ? `    Suggested Performance Tasks: ${bow.suggestedPerformanceTasks.trim()}`
+      : "",
+    bow.sourceDocument?.trim()
+      ? `    Source Document: ${bow.sourceDocument.trim()}`
+      : "",
+  ].filter(Boolean);
+
+  if (details.length > 0) {
+    return [header, ...details];
+  }
+  return pacing ? [header] : [];
+}
+
 export function formatCompetencyLines(competencies: CurriculumCompetency[]): string {
   return competencies
     .map((c) => {
@@ -23,14 +49,46 @@ export function formatCompetencyLines(competencies: CurriculumCompetency[]): str
         `  Learning Competency: ${c.learningCompetency}`,
         `  Content Standard: ${c.contentStandard}`,
         `  Performance Standard: ${c.performanceStandard}`,
-        c.budgetOfWork
-          ? `  Budget of Work (${c.budgetOfWork.term}, Week ${c.budgetOfWork.weekRange}): Suggested Activities: ${c.budgetOfWork.suggestedActivities} | Suggested Performance Tasks: ${c.budgetOfWork.suggestedPerformanceTasks}`
-          : "",
+        ...(c.budgetOfWork ? formatBowLines(c.budgetOfWork) : []),
         c.customNotes ? `  Teacher Competency Notes: ${c.customNotes}` : "",
       ];
       return parts.filter(Boolean).join("\n");
     })
     .join("\n");
+}
+
+/** Resolves lesson references: preserves explicit teacher references; otherwise includes BoW sourceDocument citation(s). */
+export function resolveLessonReferences(
+  explicitReferences: string | undefined,
+  aiReferences: unknown,
+  competencies: CurriculumCompetency[],
+): string {
+  const trimmedExplicit = explicitReferences?.trim() ?? "";
+  if (trimmedExplicit) {
+    return trimmedExplicit;
+  }
+
+  const aiRef = typeof aiReferences === "string" ? aiReferences.trim() : "";
+  const bowSources = dedupeOrdered(
+    competencies
+      .map((c) => c.budgetOfWork?.sourceDocument?.trim() ?? "")
+      .filter(Boolean),
+  );
+
+  if (bowSources.length === 0) {
+    return aiRef;
+  }
+  if (!aiRef) {
+    return bowSources.join("; ");
+  }
+
+  const aiRefLower = aiRef.toLowerCase();
+  const missingSources = bowSources.filter(
+    (src) => !aiRefLower.includes(src.toLowerCase()),
+  );
+  return missingSources.length > 0
+    ? [aiRef, ...missingSources].join("; ")
+    : aiRef;
 }
 
 export function parseAiJsonObject(

@@ -404,4 +404,124 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
       expect(tables[4]![2]![col]).toBe("");
     }
   });
+
+  it("grounds Grade 7–12 DLL generation in BoW metadata, updates System Instructions for Tech-Pro and SHS Core, and auto-populates BoW sourceDocument references when blank", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        return {
+          text: JSON.stringify({
+            lessonTitle: "SHS Core & Tech-Pro BoW Week",
+            references: "",
+            sessions: [1, 2, 3, 4, 5].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: `• Objective ${n}`,
+              preLesson: `Pre-lesson activity: “Hook ${n}”`,
+              lessonFlow: `Activity ${n}`,
+              learningResources: `• Slides`,
+              integrationAndContextualization: "Philippine workplace link.",
+              formativeAssessment: `Assessment ${n}`,
+              extendedLearningOpportunities: `Extended ${n}`,
+            })),
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const shsComp = await engine.saveCustomCompetency({
+      gradeLevels: [11],
+      quarters: [1],
+      component: "SHS_CORE",
+      sector: "General Mathematics",
+      contentTopic: "Functions",
+      contentStandard: "Demonstrates understanding of functions.",
+      performanceStandard: "Constructs mathematical models using functions.",
+      learningCompetency: "Represent real-life situations using functions.",
+      budgetOfWork: {
+        term: "First Term",
+        weekRange: "1 to 2",
+        suggestedActivities: "Barangay electric bill piecewise modeling",
+        suggestedPerformanceTasks: "Community sari-sari pricing portfolio",
+        sourceDocument: "Grade 11 SHS Core General Mathematics Budget of Work",
+      },
+    });
+
+    const g12Comp = await engine.saveCustomCompetency({
+      gradeLevels: [12],
+      quarters: [1],
+      component: "ICT",
+      sector: "Computer Programming",
+      contentTopic: "Structured Programming",
+      contentStandard: "Demonstrates understanding of modular coding.",
+      performanceStandard: "Builds a working console application.",
+      learningCompetency: "Design modular algorithms for business workflows.",
+      budgetOfWork: {
+        term: "One-Term",
+        weekRange: "3 to 4",
+        suggestedActivities: "Pseudocode pair-debugging relay",
+        suggestedPerformanceTasks: "Barangay inventory CLI prototype",
+        sourceDocument: "Grade 12 Tech-Pro ICT Computer Programming Budget of Work",
+      },
+    });
+
+    const autoRefDll = await engine.generateDll({
+      gradeAndSection: "Grade 11 - Mabini",
+      sessions: [
+        { sessionNumber: 1, mode: "instructional", competencyIds: [shsComp.id] },
+        { sessionNumber: 2, mode: "instructional", competencyIds: [shsComp.id] },
+        { sessionNumber: 3, mode: "instructional", competencyIds: [g12Comp.id] },
+        { sessionNumber: 4, mode: "instructional", competencyIds: [g12Comp.id] },
+        { sessionNumber: 5, mode: "instructional", competencyIds: [g12Comp.id] },
+      ],
+    });
+
+    expect(requests).toHaveLength(1);
+    const sys = requests[0]!.systemInstruction ?? "";
+    expect(sys).toMatch(/Grades 7[–-]12/i);
+    expect(sys).toMatch(/Technical-Professional|Tech-Pro/i);
+    expect(sys).toContain("SHS Core");
+    expect(sys).toContain("Suggested Activities");
+    expect(sys).toContain("Suggested Performance Tasks");
+    expect(sys).toMatch(/Learning Experience/i);
+    expect(sys).toMatch(/Assessing Learning/i);
+    expect(sys).toMatch(/Ways Forward/i);
+
+    const prompt = requests[0]!.prompt;
+    expect(prompt).toContain("First Term");
+    expect(prompt).toContain("Week 1 to 2");
+    expect(prompt).toContain("Barangay electric bill piecewise modeling");
+    expect(prompt).toContain("Community sari-sari pricing portfolio");
+    expect(prompt).toContain("Grade 11 SHS Core General Mathematics Budget of Work");
+    expect(prompt).toContain("One-Term");
+    expect(prompt).toContain("Week 3 to 4");
+    expect(prompt).toContain("Pseudocode pair-debugging relay");
+    expect(prompt).toContain("Barangay inventory CLI prototype");
+    expect(prompt).toContain("Grade 12 Tech-Pro ICT Computer Programming Budget of Work");
+
+    expect(autoRefDll.references).toBe(
+      "Grade 11 SHS Core General Mathematics Budget of Work; Grade 12 Tech-Pro ICT Computer Programming Budget of Work",
+    );
+
+    const customRefDll = await engine.generateDll({
+      gradeAndSection: "Grade 11 - Mabini",
+      references: "Teacher Custom Module 2026",
+      sessions: [
+        { sessionNumber: 1, mode: "instructional", competencyIds: [shsComp.id] },
+        { sessionNumber: 2, mode: "instructional", competencyIds: [shsComp.id] },
+        { sessionNumber: 3, mode: "instructional", competencyIds: [shsComp.id] },
+        { sessionNumber: 4, mode: "instructional", competencyIds: [shsComp.id] },
+        { sessionNumber: 5, mode: "instructional", competencyIds: [shsComp.id] },
+      ],
+    });
+    expect(customRefDll.references).toBe("Teacher Custom Module 2026");
+  });
 });
