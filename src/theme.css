@@ -230,6 +230,397 @@
   }
 }
 
+/* Shared Classroom Projector View (:fullscreen matches parchment overlay) */
+.classroom-projector-stage:fullscreen {
+  background-color: var(--color-surface);
+  color: var(--color-on-surface);
+  padding: 2rem;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  justify-content: safe center;
+}
+
+.classroom-projector-stage::backdrop {
+  background-color: var(--color-surface);
+}
+
+/* Random Student Picker — compositor-only motion (opt-in when motion is enabled) */
+.picker-reel-track {
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .picker-reveal-pop {
+    animation: picker-reveal-pop 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-timing-function: linear(
+      0,
+      0.42 18%,
+      0.88 42%,
+      1.04 66%,
+      1.01 82%,
+      1
+    );
+  }
+
+  .picker-spotlight-lock {
+    animation: picker-spotlight-lock 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes picker-reveal-pop {
+    0% {
+      transform: scale(0.96);
+      opacity: 0.85;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes picker-spotlight-lock {
+    0% {
+      transform: scale(0.92);
+      opacity: 0.5;
+    }
+    65% {
+      transform: scale(1.03);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+}
+
+/* Random Student Picker — 3D Card Flip Magician's Hand (compositor-only, opt-in motion) */
+.picker-card-fan {
+  --fan-focus-step: -14px;
+}
+
+.picker-card-fan--projector {
+  --fan-focus-step: -22px;
+}
+
+.picker-card-scene {
+  perspective: 1000px;
+}
+
+.picker-card-slot {
+  transform-origin: 50% 135%;
+  z-index: var(--fan-z, 1);
+  transform: translate3d(0, var(--fan-y, 0px), 0) rotate(var(--fan-angle, 0deg))
+    scale(1);
+}
+
+.picker-card-slot.is-focused {
+  transform: translate3d(
+      calc(var(--fan-offset, 0) * var(--fan-focus-step, -14px)),
+      -16px,
+      0
+    )
+    rotate(0deg) scale(1.08);
+  z-index: 30;
+}
+
+.picker-card-slot.is-dimmed {
+  opacity: 0.58;
+}
+
+.picker-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform: rotateY(0deg);
+}
+
+.picker-card-inner.is-revealed {
+  transform: rotateY(180deg);
+}
+
+.picker-card-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.picker-card-front {
+  transform: rotateY(180deg);
+}
+
+.picker-card-back-pattern {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 248, 245, 0.08) 0,
+    rgba(255, 248, 245, 0.08) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .picker-card-slot {
+    transition:
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 220ms ease-out;
+  }
+
+  .picker-card-slot:not(:disabled):not(.is-focused):hover,
+  .picker-card-slot:not(:disabled):not(.is-focused):focus-visible {
+    transform: translate3d(0, calc(var(--fan-y, 0px) - 18px), 0)
+      rotate(var(--fan-angle, 0deg)) scale(1.06);
+    opacity: 1;
+    z-index: 35;
+  }
+
+  .picker-card-slot.is-shuffling {
+    animation: picker-card-shuffle 460ms ease-in-out infinite;
+    animation-delay: var(--shuffle-delay, 0ms);
+  }
+
+  .picker-card-inner.is-flipping {
+    will-change: transform;
+    /* Finishes ~280ms before CARD_FLIP_DURATION_MS commits so face-up winner stays visible before spread shrinks. */
+    animation: picker-card-flip-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes picker-card-shuffle {
+    0%,
+    100% {
+      transform: translate3d(0, var(--fan-y, 0px), 0)
+        rotate(var(--fan-angle, 0deg)) scale(1);
+    }
+    50% {
+      transform: translate3d(
+          var(--shuffle-x, 0px),
+          calc(var(--fan-y, 0px) - 10px),
+          0
+        )
+        rotate(calc(var(--fan-angle, 0deg) * 0.4)) scale(1.03);
+    }
+  }
+
+  @keyframes picker-card-flip-in {
+    0% {
+      transform: rotateY(0deg) scale(1);
+    }
+    45% {
+      transform: rotateY(90deg) scale(1.06);
+    }
+    100% {
+      transform: rotateY(180deg) scale(1);
+    }
+  }
+}
+
+/* Group Maker: Card Deal Dealer Deck, Flying Cards & Solitaire Stacks */
+.classroom-dealer-card-back {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 248, 245, 0.08) 0,
+    rgba(255, 248, 245, 0.08) 5px,
+    transparent 5px,
+    transparent 10px
+  );
+}
+
+.classroom-deal-flight-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 76px;
+  perspective: 800px;
+  will-change: transform;
+}
+
+.classroom-deal-flight-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.classroom-deal-flight-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.classroom-deal-flight-front {
+  transform: rotateY(180deg);
+}
+
+.classroom-solitaire-card {
+  display: block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes classroom-card-deal-in {
+    0% {
+      opacity: 0.72;
+      transform: translate3d(0, -8px, 0) scale(0.96);
+    }
+    100% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  .classroom-card-deal-in {
+    transform-origin: top center;
+    animation-name: classroom-card-deal-in;
+    animation-duration: 240ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-timing-function: linear(
+      0,
+      0.28 12%,
+      0.68 28%,
+      0.94 48%,
+      1.03 68%,
+      1.01 84%,
+      1
+    );
+    animation-fill-mode: both;
+  }
+
+  @keyframes classroom-dealer-deck-lift {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(0, -2px, 0) scale(1.02);
+    }
+  }
+
+  .classroom-dealer-deck-top {
+    animation: classroom-dealer-deck-lift 520ms ease-in-out infinite;
+  }
+
+  .classroom-solitaire-card {
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .classroom-solitaire-card:not(:disabled):hover,
+  .classroom-solitaire-card:not(:disabled):focus-visible {
+    transform: translate3d(0, -3px, 0);
+  }
+
+  .classroom-solitaire-card.is-selected {
+    transform: translate3d(0, -4px, 0);
+  }
+
+  @keyframes classroom-mingle-drift {
+    0%,
+    100% {
+      translate: 0px 0px;
+    }
+    33% {
+      translate: var(--drift-x, 10px) var(--drift-y, -8px);
+    }
+    66% {
+      translate: calc(var(--drift-x, 10px) * -0.65)
+        calc(var(--drift-y, -8px) * 0.85);
+    }
+  }
+
+  .classroom-mingle-slot[data-beat="cluster"] {
+    transition-property: transform;
+    transition-duration: var(--cluster-duration, 3100ms);
+    transition-delay: var(--cluster-delay, 0ms);
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    transition-timing-function: linear(
+      0,
+      0.24 10%,
+      0.62 24%,
+      0.9 44%,
+      1.02 66%,
+      1.01 84%,
+      1
+    );
+  }
+
+  .classroom-mingle-slot[data-beat="settled"] {
+    transition-property: transform;
+    transition-duration: 380ms;
+    transition-delay: 0ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .classroom-mingle-dot {
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .classroom-mingle-dot[data-beat="mingle"] {
+    animation: classroom-mingle-drift var(--drift-duration, 1900ms) ease-in-out
+      infinite;
+  }
+
+  .classroom-mingle-dot:hover {
+    transform: scale(1.08);
+  }
+
+  .classroom-mingle-zone {
+    transition:
+      opacity 260ms ease-out,
+      transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes classroom-group-settle-in {
+    0% {
+      opacity: 0.72;
+      transform: scale(0.99);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .classroom-group-settle-in {
+    animation: classroom-group-settle-in 200ms ease-out both;
+  }
+}
+
+/* Group Maker: Group Yourselves layout & compositor base rules */
+.classroom-mingle-slot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.classroom-mingle-slot:has(
+    .classroom-mingle-dot:hover,
+    .classroom-mingle-dot:focus-visible
+  ) {
+  z-index: 20;
+}
+
+.classroom-mingle-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+}
+
+.classroom-mingle-dot {
+  translate: 0px 0px;
+}
+
+.classroom-mingle-zone[data-beat="mingle"],
+.classroom-mingle-zone[data-beat="cluster"],
+.classroom-mingle-zone[data-beat="settled"] {
+  opacity: 1;
+  transform: scale(1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
