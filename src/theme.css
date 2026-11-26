@@ -248,6 +248,55 @@
   background-color: var(--color-surface);
 }
 
+/* Random Student Picker — compositor-only motion (opt-in when motion is enabled) */
+.picker-reel-track {
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .picker-reveal-pop {
+    animation: picker-reveal-pop 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-timing-function: linear(
+      0,
+      0.42 18%,
+      0.88 42%,
+      1.04 66%,
+      1.01 82%,
+      1
+    );
+  }
+
+  .picker-spotlight-lock {
+    animation: picker-spotlight-lock 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes picker-reveal-pop {
+    0% {
+      transform: scale(0.96);
+      opacity: 0.85;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes picker-spotlight-lock {
+    0% {
+      transform: scale(0.92);
+      opacity: 0.5;
+    }
+    65% {
+      transform: scale(1.03);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
