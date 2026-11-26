@@ -190,3 +190,139 @@ export function validateCustomCompetencyForm(
   }
   return errors;
 }
+
+export function parseRosterText(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export type ClassSectionFieldKey = "sectionName" | "rosterText";
+
+export interface ClassSectionFormInput {
+  sectionName: string;
+  rosterText: string;
+}
+
+export const CLASS_SECTION_FIELDS: readonly ClassSectionFieldKey[] = [
+  "sectionName",
+  "rosterText",
+];
+
+export function validateClassSectionField(
+  field: ClassSectionFieldKey,
+  input: ClassSectionFormInput,
+): string | undefined {
+  switch (field) {
+    case "sectionName":
+      return isNonEmptyText(input.sectionName)
+        ? undefined
+        : "Enter a section name.";
+    case "rosterText":
+      return parseRosterText(input.rosterText).length > 0
+        ? undefined
+        : "Enter at least one student name (one per line).";
+  }
+}
+
+export function validateClassSectionForm(
+  input: ClassSectionFormInput,
+): FieldErrors<ClassSectionFieldKey> {
+  const errors: FieldErrors<ClassSectionFieldKey> = {};
+  for (const field of CLASS_SECTION_FIELDS) {
+    const message = validateClassSectionField(field, input);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}
+
+export type CustomTimerFieldKey = "minutes" | "seconds" | "duration";
+
+export interface CustomTimerFormInput {
+  minutes: string | number;
+  seconds: string | number;
+}
+
+export const CUSTOM_TIMER_FIELDS: readonly CustomTimerFieldKey[] = [
+  "minutes",
+  "seconds",
+  "duration",
+];
+
+function parseStrictInteger(value: string | number): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? value : null;
+  }
+  const trimmed = value.trim();
+  if (!/^[+-]?\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+export function parseCustomTimerDuration(
+  input: CustomTimerFormInput,
+): { minutes: number; seconds: number } | null {
+  const minutes = parseStrictInteger(input.minutes);
+  const seconds = parseStrictInteger(input.seconds);
+  if (
+    minutes === null ||
+    seconds === null ||
+    minutes < 0 ||
+    minutes > 180 ||
+    seconds < 0 ||
+    seconds > 59 ||
+    minutes * 60 + seconds <= 0
+  ) {
+    return null;
+  }
+  return { minutes, seconds };
+}
+
+export function validateCustomTimerField(
+  field: CustomTimerFieldKey,
+  input: CustomTimerFormInput,
+): string | undefined {
+  switch (field) {
+    case "minutes": {
+      const minutes = parseStrictInteger(input.minutes);
+      return minutes !== null && minutes >= 0 && minutes <= 180
+        ? undefined
+        : "Enter a whole number from 0 to 180.";
+    }
+    case "seconds": {
+      const seconds = parseStrictInteger(input.seconds);
+      return seconds !== null && seconds >= 0 && seconds <= 59
+        ? undefined
+        : "Enter a whole number from 0 to 59.";
+    }
+    case "duration": {
+      const minutes = parseStrictInteger(input.minutes);
+      const seconds = parseStrictInteger(input.seconds);
+      if (
+        minutes === null ||
+        seconds === null ||
+        minutes < 0 ||
+        minutes > 180 ||
+        seconds < 0 ||
+        seconds > 59
+      ) {
+        return undefined;
+      }
+      return minutes * 60 + seconds > 0
+        ? undefined
+        : "Enter a duration greater than 00:00.";
+    }
+  }
+}
+
+export function validateCustomTimerForm(
+  input: CustomTimerFormInput,
+): FieldErrors<CustomTimerFieldKey> {
+  const errors: FieldErrors<CustomTimerFieldKey> = {};
+  for (const field of CUSTOM_TIMER_FIELDS) {
+    const message = validateCustomTimerField(field, input);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}

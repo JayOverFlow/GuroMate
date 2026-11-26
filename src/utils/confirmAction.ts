@@ -68,3 +68,19 @@ export function buildDeleteCustomCompetencyPrompt(
     busyLabel: "Deleting...",
   };
 }
+
+export function buildDeleteClassSectionPrompt(section: {
+  gradeLevel: number;
+  sectionName: string;
+  studentCount: number;
+}): ConfirmPrompt {
+  const name = section.sectionName.trim() || "Untitled Section";
+  const count = Math.max(0, Math.floor(section.studentCount));
+  const studentLabel = count === 1 ? "1 student" : `${count} students`;
+  return {
+    title: "Delete Class Section?",
+    body: `Permanently delete "Grade ${section.gradeLevel} — ${name}" (${studentLabel}) from local storage? This cannot be undone.`,
+    confirmLabel: "Delete Section",
+    busyLabel: "Deleting...",
+  };
+}

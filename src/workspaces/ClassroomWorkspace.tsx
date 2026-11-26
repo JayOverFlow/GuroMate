@@ -1,4 +1,6 @@
 import { useId } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { GRADE_LEVELS, type GradeLevel } from "../engine/types";
 import {
   formatClock,
@@ -6,11 +8,12 @@ import {
   type ClassroomTimerState,
 } from "../hooks/useClassroomTimer";
 import {
-  emptySectionForm,
-  formFromSection,
   TOOL_TABS,
   useClassroomWorkspace,
 } from "../hooks/useClassroomWorkspace";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import { buildDeleteClassSectionPrompt } from "../utils/confirmAction";
+import { buildDescribedBy } from "../utils/formValidation";
 import { GroupMakerStage } from "./classroom/GroupMakerStage";
 import { PickerStage } from "./classroom/PickerStage";
 import { OVERLAY_STAGE_CLASS } from "./classroom/projectorStyles";
@@ -20,8 +23,12 @@ interface ClassroomWorkspaceProps {
   openTimerTabSignal?: number;
 }
 
-const INPUT_CLASS =
-  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50";
+const BASE_INPUT_CLASS =
+  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border text-body-md text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50";
+
+function validatedInputClass(invalid: boolean): string {
+  return `${BASE_INPUT_CLASS} ${fieldBorderClass(invalid)}`;
+}
 
 export function ClassroomWorkspace({
   timer,
@@ -29,6 +36,7 @@ export function ClassroomWorkspace({
 }: ClassroomWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
+  const confirmDialog = useConfirmDialog();
 
   const {
     stageRefs,
@@ -48,11 +56,24 @@ export function ClassroomWorkspace({
     loading,
     status,
     showSectionForm,
-    setShowSectionForm,
+    sectionFormRef,
     sectionForm,
     setSectionForm,
+    sectionFieldErrors,
+    toggleNewSectionForm,
+    openEditSectionForm,
+    closeSectionForm,
+    updateSectionField,
+    validateSectionField,
     savingSection,
     parsedFormCount,
+    customTimerFormRef,
+    customMinutesInput,
+    customSecondsInput,
+    customTimerErrors,
+    updateCustomTimerInput,
+    validateCustomTimerFieldOnBlur,
+    handleSelectTimerPreset,
     activeTab,
     setActiveTab,
     absentIndices,
@@ -117,6 +138,20 @@ export function ClassroomWorkspace({
   const isTimerProjector = projectorTab === "timer";
   const isTimerOverlay = projectorOverlayTab === "timer";
 
+  const sectionNameErrId = `${baseId}-section-name-err`;
+  const sectionRosterHintId = `${baseId}-section-roster-hint`;
+  const sectionRosterErrId = `${baseId}-section-roster-err`;
+  const customMinsErrId = `${baseId}-custom-mins-err`;
+  const customSecsErrId = `${baseId}-custom-secs-err`;
+  const customDurationErrId = `${baseId}-custom-duration-err`;
+
+  const hasCustomMinsIssue = Boolean(
+    customTimerErrors.minutes || customTimerErrors.duration,
+  );
+  const hasCustomSecsIssue = Boolean(
+    customTimerErrors.seconds || customTimerErrors.duration,
+  );
+
   function handleSoundToggle() {
     if (!soundEnabled) {
       classroomAudio.unlock();
@@ -173,10 +208,7 @@ export function ClassroomWorkspace({
               <button
                 type="button"
                 disabled={isAnyPlaybackActive}
-                onClick={() => {
-                  setSectionForm(formFromSection(activeSection));
-                  setShowSectionForm(true);
-                }}
+                onClick={() => openEditSectionForm(activeSection)}
                 className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
               >
                 <span
@@ -190,7 +222,16 @@ export function ClassroomWorkspace({
               <button
                 type="button"
                 disabled={isAnyPlaybackActive}
-                onClick={() => void handleDeleteSection()}
+                onClick={() =>
+                  confirmDialog.requestConfirm(
+                    buildDeleteClassSectionPrompt({
+                      gradeLevel: activeSection.gradeLevel,
+                      sectionName: activeSection.sectionName,
+                      studentCount: activeSection.students.length,
+                    }),
+                    () => handleDeleteSection(activeSection),
+                  )
+                }
                 className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:opacity-50"
               >
                 <span
@@ -207,12 +248,7 @@ export function ClassroomWorkspace({
           <button
             type="button"
             disabled={isAnyPlaybackActive}
-            onClick={() => {
-              setSectionForm(emptySectionForm());
-              setShowSectionForm((prev) =>
-                prev && !sectionForm.id ? false : true,
-              );
-            }}
+            onClick={toggleNewSectionForm}
             className="shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
           >
             <span
@@ -253,6 +289,8 @@ export function ClassroomWorkspace({
       {/* Add / Edit Class Section Form */}
       {showSectionForm && (
         <form
+          ref={sectionFormRef}
+          noValidate
           onSubmit={(e) => void handleSaveSection(e)}
           className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md"
         >
@@ -266,7 +304,7 @@ export function ClassroomWorkspace({
                 htmlFor={`${baseId}-section-grade`}
                 className="font-label text-label-md text-on-surface"
               >
-                Grade Level *
+                Grade Level <span aria-hidden="true">*</span>
               </label>
               <select
                 id={`${baseId}-section-grade`}
@@ -278,7 +316,7 @@ export function ClassroomWorkspace({
                     gradeLevel: Number(e.target.value) as GradeLevel,
                   }))
                 }
-                className={INPUT_CLASS}
+                className={validatedInputClass(false)}
               >
                 {GRADE_LEVELS.map((g) => (
                   <option key={g} value={String(g)}>
@@ -293,22 +331,33 @@ export function ClassroomWorkspace({
                 htmlFor={`${baseId}-section-name`}
                 className="font-label text-label-md text-on-surface"
               >
-                Section Name *
+                Section Name <span aria-hidden="true">*</span>
               </label>
               <input
                 id={`${baseId}-section-name`}
+                name="sectionName"
                 type="text"
                 required
                 disabled={savingSection || isAnyPlaybackActive}
                 placeholder="e.g. 7-Rizal"
                 value={sectionForm.sectionName}
+                aria-invalid={sectionFieldErrors.sectionName ? "true" : "false"}
+                aria-describedby={buildDescribedBy(
+                  null,
+                  sectionNameErrId,
+                  Boolean(sectionFieldErrors.sectionName),
+                )}
                 onChange={(e) =>
-                  setSectionForm((prev) => ({
-                    ...prev,
-                    sectionName: e.target.value,
-                  }))
+                  updateSectionField("sectionName", e.target.value)
                 }
-                className={INPUT_CLASS}
+                onBlur={() => validateSectionField("sectionName")}
+                className={validatedInputClass(
+                  Boolean(sectionFieldErrors.sectionName),
+                )}
+              />
+              <FieldError
+                id={sectionNameErrId}
+                message={sectionFieldErrors.sectionName}
               />
             </div>
           </div>
@@ -318,10 +367,11 @@ export function ClassroomWorkspace({
               htmlFor={`${baseId}-section-roster`}
               className="font-label text-label-md text-on-surface"
             >
-              Student Roster (paste one student name per line) *
+              Student Roster (paste one student name per line){" "}
+              <span aria-hidden="true">*</span>
             </label>
             <span
-              id={`${baseId}-section-roster-hint`}
+              id={sectionRosterHintId}
               className="font-body text-body-sm text-on-surface-variant"
             >
               {parsedFormCount}{" "}
@@ -329,19 +379,27 @@ export function ClassroomWorkspace({
             </span>
             <textarea
               id={`${baseId}-section-roster`}
+              name="rosterText"
               required
               disabled={savingSection || isAnyPlaybackActive}
               rows={7}
-              aria-describedby={`${baseId}-section-roster-hint`}
+              aria-invalid={sectionFieldErrors.rosterText ? "true" : "false"}
+              aria-describedby={buildDescribedBy(
+                sectionRosterHintId,
+                sectionRosterErrId,
+                Boolean(sectionFieldErrors.rosterText),
+              )}
               placeholder={"Dela Cruz, Juan\nReyes, Maria\nSantos, Carlo"}
               value={sectionForm.rosterText}
-              onChange={(e) =>
-                setSectionForm((prev) => ({
-                  ...prev,
-                  rosterText: e.target.value,
-                }))
-              }
-              className={INPUT_CLASS}
+              onChange={(e) => updateSectionField("rosterText", e.target.value)}
+              onBlur={() => validateSectionField("rosterText")}
+              className={validatedInputClass(
+                Boolean(sectionFieldErrors.rosterText),
+              )}
+            />
+            <FieldError
+              id={sectionRosterErrId}
+              message={sectionFieldErrors.rosterText}
             />
           </div>
 
@@ -362,8 +420,7 @@ export function ClassroomWorkspace({
               disabled={savingSection || isAnyPlaybackActive}
               onClick={() => {
                 if (savingSection || isAnyPlaybackActive) return;
-                setShowSectionForm(false);
-                setSectionForm(emptySectionForm());
+                closeSectionForm();
               }}
               className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50"
             >
@@ -723,7 +780,7 @@ export function ClassroomWorkspace({
                   <button
                     key={mins}
                     type="button"
-                    onClick={() => timer.selectPreset(mins)}
+                    onClick={() => handleSelectTimerPreset(mins)}
                     className={`px-gutter-md py-gutter-xs rounded font-mono text-label-lg transition-colors duration-state-change ${
                       timer.durationSeconds === mins * 60
                         ? "bg-primary text-on-primary"
@@ -803,71 +860,113 @@ export function ClassroomWorkspace({
               </div>
 
               <form
+                ref={customTimerFormRef}
+                noValidate
                 onSubmit={handleCustomDurationSubmit}
-                className="flex flex-wrap items-end justify-center gap-gutter-md pt-gutter-md border-t border-outline-variant"
+                className="w-full max-w-xl flex flex-col items-center gap-gutter-sm pt-gutter-md border-t border-outline-variant"
               >
-                <div className="flex flex-col gap-gutter-xs w-28">
-                  <label
-                    htmlFor={`${baseId}-custom-mins`}
-                    className="font-label text-label-md text-on-surface"
-                  >
-                    Minutes
-                  </label>
-                  <input
-                    id={`${baseId}-custom-mins`}
-                    type="number"
-                    min={0}
-                    max={180}
-                    value={timer.customMinutes}
-                    onChange={(e) =>
-                      timer.setCustomMinutes(
-                        Math.max(
-                          0,
-                          Number.parseInt(e.target.value || "0", 10) || 0,
-                        ),
-                      )
-                    }
-                    className={INPUT_CLASS}
-                  />
+                <div className="flex flex-wrap items-start justify-center gap-gutter-md">
+                  <div className="flex flex-col gap-gutter-xs w-40">
+                    <label
+                      htmlFor={`${baseId}-custom-mins`}
+                      className="font-label text-label-md text-on-surface"
+                    >
+                      Minutes
+                    </label>
+                    <input
+                      id={`${baseId}-custom-mins`}
+                      name="minutes"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={180}
+                      step={1}
+                      value={customMinutesInput}
+                      aria-invalid={hasCustomMinsIssue ? "true" : "false"}
+                      aria-describedby={buildDescribedBy(
+                        null,
+                        customTimerErrors.minutes
+                          ? customMinsErrId
+                          : customDurationErrId,
+                        hasCustomMinsIssue,
+                      )}
+                      onChange={(e) =>
+                        updateCustomTimerInput("minutes", e.target.value)
+                      }
+                      onBlur={() => validateCustomTimerFieldOnBlur("minutes")}
+                      className={validatedInputClass(hasCustomMinsIssue)}
+                    />
+                    <FieldError
+                      id={customMinsErrId}
+                      message={customTimerErrors.minutes}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-gutter-xs w-40">
+                    <label
+                      htmlFor={`${baseId}-custom-secs`}
+                      className="font-label text-label-md text-on-surface"
+                    >
+                      Seconds
+                    </label>
+                    <input
+                      id={`${baseId}-custom-secs`}
+                      name="seconds"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={59}
+                      step={1}
+                      value={customSecondsInput}
+                      aria-invalid={hasCustomSecsIssue ? "true" : "false"}
+                      aria-describedby={buildDescribedBy(
+                        null,
+                        customTimerErrors.seconds
+                          ? customSecsErrId
+                          : customDurationErrId,
+                        hasCustomSecsIssue,
+                      )}
+                      onChange={(e) =>
+                        updateCustomTimerInput("seconds", e.target.value)
+                      }
+                      onBlur={() => validateCustomTimerFieldOnBlur("seconds")}
+                      className={validatedInputClass(hasCustomSecsIssue)}
+                    />
+                    <FieldError
+                      id={customSecsErrId}
+                      message={customTimerErrors.seconds}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-gutter-xs">
+                    <span
+                      className="font-label text-label-md invisible select-none"
+                      aria-hidden="true"
+                    >
+                      Apply
+                    </span>
+                    <button
+                      type="submit"
+                      className="px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    >
+                      Set Custom Time
+                    </button>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-gutter-xs w-28">
-                  <label
-                    htmlFor={`${baseId}-custom-secs`}
-                    className="font-label text-label-md text-on-surface"
-                  >
-                    Seconds
-                  </label>
-                  <input
-                    id={`${baseId}-custom-secs`}
-                    type="number"
-                    min={0}
-                    max={59}
-                    value={timer.customSeconds}
-                    onChange={(e) =>
-                      timer.setCustomSeconds(
-                        Math.min(
-                          59,
-                          Math.max(
-                            0,
-                            Number.parseInt(e.target.value || "0", 10) || 0,
-                          ),
-                        ),
-                      )
-                    }
-                    className={INPUT_CLASS}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                >
-                  Set Custom Time
-                </button>
+                <FieldError
+                  id={customDurationErrId}
+                  message={customTimerErrors.duration}
+                  className="justify-center"
+                />
               </form>
             </div>
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        state={confirmDialog.state}
+        onConfirm={confirmDialog.confirm}
+        onCancel={confirmDialog.cancel}
+      />
     </section>
   );
 }

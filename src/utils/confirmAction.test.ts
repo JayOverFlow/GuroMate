@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   INITIAL_CONFIRM_STATE,
+  buildDeleteClassSectionPrompt,
   buildDeleteCustomCompetencyPrompt,
   confirmDialogReducer,
   formatConfirmError,
@@ -117,6 +118,34 @@ describe("buildDeleteCustomCompetencyPrompt & formatConfirmError", () => {
       title: "Delete Custom Competency?",
       body: 'Permanently delete "HTML Semantic Markup" from your custom catalog? This cannot be undone.',
       confirmLabel: "Delete Competency",
+      busyLabel: "Deleting...",
+    });
+  });
+
+  it("builds the canonical Delete Class Section prompt with singular and plural student counts", () => {
+    expect(
+      buildDeleteClassSectionPrompt({
+        gradeLevel: 7,
+        sectionName: "  Rizal  ",
+        studentCount: 40,
+      }),
+    ).toEqual({
+      title: "Delete Class Section?",
+      body: 'Permanently delete "Grade 7 — Rizal" (40 students) from local storage? This cannot be undone.',
+      confirmLabel: "Delete Section",
+      busyLabel: "Deleting...",
+    });
+
+    expect(
+      buildDeleteClassSectionPrompt({
+        gradeLevel: 10,
+        sectionName: "Mabini",
+        studentCount: 1,
+      }),
+    ).toEqual({
+      title: "Delete Class Section?",
+      body: 'Permanently delete "Grade 10 — Mabini" (1 student) from local storage? This cannot be undone.',
+      confirmLabel: "Delete Section",
       busyLabel: "Deleting...",
     });
   });
