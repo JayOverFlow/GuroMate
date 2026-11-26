@@ -4,14 +4,9 @@ import {
 } from "./classroomPreferences";
 import type { RosterStudent } from "./classroomTools";
 
-export type ActiveGroupAnimationMode =
-  | "card-deal"
-  | "group-yourselves"
-  | "instant";
-
 export interface GroupPlaybackState {
   phase: "idle" | "animating" | "settled";
-  mode: ActiveGroupAnimationMode | null;
+  mode: GroupAnimationMode | null;
   plan: CardDealPlan | null;
   minglePlan: MingleClusterPlan | null;
   mingleBeat: MingleClusterBeat | null;
@@ -400,14 +395,6 @@ export function shouldPlayCardDealTick(
   return lastTickAtMs < 0 || nowMs - lastTickAtMs >= minTickGapMs;
 }
 
-/** Resolves the active Group Maker playback mode, falling back to Instant under reduced motion. */
-export function resolveActiveGroupAnimationMode(
-  mode: GroupAnimationMode,
-  prefersReducedMotion: boolean,
-): ActiveGroupAnimationMode {
-  return resolveEffectiveGroupMode(mode, prefersReducedMotion);
-}
-
 /** Returns which beat of Group Yourselves is active at elapsedMs. */
 export function getMingleClusterBeat(
   plan: MingleClusterPlan,
@@ -427,10 +414,7 @@ export function startGroupPlayback(
     return INITIAL_GROUP_PLAYBACK_STATE;
   }
 
-  const activeMode = resolveActiveGroupAnimationMode(
-    mode,
-    prefersReducedMotion,
-  );
+  const activeMode = resolveEffectiveGroupMode(mode, prefersReducedMotion);
   if (activeMode === "instant") {
     return {
       phase: "settled",

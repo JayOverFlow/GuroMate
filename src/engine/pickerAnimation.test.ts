@@ -9,7 +9,6 @@ import {
   createInitialPickerState,
   getMysteryCardCount,
   isPickerLocked,
-  normalizeAvailablePickerMode,
   preparePickerDraw,
   resetPickerPool,
   sampleCardFlipFrame,
@@ -179,9 +178,9 @@ describe("pickerAnimation", () => {
   });
 
   it("reveals immediately in Instant mode or under reduced motion, handles exhausted pools, and activates card-flip mode", () => {
-    expect(normalizeAvailablePickerMode("slot")).toBe("slot");
-    expect(normalizeAvailablePickerMode("card-flip")).toBe("card-flip");
-    expect(normalizeAvailablePickerMode("instant")).toBe("instant");
+    expect(resolveEffectivePickerMode("slot", false)).toBe("slot");
+    expect(resolveEffectivePickerMode("card-flip", false)).toBe("card-flip");
+    expect(resolveEffectivePickerMode("instant", false)).toBe("instant");
 
     // Mystery spread card count clamps to 0..5 based on eligible students
     expect(getMysteryCardCount(-2)).toBe(0);
@@ -395,5 +394,63 @@ describe("pickerAnimation", () => {
     );
     expect(committedAuto.committed).toBe(true);
     expect(committedAuto.state.usedIndices).toEqual(new Set([0, 2]));
+  });
+
+  it("keeps mystery card counts and direct-slot plans exact across 5 -> 4 -> 3 -> 2 -> 1 -> 0 draws", () => {
+    const fiveStudents = filterPresentStudents(
+      ["Ana", "Ben", "Cara", "Diego", "Elena"],
+      new Set(),
+    );
+    let state = createInitialPickerState();
+
+    for (let remaining = 5; remaining >= 1; remaining--) {
+      expect(getMysteryCardCount(remaining)).toBe(remaining);
+
+      // Every valid slot 0..remaining-1 in createCardFlipPlan targets itself without clamping drift
+      for (let slot = 0; slot < remaining; slot++) {
+        const plan = createCardFlipPlan({
+          eligibleCount: remaining,
+          requestedSlotIndex: slot,
+        });
+        expect(plan.cardCount).toBe(remaining);
+        expect(plan.chosenSlotIndex).toBe(slot);
+      }
+
+      // Click the last visible card slot (remaining - 1) and commit
+      const lastSlot = remaining - 1;
+      const started = startPickerDraw(state, {
+        presentStudents: fiveStudents,
+        removeFromPool: true,
+        effectiveMode: "card-flip",
+        requestedSlotIndex: lastSlot,
+        random: () => 0,
+      });
+      expect(started.outcome).toBe("animating");
+      if (started.outcome !== "animating") throw new Error("expected animating");
+      if (started.pendingDraw.mode !== "card-flip") {
+        throw new Error("expected card-flip pending draw");
+      }
+      expect(started.pendingDraw.plan.cardCount).toBe(remaining);
+      expect(started.pendingDraw.plan.chosenSlotIndex).toBe(lastSlot);
+
+      const committed = commitPendingDraw(
+        started.state,
+        started.pendingDraw.drawId,
+      );
+      expect(committed.committed).toBe(true);
+      state = committed.state;
+      expect(getMysteryCardCount(fiveStudents.length - state.usedIndices.size)).toBe(
+        remaining - 1,
+      );
+    }
+
+    expect(getMysteryCardCount(0)).toBe(0);
+    const exhausted = startPickerDraw(state, {
+      presentStudents: fiveStudents,
+      removeFromPool: true,
+      effectiveMode: "card-flip",
+    });
+    expect(exhausted.outcome).toBe("exhausted");
+    expect(exhausted.state.poolExhausted).toBe(true);
   });
 });

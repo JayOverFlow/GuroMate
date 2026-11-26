@@ -4,14 +4,12 @@ import { drawRandomStudent, type RosterStudent } from "./classroomTools";
 export const SLOT_REEL_DURATION_MS = 2600;
 export const SINGLE_STUDENT_SPOTLIGHT_DURATION_MS = 600;
 export const MAX_MYSTERY_CARDS = 5;
-export const CARD_FLIP_SHUFFLE_DURATION_MS = 1050;
-export const CARD_FLIP_DURATION_MS = 750;
+export const CARD_FLIP_SHUFFLE_DURATION_MS = 1000;
+export const CARD_FLIP_DURATION_MS = 800;
 export const CARD_FLIP_AUTO_TOTAL_MS =
   CARD_FLIP_SHUFFLE_DURATION_MS + CARD_FLIP_DURATION_MS;
 const SLOT_REEL_STEPS = 30;
 const CARD_FLIP_SHUFFLE_STEPS = 5;
-
-export type AvailablePickerMode = PickerAnimationMode;
 
 export interface PreparedPickerDraw {
   picked: RosterStudent | null;
@@ -360,12 +358,6 @@ export function sampleCardFlipFrame(
   };
 }
 
-export function normalizeAvailablePickerMode(
-  mode: PickerAnimationMode,
-): AvailablePickerMode {
-  return mode === "instant" || mode === "card-flip" ? mode : "slot";
-}
-
 export function createInitialPickerState(): PickerLifecycleState {
   return {
     usedIndices: new Set(),
@@ -406,7 +398,7 @@ export function startPickerDraw(
     };
   }
 
-  const playbackMode = normalizeAvailablePickerMode(options.effectiveMode);
+  const playbackMode = options.effectiveMode;
   if (playbackMode === "instant") {
     return {
       state: {

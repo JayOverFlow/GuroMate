@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolveEffectiveGroupMode } from "./classroomPreferences";
 import {
   filterPresentStudents,
   generateStudentGroups,
@@ -14,7 +15,6 @@ import {
   INITIAL_GROUP_PLAYBACK_STATE,
   isGroupCardRevealed,
   isGroupSwapAllowed,
-  resolveActiveGroupAnimationMode,
   shouldPlayCardDealTick,
   skipGroupPlayback,
   startGroupPlayback,
@@ -190,17 +190,13 @@ describe("groupAnimation", () => {
   });
 
   it("resolves Card Deal, Group Yourselves, and Instant modes and falls back to instant under reduced motion", () => {
-    expect(resolveActiveGroupAnimationMode("card-deal", false)).toBe(
-      "card-deal",
-    );
-    expect(resolveActiveGroupAnimationMode("group-yourselves", false)).toBe(
+    expect(resolveEffectiveGroupMode("card-deal", false)).toBe("card-deal");
+    expect(resolveEffectiveGroupMode("group-yourselves", false)).toBe(
       "group-yourselves",
     );
-    expect(resolveActiveGroupAnimationMode("instant", false)).toBe("instant");
-    expect(resolveActiveGroupAnimationMode("card-deal", true)).toBe("instant");
-    expect(resolveActiveGroupAnimationMode("group-yourselves", true)).toBe(
-      "instant",
-    );
+    expect(resolveEffectiveGroupMode("instant", false)).toBe("instant");
+    expect(resolveEffectiveGroupMode("card-deal", true)).toBe("instant");
+    expect(resolveEffectiveGroupMode("group-yourselves", true)).toBe("instant");
 
     const present = filterPresentStudents(
       ["Ana", "Ben", "Cara", "Dan"],

@@ -106,6 +106,10 @@ _Avoid_: Active roster, draw list, queue
 A classroom activity tool that partitions present students in the active **Class Section** evenly into randomized groups by target group count or maximum group size, with optional manual swaps.
 _Avoid_: Team generator, group splitter, seating chart
 
+**Classroom Timer**:
+A persistent countdown timer (presets and custom duration) shared across workspaces and available in **Projector View**, with an optional chime gated by sound and reduced-motion preferences.
+_Avoid_: Stopwatch, alarm clock
+
 **Projector View**:
 A distraction-free fullscreen presentation mode for classroom management tools (**Random Student Picker**, **Group Maker**, and **Classroom Timer**) sized for whole-class visibility.
 _Avoid_: Presentation mode, kiosk mode, TV mode
