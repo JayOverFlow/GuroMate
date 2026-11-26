@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { computeCatalogCoverage } from "../engine/catalogCoverage";
 import {
   AI_PROVIDERS,
   AI_PROVIDER_MAP,
@@ -11,6 +12,7 @@ import type {
   AiModelListResult,
   AiModelOption,
   AiProviderType,
+  CurriculumCompetency,
   GuroMateSettings,
 } from "../engine/types";
 
@@ -81,6 +83,10 @@ export function useSettingsWorkspace(
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>(
     {},
   );
+  const [catalogItems, setCatalogItems] = useState<
+    CurriculumCompetency[] | null
+  >(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -102,6 +108,21 @@ export function useSettingsWorkspace(
           setLoadError(err instanceof Error ? err.message : String(err));
         }
       });
+
+    void fetch("/api/curriculum")
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await readErrorMessage(res));
+        return (await res.json()) as CurriculumCompetency[];
+      })
+      .then((items) => {
+        if (active) setCatalogItems(items);
+      })
+      .catch((err) => {
+        if (active) {
+          setCatalogError(err instanceof Error ? err.message : String(err));
+        }
+      });
+
     return () => {
       active = false;
     };
@@ -322,6 +343,10 @@ export function useSettingsWorkspace(
     : AI_PROVIDERS[0]!;
   const curatedModels = getCuratedModels(activeProvider.value);
   const availableModels = liveModels ?? curatedModels;
+  const catalogCoverage = useMemo(
+    () => (catalogItems ? computeCatalogCoverage(catalogItems) : null),
+    [catalogItems],
+  );
 
   return {
     formRef,
@@ -337,6 +362,8 @@ export function useSettingsWorkspace(
     status,
     invalidFields,
     activeProvider,
+    catalogCoverage,
+    catalogError,
     syncFieldValidity,
     updateProfileField,
     updateProvider,

@@ -131,7 +131,14 @@ function normalizeBudgetOfWork(
   const weekRange = (bow.weekRange ?? "").trim();
   const suggestedActivities = (bow.suggestedActivities ?? "").trim();
   const suggestedPerformanceTasks = (bow.suggestedPerformanceTasks ?? "").trim();
-  if (!term && !weekRange && !suggestedActivities && !suggestedPerformanceTasks) {
+  const sourceDocument = (bow.sourceDocument ?? "").trim();
+  if (
+    !term &&
+    !weekRange &&
+    !suggestedActivities &&
+    !suggestedPerformanceTasks &&
+    !sourceDocument
+  ) {
     return undefined;
   }
   return {
@@ -139,6 +146,7 @@ function normalizeBudgetOfWork(
     weekRange,
     suggestedActivities,
     suggestedPerformanceTasks,
+    ...(sourceDocument ? { sourceDocument } : {}),
   };
 }
 
@@ -151,7 +159,7 @@ function validateAndBuildCustomCompetency(
   );
   if (gradeLevels.length === 0) {
     throw new CurriculumValidationError(
-      "At least one valid Grade Level (7-10) is required.",
+      "At least one valid Grade Level (7-12) is required.",
     );
   }
   const quarters = [...new Set(input.quarters)]
@@ -164,7 +172,7 @@ function validateAndBuildCustomCompetency(
   }
   if (!VALID_COMPONENTS.has(input.component)) {
     throw new CurriculumValidationError(
-      `Unsupported TLE Component: ${String(input.component)}`,
+      `Unsupported component: ${String(input.component)}`,
     );
   }
   const contentTopic = input.contentTopic.trim();
@@ -235,6 +243,9 @@ function matchesCurriculumFilter(
   if (filter.sector && item.sector !== filter.sector) {
     return false;
   }
+  if (filter.hasBow !== undefined && Boolean(item.budgetOfWork) !== filter.hasBow) {
+    return false;
+  }
   const q = filter.query?.trim().toLowerCase();
   if (q) {
     const haystack = [
@@ -244,6 +255,8 @@ function matchesCurriculumFilter(
       item.contentStandard,
       item.performanceStandard,
       item.sector ?? "",
+      item.sectorDescription ?? "",
+      item.budgetOfWork?.sourceDocument ?? "",
       item.customNotes ?? "",
     ]
       .join(" ")
@@ -293,7 +306,7 @@ function validateAndBuildClassSection(
 ): ClassSection {
   if (!VALID_GRADES.has(input.gradeLevel)) {
     throw new ClassSectionValidationError(
-      "Grade Level must be between 7 and 10.",
+      "Grade Level must be between 7 and 12.",
     );
   }
   const sectionName = input.sectionName.trim();

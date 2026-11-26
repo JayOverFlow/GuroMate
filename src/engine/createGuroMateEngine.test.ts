@@ -843,4 +843,123 @@ describe("createGuroMateEngine", () => {
       /not found/i,
     );
   });
+
+  it("supports Grades 11-12, SHS_CORE, One-Term BoW, sourceDocument, and hasBow filtering", async () => {
+    const dataDir = await makeTempDir();
+    const engine1 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    const shsComp = await engine1.saveCustomCompetency({
+      gradeLevels: [11],
+      quarters: [1],
+      component: "SHS_CORE",
+      sector: "General Mathematics",
+      contentTopic: "Functions and Models",
+      contentStandard: "The learners demonstrate understanding of key concepts of functions.",
+      performanceStandard: "The learners accurately construct mathematical models.",
+      learningCompetency: "represent real-life situations using functions",
+      budgetOfWork: {
+        term: "One-Term",
+        weekRange: "1 to 2",
+        suggestedActivities: "- Function mapping worksheet",
+        suggestedPerformanceTasks: "- Local business pricing model",
+        sourceDocument: "DepEd SHS Core BoW - General Mathematics (2026)",
+      },
+    });
+
+    expect(shsComp.gradeLevels).toEqual([11]);
+    expect(shsComp.component).toBe("SHS_CORE");
+    expect(shsComp.budgetOfWork).toEqual({
+      term: "One-Term",
+      weekRange: "1 to 2",
+      suggestedActivities: "- Function mapping worksheet",
+      suggestedPerformanceTasks: "- Local business pricing model",
+      sourceDocument: "DepEd SHS Core BoW - General Mathematics (2026)",
+    });
+
+    const g12NoBow = await engine1.saveCustomCompetency({
+      gradeLevels: [12],
+      quarters: [2],
+      component: "ICT",
+      sector: "Computer Programming",
+      contentTopic: "Web API Integration",
+      contentStandard: "The learners demonstrate understanding of REST APIs.",
+      performanceStandard: "The learners build a client consuming JSON APIs.",
+      learningCompetency: "fetch and render structured JSON data",
+    });
+    expect(g12NoBow.gradeLevels).toEqual([12]);
+    expect(g12NoBow.budgetOfWork).toBeUndefined();
+
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    const shsFiltered = await engine2.listCurriculum({
+      gradeLevel: 11,
+      component: "SHS_CORE",
+      term: "One-Term",
+      hasBow: true,
+    });
+    expect(shsFiltered).toHaveLength(1);
+    expect(shsFiltered[0]?.budgetOfWork?.sourceDocument).toBe(
+      "DepEd SHS Core BoW - General Mathematics (2026)",
+    );
+
+    const g12WithoutBow = await engine2.listCurriculum({
+      gradeLevel: 12,
+      hasBow: false,
+    });
+    expect(g12WithoutBow.map((item) => item.id)).toContain(g12NoBow.id);
+    expect(g12WithoutBow.every((item) => !item.budgetOfWork)).toBe(true);
+
+    const g12WithBow = await engine2.listCurriculum({
+      gradeLevel: 12,
+      hasBow: true,
+    });
+    expect(g12WithBow.map((item) => item.id)).not.toContain(g12NoBow.id);
+
+    await expect(
+      engine2.saveCustomCompetency({
+        gradeLevels: [13 as never],
+        quarters: [1],
+        component: "ICT",
+        contentTopic: "Invalid",
+        contentStandard: "CS",
+        performanceStandard: "PS",
+        learningCompetency: "LC",
+      }),
+    ).rejects.toThrow(/7-12/i);
+  });
+
+  it("accepts Grades 11 and 12 for Class Sections and rejects out-of-range grades", async () => {
+    const dataDir = await makeTempDir();
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    const g11 = await engine.saveClassSection({
+      gradeLevel: 11,
+      sectionName: "11-ABM-A",
+      students: ["Ana Cruz"],
+    });
+    const g12 = await engine.saveClassSection({
+      gradeLevel: 12,
+      sectionName: "12-TVL-ICT",
+      students: ["Ben Reyes"],
+    });
+    expect(g11.gradeLevel).toBe(11);
+    expect(g12.gradeLevel).toBe(12);
+
+    await expect(
+      engine.saveClassSection({
+        gradeLevel: 13 as never,
+        sectionName: "13-Invalid",
+        students: ["Ana Cruz"],
+      }),
+    ).rejects.toThrow(/7 and 12/i);
+  });
 });

@@ -8,6 +8,7 @@ import {
   type QuarterNumber,
   type TleComponent,
 } from "../engine/types";
+import { COMPONENT_SHORT_LABELS } from "../hooks/useCurriculumWorkspace";
 
 interface CurriculumCompetencyPickerProps {
   baseId: string;
@@ -132,7 +133,7 @@ export function CurriculumCompetencyPicker({
             <option value="">All Components</option>
             {TLE_COMPONENTS.map((c) => (
               <option key={c} value={c}>
-                {c}
+                {COMPONENT_SHORT_LABELS[c]}
               </option>
             ))}
           </select>
@@ -174,7 +175,8 @@ export function CurriculumCompetencyPicker({
           ) : (
             filteredCurriculum.map((item) => (
               <option key={item.id} value={item.id}>
-                [{item.component}] {item.contentTopic} — {item.learningCompetency}
+                [{COMPONENT_SHORT_LABELS[item.component]}] {item.contentTopic} —{" "}
+                {item.learningCompetency}
               </option>
             ))
           )}
