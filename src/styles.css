@@ -1102,3 +1102,16 @@ button:disabled {
   background: var(--bg);
 }
 }
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.confirm-dialog::backdrop {
+  background: rgb(31 27 23 / 0.48);
+}

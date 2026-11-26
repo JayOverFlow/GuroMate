@@ -121,3 +121,72 @@ export function validateSettingsForm(
   }
   return errors;
 }
+
+export type CustomCompetencyFieldKey =
+  | "gradeLevels"
+  | "quarters"
+  | "contentTopic"
+  | "contentStandard"
+  | "performanceStandard"
+  | "learningCompetency";
+
+export interface CustomCompetencyFormInput {
+  gradeLevels: readonly number[];
+  quarters: readonly number[];
+  contentTopic: string;
+  contentStandard: string;
+  performanceStandard: string;
+  learningCompetency: string;
+}
+
+export const CUSTOM_COMPETENCY_FIELDS: readonly CustomCompetencyFieldKey[] = [
+  "gradeLevels",
+  "quarters",
+  "contentTopic",
+  "contentStandard",
+  "performanceStandard",
+  "learningCompetency",
+];
+
+export function validateCustomCompetencyField(
+  field: CustomCompetencyFieldKey,
+  input: CustomCompetencyFormInput,
+): string | undefined {
+  switch (field) {
+    case "gradeLevels":
+      return input.gradeLevels.length > 0
+        ? undefined
+        : "Select at least one grade level.";
+    case "quarters":
+      return input.quarters.length > 0
+        ? undefined
+        : "Select at least one quarter.";
+    case "contentTopic":
+      return isNonEmptyText(input.contentTopic)
+        ? undefined
+        : "Enter a content topic.";
+    case "contentStandard":
+      return isNonEmptyText(input.contentStandard)
+        ? undefined
+        : "Enter a Content Standard.";
+    case "performanceStandard":
+      return isNonEmptyText(input.performanceStandard)
+        ? undefined
+        : "Enter a Performance Standard.";
+    case "learningCompetency":
+      return isNonEmptyText(input.learningCompetency)
+        ? undefined
+        : "Enter a Learning Competency.";
+  }
+}
+
+export function validateCustomCompetencyForm(
+  input: CustomCompetencyFormInput,
+): FieldErrors<CustomCompetencyFieldKey> {
+  const errors: FieldErrors<CustomCompetencyFieldKey> = {};
+  for (const field of CUSTOM_COMPETENCY_FIELDS) {
+    const message = validateCustomCompetencyField(field, input);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}
