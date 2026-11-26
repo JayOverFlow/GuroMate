@@ -64,6 +64,19 @@ export interface CardFlipFrame {
   isComplete: boolean;
 }
 
+export interface CardFanSlotLayout {
+  /** Signed distance from the fan midpoint (negative = left, 0 = center, positive = right). */
+  offset: number;
+  /** Rotation angle in degrees around the bottom-center pivot (0 for a single card). */
+  angleDeg: number;
+  /** Downward vertical arc offset in pixels so outer cards follow a curved hand profile. */
+  arcYPx: number;
+  /** Horizontal inward nudge in pixels during auto-pick shuffle. */
+  shuffleXPx: number;
+  /** Ascending left-to-right stacking order (1..cardCount). */
+  zIndex: number;
+}
+
 export interface PendingSlotPickerDraw {
   mode: "slot";
   drawId: number;
@@ -267,6 +280,43 @@ export function sampleSlotReelWindow(
 export function getMysteryCardCount(eligibleCount: number): number {
   if (!Number.isFinite(eligibleCount)) return 0;
   return Math.min(MAX_MYSTERY_CARDS, Math.max(0, Math.floor(eligibleCount)));
+}
+
+function normalizeZero(value: number): number {
+  return value === 0 ? 0 : value;
+}
+
+export function getCardFanSlotLayout(
+  slotIndex: number,
+  cardCount: number,
+): CardFanSlotLayout {
+  const safeCount = getMysteryCardCount(cardCount);
+  if (safeCount <= 1) {
+    return {
+      offset: 0,
+      angleDeg: 0,
+      arcYPx: 0,
+      shuffleXPx: 0,
+      zIndex: 1,
+    };
+  }
+
+  const safeSlot = Number.isFinite(slotIndex) ? Math.floor(slotIndex) : 0;
+  const clampedSlot = Math.min(safeCount - 1, Math.max(0, safeSlot));
+  const mid = (safeCount - 1) / 2;
+  const offset = normalizeZero(clampedSlot - mid);
+  const stepDeg = safeCount === 2 ? 16 : 11;
+  const angleDeg = normalizeZero(offset * stepDeg);
+  const arcYPx = normalizeZero(Math.round(offset * offset * 3));
+  const shuffleXPx = normalizeZero(Math.round(-offset * 14));
+
+  return {
+    offset,
+    angleDeg,
+    arcYPx,
+    shuffleXPx,
+    zIndex: clampedSlot + 1,
+  };
 }
 
 export function createCardFlipPlan({

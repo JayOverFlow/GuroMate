@@ -7,6 +7,7 @@ import {
   commitPendingDraw,
   createCardFlipPlan,
   createInitialPickerState,
+  getCardFanSlotLayout,
   getMysteryCardCount,
   isPickerLocked,
   preparePickerDraw,
@@ -452,5 +453,60 @@ describe("pickerAnimation", () => {
     });
     expect(exhausted.outcome).toBe("exhausted");
     expect(exhausted.state.poolExhausted).toBe(true);
+  });
+
+  it("computes symmetric curved magician's-hand fan geometry with ascending stacking order across 1..5 cards", () => {
+    // 1 card: centered upright with no arc drop
+    expect(getCardFanSlotLayout(0, 1)).toEqual({
+      offset: 0,
+      angleDeg: 0,
+      arcYPx: 0,
+      shuffleXPx: 0,
+      zIndex: 1,
+    });
+
+    // 5 cards: full curved fan (-22deg..+22deg), parabolic arc drop, ascending z-index 1..5
+    const five = Array.from({ length: 5 }, (_, i) => getCardFanSlotLayout(i, 5));
+    expect(five.map((slot) => slot.angleDeg)).toEqual([-22, -11, 0, 11, 22]);
+    expect(five.map((slot) => slot.zIndex)).toEqual([1, 2, 3, 4, 5]);
+    expect(five[2]!.arcYPx).toBe(0);
+    expect(five[1]!.arcYPx).toBeGreaterThan(five[2]!.arcYPx);
+    expect(five[0]!.arcYPx).toBeGreaterThan(five[1]!.arcYPx);
+    expect(five[0]!.arcYPx).toBe(five[4]!.arcYPx);
+    expect(five[1]!.arcYPx).toBe(five[3]!.arcYPx);
+    expect(five[0]!.shuffleXPx).toBeGreaterThan(0);
+    expect(five[2]!.shuffleXPx).toBe(0);
+    expect(five[4]!.shuffleXPx).toBe(-five[0]!.shuffleXPx);
+
+    // 2..4 cards: gracefully narrower symmetric arcs with ascending stacking order
+    for (const count of [2, 3, 4]) {
+      const fan = Array.from({ length: count }, (_, i) =>
+        getCardFanSlotLayout(i, count),
+      );
+      expect(fan.map((slot) => slot.zIndex)).toEqual(
+        Array.from({ length: count }, (_, i) => i + 1),
+      );
+      for (let i = 0; i < count; i++) {
+        const mirror = count - 1 - i;
+        expect(fan[i]!.angleDeg + fan[mirror]!.angleDeg).toBe(0);
+        expect(fan[i]!.arcYPx).toBe(fan[mirror]!.arcYPx);
+        if (i > 0) {
+          expect(fan[i]!.angleDeg).toBeGreaterThan(fan[i - 1]!.angleDeg);
+        }
+      }
+      expect(Math.abs(fan[0]!.angleDeg)).toBeLessThan(22);
+    }
+
+    // Safe clamping for 0 cards and out-of-range indices
+    expect(getCardFanSlotLayout(0, 0)).toEqual({
+      offset: 0,
+      angleDeg: 0,
+      arcYPx: 0,
+      shuffleXPx: 0,
+      zIndex: 1,
+    });
+    expect(getCardFanSlotLayout(-3, 4)).toEqual(getCardFanSlotLayout(0, 4));
+    expect(getCardFanSlotLayout(9, 4)).toEqual(getCardFanSlotLayout(3, 4));
+    expect(getCardFanSlotLayout(4, 12)).toEqual(getCardFanSlotLayout(4, 5));
   });
 });

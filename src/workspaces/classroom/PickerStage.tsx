@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { PickerAnimationMode } from "../../engine/classroomPreferences";
 import type { RosterStudent } from "../../engine/classroomTools";
 import {
+  getCardFanSlotLayout,
   getMysteryCardCount,
   type CardFlipFrame,
   type CardFlipPlan,
@@ -11,8 +12,10 @@ import type { RevealedMysteryCard } from "../../hooks/useClassroomWorkspace";
 import { OVERLAY_STAGE_CLASS } from "./projectorStyles";
 
 type CardSlotStyle = CSSProperties & {
+  "--fan-offset": string;
   "--fan-angle": string;
   "--fan-y": string;
+  "--fan-z": string;
   "--shuffle-x": string;
   "--shuffle-delay": string;
 };
@@ -227,23 +230,35 @@ export function PickerStage({
                 {/* Left & right terracotta target markers */}
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute left-2 z-20 flex items-center text-secondary material-symbols-outlined text-title-md"
+                  className="pointer-events-none absolute left-2 z-20 flex items-center justify-center text-secondary"
                   style={{
                     top: `${rowHeightPx}px`,
                     height: `${rowHeightPx}px`,
                   }}
                 >
-                  arrow_right
+                  <span
+                    className={`material-symbols-outlined ${
+                      isProjector ? "text-headline-md" : "text-title-md"
+                    }`}
+                  >
+                    arrow_right
+                  </span>
                 </span>
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute right-2 z-20 flex items-center text-secondary material-symbols-outlined text-title-md"
+                  className="pointer-events-none absolute right-2 z-20 flex items-center justify-center text-secondary"
                   style={{
                     top: `${rowHeightPx}px`,
                     height: `${rowHeightPx}px`,
                   }}
                 >
-                  arrow_left
+                  <span
+                    className={`material-symbols-outlined ${
+                      isProjector ? "text-headline-md" : "text-title-md"
+                    }`}
+                  >
+                    arrow_left
+                  </span>
                 </span>
 
                 {/* Active Spin (multi-student 3-row continuous reel) */}
@@ -458,19 +473,18 @@ export function PickerStage({
                   <div
                     role="group"
                     aria-label="Mystery cards"
-                    className={`w-full flex flex-wrap items-center justify-center ${
+                    className={`picker-card-fan w-full flex flex-nowrap items-end justify-center ${
                       isProjector
-                        ? "gap-gutter-md py-gutter-lg min-h-64"
-                        : "gap-gutter-xs sm:gap-gutter-sm py-gutter-md min-h-44"
+                        ? "picker-card-fan--projector pt-14 pb-10 px-10 min-h-72"
+                        : "pt-10 pb-8 px-6 min-h-52"
                     }`}
                   >
                     {Array.from({ length: displayCardCount }, (_, slotIndex) => {
                       const cardNumber = slotIndex + 1;
-                      const mid = (displayCardCount - 1) / 2;
-                      const offset = slotIndex - mid;
-                      const fanAngle = offset * (displayCardCount >= 5 ? 5 : 6);
-                      const fanY = Math.round(offset * offset * 3);
-                      const shuffleX = Math.round(-offset * 12);
+                      const fanLayout = getCardFanSlotLayout(
+                        slotIndex,
+                        displayCardCount,
+                      );
 
                       const isShuffling =
                         isCardFlipAnimating &&
@@ -503,11 +517,20 @@ export function PickerStage({
                           : `idle-${slotIndex}`;
 
                       const slotStyle: CardSlotStyle = {
-                        "--fan-angle": `${fanAngle}deg`,
-                        "--fan-y": `${fanY}px`,
-                        "--shuffle-x": `${shuffleX}px`,
+                        "--fan-offset": String(fanLayout.offset),
+                        "--fan-angle": `${fanLayout.angleDeg}deg`,
+                        "--fan-y": `${fanLayout.arcYPx}px`,
+                        "--fan-z": String(fanLayout.zIndex),
+                        "--shuffle-x": `${fanLayout.shuffleXPx}px`,
                         "--shuffle-delay": `${slotIndex * 55}ms`,
                       };
+
+                      const overlapClass =
+                        slotIndex > 0
+                          ? isProjector
+                            ? "-ml-[5.75rem] sm:-ml-[7rem]"
+                            : "-ml-[4.25rem] sm:-ml-[4.75rem]"
+                          : "";
 
                       return (
                         <button
@@ -521,10 +544,10 @@ export function PickerStage({
                           }
                           onClick={() => onPickCardSlot(slotIndex)}
                           style={slotStyle}
-                          className={`picker-card-scene picker-card-slot relative rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed ${
+                          className={`picker-card-scene picker-card-slot shrink-0 relative rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed ${overlapClass} ${
                             isProjector
-                              ? "w-28 sm:w-36 h-44 sm:h-52"
-                              : "w-[4.75rem] sm:w-[5.25rem] h-32 sm:h-36"
+                              ? "w-32 sm:w-36 h-[11.5rem] sm:h-52"
+                              : "w-[5.25rem] sm:w-24 h-32 sm:h-36"
                           } ${isFocused ? "is-focused" : ""} ${
                             isDimmed ? "is-dimmed" : ""
                           } ${isShuffling ? "is-shuffling" : ""}`}
@@ -539,23 +562,43 @@ export function PickerStage({
                                   : ""
                             }`}
                           >
-                            {/* Back Face: Numbered Face-Down Mystery Card */}
+                            {/* Back Face: Numbered Face-Down Magician's-Hand Card */}
                             <span
                               aria-hidden="true"
-                              className={`picker-card-face picker-card-back-pattern rounded-md border-2 bg-primary text-on-primary shadow-sm flex flex-col items-center justify-between p-gutter-xs sm:p-gutter-sm ${
+                              className={`picker-card-face picker-card-back-pattern rounded-md border-2 bg-primary text-on-primary shadow-md flex flex-col justify-between p-1.5 sm:p-2 ${
                                 isShuffleHighlight
                                   ? "border-secondary-container ring-2 ring-secondary-container"
-                                  : "border-primary-container"
+                                  : "border-surface-container-lowest/85"
                               }`}
                             >
-                              <span className="w-full flex items-center justify-between font-mono text-label-sm text-on-primary-container">
-                                <span>{cardNumber}</span>
-                                <span className="material-symbols-outlined text-body-sm text-secondary-container">
-                                  style
+                              {/* Bold Exposed Top-Left Playing-Card Index */}
+                              <span className="w-full flex items-start justify-between">
+                                <span className="flex flex-col items-center leading-none">
+                                  <span
+                                    className={`font-display font-bold text-on-primary drop-shadow-xs ${
+                                      isProjector
+                                        ? "text-headline-md sm:text-headline-lg"
+                                        : "text-title-lg sm:text-headline-md"
+                                    }`}
+                                  >
+                                    {cardNumber}
+                                  </span>
+                                  <span
+                                    className={`material-symbols-outlined text-secondary-container mt-0.5 ${
+                                      isProjector
+                                        ? "text-body-md"
+                                        : "text-body-sm"
+                                    }`}
+                                  >
+                                    style
+                                  </span>
                                 </span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-on-primary-container/50 mt-1 mr-0.5" />
                               </span>
+
+                              {/* Center Medallion */}
                               <span
-                                className={`rounded-full bg-surface-container-low text-primary border-2 border-secondary font-display font-bold flex items-center justify-center shadow-xs ${
+                                className={`self-center rounded-full bg-surface-container-low text-primary border-2 border-secondary font-display font-bold flex items-center justify-center shadow-xs ${
                                   isProjector
                                     ? "w-14 h-14 text-headline-lg"
                                     : "w-9 h-9 text-title-lg"
@@ -563,18 +606,25 @@ export function PickerStage({
                               >
                                 {cardNumber}
                               </span>
-                              <span className="w-full flex items-center justify-between font-mono text-label-sm text-on-primary-container">
-                                <span className="uppercase tracking-wider text-[10px]">
-                                  Card
+
+                              {/* Subtle Bottom-Right Playing-Card Mirror Index */}
+                              <span className="w-full flex items-end justify-end">
+                                <span
+                                  className={`font-display font-bold text-on-primary-container leading-none rotate-180 ${
+                                    isProjector
+                                      ? "text-title-md"
+                                      : "text-label-md"
+                                  }`}
+                                >
+                                  {cardNumber}
                                 </span>
-                                <span>{cardNumber}</span>
                               </span>
                             </span>
 
                             {/* Front Face: Revealed Student Name */}
                             <span
                               aria-hidden={isAnimating}
-                              className="picker-card-face picker-card-front rounded-md border-2 border-primary bg-surface-container-lowest text-on-surface shadow-md flex flex-col items-center justify-between p-gutter-xs sm:p-gutter-sm text-center"
+                              className="picker-card-face picker-card-front rounded-md border-2 border-primary bg-surface-container-lowest text-on-surface shadow-lg flex flex-col items-center justify-between p-gutter-xs sm:p-gutter-sm text-center"
                             >
                               <span className="px-1.5 py-0.5 rounded-full bg-warning-container text-secondary font-mono text-[10px] font-semibold">
                                 #{cardNumber}
