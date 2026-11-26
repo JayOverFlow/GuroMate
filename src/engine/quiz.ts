@@ -211,7 +211,8 @@ export function buildQuizPrompt(params: {
   const promptNotes = params.promptNotes?.trim();
 
   return [
-    "Generate a DepEd MATATAG TLE printable formative Quiz with a complete Answer Key.",
+    "Generate a DepEd MATATAG (Grades 7–12: TLE, Grade 12 Technical-Professional electives, and Grade 11 SHS Core) printable formative Quiz with a complete Answer Key.",
+    "When Budget of Work (BoW) metadata is present on target Learning Competencies, align items with the BoW term/week pacing and Suggested Activities, and adapt BoW Suggested Performance Tasks for Essay / Performance Task items and rubrics; Teacher Prompt Notes override these defaults when specified.",
     `Learning Area/s: ${context.learningAreas}`,
     `Grade Level and Section: ${context.gradeAndSection}`,
     params.title?.trim() ? `Requested Quiz Title: ${params.title.trim()}` : "",
