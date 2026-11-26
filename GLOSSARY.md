@@ -93,3 +93,19 @@ _Avoid_: Exam, test portal, summative test
 **Class Section**:
 A named student group (grade level, section name, and student roster) used in lesson header metadata and classroom management tools (**Random Student Picker**, **Group Maker**).
 _Avoid_: Classroom, cohort, batch
+
+**Random Student Picker**:
+A classroom recitation tool that draws a present student uniformly at random from the active **Class Section**'s **Recitation Pool**.
+_Avoid_: Name wheel, roulette, student selector
+
+**Recitation Pool**:
+The subset of present students in a **Class Section** who remain eligible to be drawn by the **Random Student Picker** until the pool is reset.
+_Avoid_: Active roster, draw list, queue
+
+**Group Maker**:
+A classroom activity tool that partitions present students in the active **Class Section** evenly into randomized groups by target group count or maximum group size, with optional manual swaps.
+_Avoid_: Team generator, group splitter, seating chart
+
+**Projector View**:
+A distraction-free fullscreen presentation mode for classroom management tools (**Random Student Picker**, **Group Maker**, and **Classroom Timer**) sized for whole-class visibility.
+_Avoid_: Presentation mode, kiosk mode, TV mode
