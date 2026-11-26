@@ -7,6 +7,21 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { flushSync } from "react-dom";
+import {
+  createClassroomAudioPlayer,
+  type ClassroomAudioPlayer,
+} from "../engine/classroomAudio";
+import {
+  loadClassroomPreferences,
+  resolveEffectiveGroupMode,
+  resolveEffectivePickerMode,
+  saveClassroomPreferences,
+  shouldPlayClassroomCue,
+  type ClassroomPreferences,
+  type GroupAnimationMode,
+  type PickerAnimationMode,
+} from "../engine/classroomPreferences";
 import {
   drawRandomStudent,
   filterPresentStudents,
@@ -18,6 +33,7 @@ import {
 } from "../engine/classroomTools";
 import { type ClassSection, type GradeLevel } from "../engine/types";
 import type { ClassroomTimerState } from "./useClassroomTimer";
+import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 export type ToolTab = "picker" | "groups" | "timer";
 
@@ -76,12 +92,25 @@ export function useClassroomWorkspace(
   timer: ClassroomTimerState,
   openTimerTabSignal = 0,
 ) {
-  const timerBoxRef = useRef<HTMLDivElement>(null);
+  const stageRefs = useRef<Record<ToolTab, HTMLDivElement | null>>({
+    picker: null,
+    groups: null,
+    timer: null,
+  });
   const tabRefs = useRef<Record<ToolTab, HTMLButtonElement | null>>({
     picker: null,
     groups: null,
     timer: null,
   });
+
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [preferences, setPreferences] = useState<ClassroomPreferences>(() =>
+    loadClassroomPreferences(),
+  );
+  const classroomAudio: ClassroomAudioPlayer = useMemo(
+    () => createClassroomAudioPlayer(),
+    [],
+  );
 
   const [sections, setSections] = useState<ClassSection[]>([]);
   const [selectedSectionId, setSelectedSectionId] = useState<string>("");
@@ -111,14 +140,54 @@ export function useClassroomWorkspace(
   const [groups, setGroups] = useState<RosterStudent[][]>([]);
   const [swapSelection, setSwapSelection] = useState<GroupSlot | null>(null);
 
-  const [isFullscreenOverlay, setIsFullscreenOverlay] = useState(false);
-  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const [projectorOverlayTab, setProjectorOverlayTab] =
+    useState<ToolTab | null>(null);
+  const [nativeFullscreenTab, setNativeFullscreenTab] =
+    useState<ToolTab | null>(null);
+
+  useEffect(() => {
+    return () => {
+      classroomAudio.dispose();
+    };
+  }, [classroomAudio]);
 
   useEffect(() => {
     if (openTimerTabSignal > 0) {
       setActiveTab("timer");
     }
   }, [openTimerTabSignal]);
+
+  const updatePreferences = useCallback(
+    (updater: (prev: ClassroomPreferences) => ClassroomPreferences) => {
+      setPreferences((prev) => {
+        const next = updater(prev);
+        saveClassroomPreferences(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const setPickerAnimationMode = useCallback(
+    (pickerMode: PickerAnimationMode) => {
+      updatePreferences((prev) => ({ ...prev, pickerMode }));
+    },
+    [updatePreferences],
+  );
+
+  const setGroupAnimationMode = useCallback(
+    (groupModePref: GroupAnimationMode) => {
+      updatePreferences((prev) => ({ ...prev, groupMode: groupModePref }));
+    },
+    [updatePreferences],
+  );
+
+  const toggleSound = useCallback(() => {
+    updatePreferences((prev) => ({
+      ...prev,
+      soundEnabled: !prev.soundEnabled,
+    }));
+  }, [updatePreferences]);
 
   const reportError = useCallback((err: unknown) => {
     setStatus({
@@ -186,7 +255,16 @@ export function useClassroomWorkspace(
 
   useEffect(() => {
     const onFullscreenChange = () => {
-      setIsNativeFullscreen(document.fullscreenElement === timerBoxRef.current);
+      const currentEl = document.fullscreenElement;
+      if (!currentEl) {
+        setNativeFullscreenTab(null);
+        return;
+      }
+      const matchedTab =
+        (Object.keys(stageRefs.current) as ToolTab[]).find(
+          (tab) => stageRefs.current[tab] === currentEl,
+        ) ?? null;
+      setNativeFullscreenTab(matchedTab);
     };
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () =>
@@ -194,13 +272,45 @@ export function useClassroomWorkspace(
   }, []);
 
   useEffect(() => {
-    if (!isFullscreenOverlay) return;
+    if (!projectorOverlayTab) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setIsFullscreenOverlay(false);
+      if (event.key === "Escape") {
+        setProjectorOverlayTab(null);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isFullscreenOverlay]);
+  }, [projectorOverlayTab]);
+
+  useEffect(() => {
+    if (!projectorOverlayTab) return;
+    const el = stageRefs.current[projectorOverlayTab];
+    if (el && !el.contains(document.activeElement)) {
+      el.focus();
+    }
+  }, [projectorOverlayTab]);
+
+  useEffect(() => {
+    if (projectorOverlayTab && projectorOverlayTab !== activeTab) {
+      setProjectorOverlayTab(null);
+    }
+    if (
+      nativeFullscreenTab &&
+      nativeFullscreenTab !== activeTab &&
+      document.fullscreenElement
+    ) {
+      void document.exitFullscreen().catch(() => {});
+    }
+  }, [activeTab, projectorOverlayTab, nativeFullscreenTab]);
+
+  useEffect(() => {
+    if (
+      !activeSection &&
+      (projectorOverlayTab === "picker" || projectorOverlayTab === "groups")
+    ) {
+      setProjectorOverlayTab(null);
+    }
+  }, [activeSection, projectorOverlayTab]);
 
   async function handleSaveSection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -343,25 +453,45 @@ export function useClassroomWorkspace(
     timer.applyCustomTime();
   }
 
-  async function toggleFullscreen() {
-    if (isNativeFullscreen) {
+  const projectorTab: ToolTab | null =
+    nativeFullscreenTab ?? projectorOverlayTab;
+
+  async function exitProjectorView() {
+    if (document.fullscreenElement) {
       await document.exitFullscreen().catch(() => {});
+    }
+    setProjectorOverlayTab(null);
+  }
+
+  async function toggleProjectorView(tab: ToolTab) {
+    if (projectorTab === tab) {
+      await exitProjectorView();
       return;
     }
-    if (isFullscreenOverlay) {
-      setIsFullscreenOverlay(false);
-      return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
     }
-    const el = timerBoxRef.current;
-    if (el?.requestFullscreen) {
+    setProjectorOverlayTab(null);
+
+    if (activeTab !== tab) {
+      // Flush tab switch synchronously so requestFullscreen keeps user activation on a visible stage.
+      flushSync(() => {
+        setActiveTab(tab);
+      });
+    }
+
+    const el = stageRefs.current[tab];
+    if (!el) return;
+
+    if (typeof el.requestFullscreen === "function") {
       try {
         await el.requestFullscreen();
         return;
       } catch {
-        // Fall through to CSS projector overlay when Fullscreen API is unavailable.
+        // Fall through to full-viewport Escape-to-exit overlay when Fullscreen API is unavailable.
       }
     }
-    setIsFullscreenOverlay(true);
+    setProjectorOverlayTab(tab);
   }
 
   function handleTabKeyDown(
@@ -384,11 +514,37 @@ export function useClassroomWorkspace(
   }
 
   const parsedFormCount = parseRosterText(sectionForm.rosterText).length;
-  const isFullscreenActive = isNativeFullscreen || isFullscreenOverlay;
+  const effectivePickerMode = resolveEffectivePickerMode(
+    preferences.pickerMode,
+    prefersReducedMotion,
+  );
+  const effectiveGroupMode = resolveEffectiveGroupMode(
+    preferences.groupMode,
+    prefersReducedMotion,
+  );
+  const canPlayClassroomCue = useCallback(
+    (isInstant = false) =>
+      shouldPlayClassroomCue({
+        soundEnabled: preferences.soundEnabled,
+        prefersReducedMotion,
+        isInstant,
+      }),
+    [preferences.soundEnabled, prefersReducedMotion],
+  );
 
   return {
-    timerBoxRef,
+    stageRefs,
     tabRefs,
+    preferences,
+    prefersReducedMotion,
+    effectivePickerMode,
+    effectiveGroupMode,
+    soundEnabled: preferences.soundEnabled,
+    setPickerAnimationMode,
+    setGroupAnimationMode,
+    toggleSound,
+    classroomAudio,
+    canPlayClassroomCue,
     sections,
     selectedSectionId,
     setSelectedSectionId,
@@ -418,8 +574,9 @@ export function useClassroomWorkspace(
     setGroupValue,
     groups,
     swapSelection,
-    isFullscreenOverlay,
-    isFullscreenActive,
+    projectorTab,
+    projectorOverlayTab,
+    isProjectorActive: projectorTab !== null,
     handleSaveSection,
     handleDeleteSection,
     toggleAbsent,
@@ -429,7 +586,8 @@ export function useClassroomWorkspace(
     handleGenerateGroups,
     handleGroupStudentClick,
     handleCustomDurationSubmit,
-    toggleFullscreen,
+    toggleProjectorView,
+    exitProjectorView,
     handleTabKeyDown,
   };
 }
