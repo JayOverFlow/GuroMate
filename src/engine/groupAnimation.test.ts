@@ -3,11 +3,13 @@ import { resolveEffectiveGroupMode } from "./classroomPreferences";
 import {
   filterPresentStudents,
   generateStudentGroups,
+  swapGroupStudents,
 } from "./classroomTools";
 import {
   advanceGroupPlayback,
   createCardDealPlan,
   createMingleClusterPlan,
+  createSettledMingleLayout,
   getChipDensityTier,
   getMingleClusterBeat,
   getRemainingDeckCount,
@@ -15,6 +17,8 @@ import {
   INITIAL_GROUP_PLAYBACK_STATE,
   isGroupCardRevealed,
   isGroupSwapAllowed,
+  MAX_MINGLE_DURATION_MS,
+  MIN_MINGLE_DURATION_MS,
   shouldPlayCardDealTick,
   skipGroupPlayback,
   startGroupPlayback,
@@ -238,7 +242,9 @@ describe("groupAnimation", () => {
     );
   });
 
-  it("builds a mingle-to-cluster plan with scattered floor coordinates, zone targets, density tiers, and adaptive 2500-3500ms timing", () => {
+  it("builds a mingle-to-cluster plan with scattered floor coordinates, zone targets, density tiers, and adaptive 5500-6500ms timing", () => {
+    expect(MIN_MINGLE_DURATION_MS).toBe(5500);
+    expect(MAX_MINGLE_DURATION_MS).toBe(6500);
     expect(getChipDensityTier(7)).toBe("comfortable");
     expect(getChipDensityTier(16)).toBe("comfortable");
     expect(getChipDensityTier(17)).toBe("standard");
@@ -297,7 +303,7 @@ describe("groupAnimation", () => {
       mingleKeys.add(`${Math.round(chip.mingleX)},${Math.round(chip.mingleY)}`);
 
       expect(Math.hypot(chip.driftX, chip.driftY)).toBeGreaterThan(0);
-      expect(Math.hypot(chip.driftX, chip.driftY)).toBeLessThanOrEqual(12);
+      expect(Math.hypot(chip.driftX, chip.driftY)).toBeLessThanOrEqual(18);
 
       const zone = smallPlan.zones[chip.groupIndex]!;
       expect(chip.targetX).toBeGreaterThanOrEqual(zone.leftPct);
@@ -307,7 +313,7 @@ describe("groupAnimation", () => {
     }
     expect(mingleKeys.size).toBe(7);
 
-    // Adaptive timing across small (~7) and large (~45-50, 80) Class Sections stays within 2500-3500ms
+    // Adaptive timing across small (~7) and large (~45-50, 80) Class Sections stays within 5500-6500ms (~2.5s mingle + ~3.0-4.0s cluster)
     const mediumPlan = createMingleClusterPlan(
       makeGroups(25, 5),
       makeDeterministicRandom(),
@@ -337,10 +343,12 @@ describe("groupAnimation", () => {
       large50Plan,
       hugePlan,
     ]) {
-      expect(plan.totalDurationMs).toBeGreaterThanOrEqual(2500);
-      expect(plan.totalDurationMs).toBeLessThanOrEqual(3500);
-      expect(plan.mingleDurationMs).toBeGreaterThan(0);
-      expect(plan.clusterDurationMs).toBeGreaterThan(0);
+      expect(plan.totalDurationMs).toBeGreaterThanOrEqual(5500);
+      expect(plan.totalDurationMs).toBeLessThanOrEqual(6500);
+      expect(plan.mingleDurationMs).toBeGreaterThanOrEqual(2400);
+      expect(plan.mingleDurationMs).toBeLessThanOrEqual(2600);
+      expect(plan.clusterDurationMs).toBeGreaterThanOrEqual(3000);
+      expect(plan.clusterDurationMs).toBeLessThanOrEqual(4000);
       expect(plan.mingleDurationMs + plan.clusterDurationMs).toBe(
         plan.totalDurationMs,
       );
@@ -440,5 +448,102 @@ describe("groupAnimation", () => {
       settled,
     );
     expect(skipGroupPlayback(settled)).toBe(settled);
+  });
+
+  it("deterministically computes settled dot zones and updates coordinates live after manual swaps", () => {
+    const emptyLayout = createSettledMingleLayout([]);
+    expect(emptyLayout).toEqual({
+      chips: [],
+      zones: [],
+      totalStudents: 0,
+      groupCount: 0,
+      zoneCols: 0,
+      zoneRows: 0,
+      densityTier: "comfortable",
+    });
+
+    const makeGroups = (count: number, groupCount: number) => {
+      const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
+      return generateStudentGroups(
+        filterPresentStudents(roster, new Set()),
+        { mode: "count", value: groupCount },
+        () => 0.35,
+      );
+    };
+
+    const groups = makeGroups(9, 3);
+    const first = createSettledMingleLayout(groups);
+    const second = createSettledMingleLayout(groups);
+    expect(first).toEqual(second);
+
+    // Settled layout zones and target coordinates align with the animated cluster plan
+    const animatedPlan = createMingleClusterPlan(groups, () => 0.42);
+    expect(first.zones).toEqual(animatedPlan.zones);
+    expect(first.chips.map((c) => [c.student.index, c.targetX, c.targetY])).toEqual(
+      animatedPlan.chips.map((c) => [c.student.index, c.targetX, c.targetY]),
+    );
+
+    // Containment and coordinate uniqueness across small, single-group 50, and 10-group 50 rosters
+    for (const sampleGroups of [
+      groups,
+      makeGroups(50, 1),
+      makeGroups(50, 10),
+    ]) {
+      const layout = createSettledMingleLayout(sampleGroups);
+      const expectedTotal = sampleGroups.reduce((sum, g) => sum + g.length, 0);
+      expect(layout.totalStudents).toBe(expectedTotal);
+      expect(layout.groupCount).toBe(sampleGroups.length);
+      expect(layout.chips).toHaveLength(expectedTotal);
+
+      const seenStudents = new Set<number>();
+      const seenCoords = new Set<string>();
+      for (const chip of layout.chips) {
+        expect(seenStudents.has(chip.student.index)).toBe(false);
+        seenStudents.add(chip.student.index);
+
+        const zone = layout.zones[chip.groupIndex]!;
+        expect(chip.targetX).toBeGreaterThan(zone.leftPct);
+        expect(chip.targetX).toBeLessThan(zone.leftPct + zone.widthPct);
+        expect(chip.targetY).toBeGreaterThan(zone.topPct);
+        expect(chip.targetY).toBeLessThan(zone.topPct + zone.heightPct);
+
+        const coordKey = `${chip.targetX},${chip.targetY}`;
+        expect(seenCoords.has(coordKey)).toBe(false);
+        seenCoords.add(coordKey);
+      }
+    }
+
+    // Swapping two students across groups immediately moves their dots between group containers
+    const studentA = groups[0]![0]!;
+    const studentB = groups[2]![1]!;
+    const swappedGroups = swapGroupStudents(
+      groups,
+      { groupIndex: 0, studentIndex: 0 },
+      { groupIndex: 2, studentIndex: 1 },
+    );
+    const swappedLayout = createSettledMingleLayout(swappedGroups);
+
+    const movedA = swappedLayout.chips.find(
+      (chip) => chip.student.index === studentA.index,
+    )!;
+    const movedB = swappedLayout.chips.find(
+      (chip) => chip.student.index === studentB.index,
+    )!;
+    expect(movedA.groupIndex).toBe(2);
+    expect(movedA.studentIndex).toBe(1);
+    expect(movedB.groupIndex).toBe(0);
+    expect(movedB.studentIndex).toBe(0);
+
+    const zone0 = swappedLayout.zones[0]!;
+    const zone2 = swappedLayout.zones[2]!;
+    expect(movedA.targetX).toBeGreaterThan(zone2.leftPct);
+    expect(movedA.targetX).toBeLessThan(zone2.leftPct + zone2.widthPct);
+    expect(movedA.targetY).toBeGreaterThan(zone2.topPct);
+    expect(movedA.targetY).toBeLessThan(zone2.topPct + zone2.heightPct);
+
+    expect(movedB.targetX).toBeGreaterThan(zone0.leftPct);
+    expect(movedB.targetX).toBeLessThan(zone0.leftPct + zone0.widthPct);
+    expect(movedB.targetY).toBeGreaterThan(zone0.topPct);
+    expect(movedB.targetY).toBeLessThan(zone0.topPct + zone0.heightPct);
   });
 });

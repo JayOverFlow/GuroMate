@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useMemo, type CSSProperties, type ReactNode } from "react";
 import {
   resolveEffectiveGroupMode,
   type GroupAnimationMode,
@@ -9,10 +9,13 @@ import type {
   RosterStudent,
 } from "../../engine/classroomTools";
 import {
+  createSettledMingleLayout,
   getRemainingDeckCount,
   isGroupCardRevealed,
   type ChipDensityTier,
   type GroupPlaybackState,
+  type MingleChipPlan,
+  type MingleSettledChip,
 } from "../../engine/groupAnimation";
 import { OVERLAY_STAGE_CLASS } from "./projectorStyles";
 
@@ -31,36 +34,42 @@ const FLOOR_HEIGHT_CLASS: Record<
   { inline: string; projector: string }
 > = {
   comfortable: {
-    inline: "min-h-[340px] sm:min-h-[380px]",
-    projector: "min-h-[58vh]",
+    inline: "min-h-[280px] sm:min-h-[320px]",
+    projector: "min-h-[44vh]",
   },
   standard: {
-    inline: "min-h-[400px] sm:min-h-[440px]",
-    projector: "min-h-[64vh]",
+    inline: "min-h-[320px] sm:min-h-[360px]",
+    projector: "min-h-[48vh]",
   },
   compact: {
-    inline: "min-h-[460px] sm:min-h-[520px]",
-    projector: "min-h-[70vh]",
+    inline: "min-h-[360px] sm:min-h-[420px]",
+    projector: "min-h-[52vh]",
   },
 };
 
-const CHIP_SIZE_CLASS: Record<
+const DOT_SIZE_CLASS: Record<
   ChipDensityTier,
   { inline: string; projector: string }
 > = {
   comfortable: {
-    inline: "px-3 py-1.5 text-body-sm max-w-[164px]",
-    projector: "px-4 py-2 text-body-lg max-w-[228px]",
+    inline: "w-4 h-4",
+    projector: "w-6 h-6",
   },
   standard: {
-    inline: "px-2.5 py-1 text-label-md max-w-[138px]",
-    projector: "px-3 py-1.5 text-body-md max-w-[184px]",
+    inline: "w-3.5 h-3.5",
+    projector: "w-5 h-5",
   },
   compact: {
-    inline: "px-2 py-0.5 text-label-sm max-w-[114px]",
-    projector: "px-2.5 py-1 text-body-sm max-w-[154px]",
+    inline: "w-3 h-3",
+    projector: "w-4 h-4",
   },
 };
+
+function isAnimatedMingleChip(
+  chip: MingleChipPlan | MingleSettledChip,
+): chip is MingleChipPlan {
+  return "mingleX" in chip;
+}
 
 export interface GroupMakerStageProps {
   baseId: string;
@@ -131,6 +140,26 @@ export function GroupMakerStage({
   const isClusterBeat = playback.mingleBeat === "cluster";
   const settledFromMingle =
     playback.phase === "settled" && playback.mode === "group-yourselves";
+  const showRetainedMingleStage =
+    !isAnimating && groups.length > 0 && animationMode === "group-yourselves";
+  const settledMingleLayout = useMemo(
+    () => (showRetainedMingleStage ? createSettledMingleLayout(groups) : null),
+    [groups, showRetainedMingleStage],
+  );
+  const activeMingleLayout = minglePlan ?? settledMingleLayout;
+  const showMingleStage = Boolean(activeMingleLayout);
+  const stageBeat: "mingle" | "cluster" | "settled" = isMingleAnimating
+    ? isClusterBeat
+      ? "cluster"
+      : "mingle"
+    : "settled";
+  const isZoneHighlighted = stageBeat !== "mingle";
+  const orderedStageDots = useMemo(() => {
+    if (!activeMingleLayout) return [];
+    return [...activeMingleLayout.chips].sort(
+      (a, b) => a.student.index - b.student.index,
+    );
+  }, [activeMingleLayout]);
 
   const settledAnnouncement =
     playback.phase === "settled" && groups.length > 0
@@ -357,23 +386,24 @@ export function GroupMakerStage({
               )}
             </div>
 
-            {isMingleAnimating && minglePlan ? (
+            {showMingleStage && activeMingleLayout ? (
               <div
                 aria-label="Group Yourselves floor stage"
-                aria-busy="true"
+                aria-busy={isMingleAnimating || undefined}
                 className={`relative w-full rounded-md border border-outline-variant bg-surface-container-low overflow-hidden select-none ${
                   isProjector
-                    ? FLOOR_HEIGHT_CLASS[minglePlan.densityTier].projector
-                    : FLOOR_HEIGHT_CLASS[minglePlan.densityTier].inline
+                    ? FLOOR_HEIGHT_CLASS[activeMingleLayout.densityTier]
+                        .projector
+                    : FLOOR_HEIGHT_CLASS[activeMingleLayout.densityTier].inline
                 }`}
               >
-                {/* Beat 2 group zone targets */}
-                {minglePlan.zones.map((zone) => {
+                {/* Always-visible Group 1..N containers across mingle, cluster, and settled states */}
+                {activeMingleLayout.zones.map((zone) => {
                   const isEmeraldZone = zone.groupIndex % 2 === 0;
                   return (
                     <div
                       key={zone.groupIndex}
-                      data-beat={isClusterBeat ? "cluster" : "mingle"}
+                      data-beat={stageBeat}
                       aria-hidden="true"
                       style={{
                         left: `${zone.leftPct}%`,
@@ -382,11 +412,11 @@ export function GroupMakerStage({
                         height: `${zone.heightPct}%`,
                       }}
                       className={`classroom-mingle-zone absolute rounded-md border p-gutter-xs sm:p-gutter-sm flex flex-col justify-between ${
-                        isClusterBeat
+                        isZoneHighlighted
                           ? isEmeraldZone
                             ? "border-primary/45 bg-primary/[0.06]"
                             : "border-secondary/45 bg-secondary/[0.06]"
-                          : "border-dashed border-outline-variant/60 bg-surface-container/30"
+                          : "border-dashed border-outline/60 bg-surface-container-lowest/75"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-gutter-xs">
@@ -394,22 +424,22 @@ export function GroupMakerStage({
                           className={`font-title truncate ${
                             isProjector ? "text-title-md" : "text-label-md"
                           } ${
-                            isClusterBeat
+                            isZoneHighlighted
                               ? isEmeraldZone
                                 ? "text-primary"
                                 : "text-secondary"
-                              : "text-on-surface-variant"
+                              : "text-on-surface"
                           }`}
                         >
                           {zone.label}
                         </span>
                         <span
                           className={`px-1.5 py-0.5 rounded-full font-mono text-label-sm tabular-nums ${
-                            isClusterBeat
+                            isZoneHighlighted
                               ? isEmeraldZone
                                 ? "bg-primary/15 text-primary"
                                 : "bg-secondary/15 text-secondary"
-                              : "bg-surface-container-lowest/70 text-on-surface-variant"
+                              : "bg-surface-container text-on-surface-variant"
                           }`}
                         >
                           {zone.studentCount}
@@ -419,66 +449,94 @@ export function GroupMakerStage({
                   );
                 })}
 
-                {/* Compositor-only student chips gliding from mingle positions to group zones */}
-                {minglePlan.chips.map((chip, idx) => {
-                  const isEmeraldZone = chip.groupIndex % 2 === 0;
-                  const x = isClusterBeat ? chip.targetX : chip.mingleX;
-                  const y = isClusterBeat ? chip.targetY : chip.mingleY;
-                  const glideMs = Math.max(
-                    420,
-                    minglePlan.clusterDurationMs - chip.clusterDelayMs - 140,
-                  );
+                {/* Compositor-only student dots gliding from mingle positions into Group 1..N containers */}
+                {orderedStageDots.map((dot) => {
+                  const isEmeraldZone = dot.groupIndex % 2 === 0;
+                  const isMingleBeat = stageBeat === "mingle";
+                  const animatedChip = isAnimatedMingleChip(dot) ? dot : null;
+                  const x =
+                    isMingleBeat && animatedChip
+                      ? animatedChip.mingleX
+                      : dot.targetX;
+                  const y =
+                    isMingleBeat && animatedChip
+                      ? animatedChip.mingleY
+                      : dot.targetY;
+                  const settleBuffer = minglePlan
+                    ? Math.min(220, Math.floor(minglePlan.clusterDurationMs * 0.15))
+                    : 0;
+                  const glideMs =
+                    minglePlan && animatedChip
+                      ? Math.max(
+                          220,
+                          minglePlan.clusterDurationMs -
+                            animatedChip.clusterDelayMs -
+                            settleBuffer,
+                        )
+                      : 380;
                   const slotStyle = {
                     transform: `translate3d(${x}%, ${y}%, 0)`,
                     "--cluster-duration": `${glideMs}ms`,
-                    "--cluster-delay": `${chip.clusterDelayMs}ms`,
+                    "--cluster-delay": `${
+                      stageBeat === "cluster" && animatedChip
+                        ? animatedChip.clusterDelayMs
+                        : 0
+                    }ms`,
                   } as CSSProperties;
-                  const chipStyle = {
-                    "--drift-x": `${chip.driftX}px`,
-                    "--drift-y": `${chip.driftY}px`,
-                    "--drift-duration": `${1100 + (idx % 5) * 140}ms`,
-                  } as CSSProperties;
-                  const chipSizeClass = isProjector
-                    ? CHIP_SIZE_CLASS[minglePlan.densityTier].projector
-                    : CHIP_SIZE_CLASS[minglePlan.densityTier].inline;
+                  const dotStyle = animatedChip
+                    ? ({
+                        "--drift-x": `${animatedChip.driftX}px`,
+                        "--drift-y": `${animatedChip.driftY}px`,
+                        "--drift-duration": `${1800 + (dot.student.index % 5) * 180}ms`,
+                      } as CSSProperties)
+                    : undefined;
+                  const dotSizeClass = isProjector
+                    ? DOT_SIZE_CLASS[activeMingleLayout.densityTier].projector
+                    : DOT_SIZE_CLASS[activeMingleLayout.densityTier].inline;
+                  const isSwapSelected =
+                    !isMingleAnimating &&
+                    swapSelection?.groupIndex === dot.groupIndex &&
+                    swapSelection?.studentIndex === dot.studentIndex;
 
                   return (
                     <div
-                      key={`${chip.student.index}-${chip.groupIndex}-${chip.studentIndex}`}
-                      data-beat={isClusterBeat ? "cluster" : "mingle"}
+                      key={dot.student.index}
+                      data-beat={stageBeat}
                       style={slotStyle}
                       className="classroom-mingle-slot"
                     >
                       <div className="classroom-mingle-anchor">
                         <span
-                          data-beat={isClusterBeat ? "cluster" : "mingle"}
-                          style={chipStyle}
-                          className={`classroom-mingle-chip inline-flex items-center gap-1.5 rounded-full border font-body font-medium shadow-xs truncate ${chipSizeClass} ${
-                            isClusterBeat
-                              ? isEmeraldZone
-                                ? "bg-surface-container-lowest border-primary/60 text-on-surface"
-                                : "bg-surface-container-lowest border-secondary/60 text-on-surface"
-                              : "bg-surface-container-lowest border-outline-variant text-on-surface"
+                          role="img"
+                          tabIndex={0}
+                          title={dot.student.name}
+                          aria-label={
+                            isMingleBeat
+                              ? dot.student.name
+                              : `${dot.student.name}, Group ${dot.groupIndex + 1}`
+                          }
+                          data-beat={stageBeat}
+                          style={dotStyle}
+                          className={`classroom-mingle-dot pointer-events-auto block rounded-full shadow-xs cursor-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${dotSizeClass} ${
+                            isMingleBeat
+                              ? "bg-outline ring-2 ring-surface-container-lowest"
+                              : isEmeraldZone
+                                ? "bg-primary ring-2 ring-surface-container-lowest"
+                                : "bg-secondary ring-2 ring-surface-container-lowest"
+                          } ${
+                            isSwapSelected
+                              ? "ring-primary ring-offset-2 ring-offset-surface-container-low"
+                              : ""
                           }`}
-                        >
-                          <span
-                            aria-hidden="true"
-                            className={`shrink-0 w-2 h-2 rounded-full ${
-                              isClusterBeat
-                                ? isEmeraldZone
-                                  ? "bg-primary"
-                                  : "bg-secondary"
-                                : "bg-outline"
-                            }`}
-                          />
-                          <span className="truncate">{chip.student.name}</span>
-                        </span>
+                        />
                       </div>
                     </div>
                   );
                 })}
               </div>
-            ) : (
+            ) : null}
+
+            {!isMingleAnimating ? (
               <div
                 className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md ${
                   settledFromMingle ? "classroom-group-settle-in" : ""
@@ -578,7 +636,7 @@ export function GroupMakerStage({
                   );
                 })}
               </div>
-            )}
+            ) : null}
           </div>
         ) : (
           <p className="font-body text-body-sm text-on-surface-variant">
