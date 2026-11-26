@@ -297,6 +297,51 @@
   }
 }
 
+/* Group Maker: Card Deal slide/flip-in transition */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes classroom-card-deal-in {
+    0% {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.94) rotateX(-16deg);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1) rotateX(0deg);
+    }
+  }
+
+  .classroom-card-deal-in {
+    transform-origin: top center;
+    animation-name: classroom-card-deal-in;
+    animation-duration: 240ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-timing-function: linear(
+      0,
+      0.28 12%,
+      0.68 28%,
+      0.94 48%,
+      1.03 68%,
+      1.01 84%,
+      1
+    );
+    animation-fill-mode: both;
+  }
+
+  @keyframes classroom-deck-float {
+    0%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
+    50% {
+      transform: translateY(-2px) scale(1.015);
+    }
+  }
+
+  .classroom-deck-badge {
+    animation: classroom-deck-float 800ms ease-in-out infinite;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
