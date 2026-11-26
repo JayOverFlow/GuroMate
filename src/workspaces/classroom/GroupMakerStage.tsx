@@ -83,6 +83,16 @@ function isAnimatedMingleChip(
 
 const SOLITAIRE_SUITS = ["♠", "♦", "♣", "♥"] as const;
 
+function getSolitaireGroupAccent(groupIndex: number): {
+  isEmerald: boolean;
+  suit: (typeof SOLITAIRE_SUITS)[number];
+} {
+  return {
+    isEmerald: groupIndex % 2 === 0,
+    suit: SOLITAIRE_SUITS[groupIndex % SOLITAIRE_SUITS.length] ?? "♠",
+  };
+}
+
 interface SolitaireCascadeStyle {
   overlap: string;
   apron: string;
@@ -700,14 +710,10 @@ export function GroupMakerStage({
                   const dotSizeClass = isProjector
                     ? DOT_SIZE_CLASS[activeMingleLayout.densityTier].projector
                     : DOT_SIZE_CLASS[activeMingleLayout.densityTier].inline;
-                  const isSwapSelected =
-                    !isMingleAnimating &&
-                    swapSelection?.groupIndex === dot.groupIndex &&
-                    swapSelection?.studentIndex === dot.studentIndex;
 
                   return (
                     <div
-                      key={dot.student.index}
+                      key={`${dot.student.index}-${playback.skipped ? "snap" : "live"}`}
                       data-beat={stageBeat}
                       style={slotStyle}
                       className="classroom-mingle-slot"
@@ -715,7 +721,6 @@ export function GroupMakerStage({
                       <div className="classroom-mingle-anchor">
                         <span
                           role="img"
-                          tabIndex={0}
                           title={dot.student.name}
                           aria-label={
                             isMingleBeat
@@ -724,16 +729,12 @@ export function GroupMakerStage({
                           }
                           data-beat={stageBeat}
                           style={dotStyle}
-                          className={`classroom-mingle-dot pointer-events-auto block rounded-full shadow-xs cursor-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${dotSizeClass} ${
+                          className={`classroom-mingle-dot pointer-events-auto block rounded-full shadow-xs cursor-default ${dotSizeClass} ${
                             isMingleBeat
                               ? "bg-outline ring-2 ring-surface-container-lowest"
                               : isEmeraldZone
                                 ? "bg-primary ring-2 ring-surface-container-lowest"
                                 : "bg-secondary ring-2 ring-surface-container-lowest"
-                          } ${
-                            isSwapSelected
-                              ? "ring-primary ring-offset-2 ring-offset-surface-container-low"
-                              : ""
                           }`}
                         />
                       </div>
@@ -751,7 +752,7 @@ export function GroupMakerStage({
                   inFlightCards.length > 0 && (
                     <div
                       aria-hidden="true"
-                      className="pointer-events-none absolute inset-0 z-20 overflow-visible"
+                      className="pointer-events-none absolute inset-0 z-50 overflow-visible"
                     >
                       {inFlightCards.map((flight) => {
                         const target =
@@ -782,12 +783,8 @@ export function GroupMakerStage({
                           Math.max(150, target.width),
                           isProjector ? 260 : 210,
                         );
-                        const isEmeraldGroup =
-                          flight.step.groupIndex % 2 === 0;
-                        const suit =
-                          SOLITAIRE_SUITS[
-                            flight.step.groupIndex % SOLITAIRE_SUITS.length
-                          ] ?? "♠";
+                        const { isEmerald: isEmeraldGroup, suit } =
+                          getSolitaireGroupAccent(flight.step.groupIndex);
 
                         return (
                           <div
@@ -880,10 +877,8 @@ export function GroupMakerStage({
                           0,
                         )
                       : group.length;
-                    const isEmeraldGroup = groupIndex % 2 === 0;
-                    const suit =
-                      SOLITAIRE_SUITS[groupIndex % SOLITAIRE_SUITS.length] ??
-                      "♠";
+                    const { isEmerald: isEmeraldGroup, suit } =
+                      getSolitaireGroupAccent(groupIndex);
 
                     return (
                       <section
@@ -892,7 +887,7 @@ export function GroupMakerStage({
                           groupSectionRefs.current[groupIndex] = el;
                         }}
                         aria-label={`Group ${groupIndex + 1}`}
-                        className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
+                        className="isolate p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
                       >
                         <h3
                           className={`font-title text-on-surface flex items-center justify-between ${
@@ -948,7 +943,9 @@ export function GroupMakerStage({
                                       : ""
                                   }`}
                                   style={{
-                                    zIndex: isSelected ? 30 : studentIndex + 1,
+                                    zIndex: isSelected
+                                      ? group.length + 10
+                                      : studentIndex + 1,
                                   }}
                                 >
                                   {revealed ? (
@@ -1113,11 +1110,6 @@ export function GroupMakerStage({
                                         })
                                       }
                                       className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${sizeClass} ${
-                                        isAnimating &&
-                                        effectiveMode === "card-deal"
-                                          ? "classroom-card-deal-in"
-                                          : ""
-                                      } ${
                                         isSelected
                                           ? "bg-primary text-on-primary border-primary font-semibold"
                                           : isAnimating

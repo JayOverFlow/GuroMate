@@ -12,6 +12,7 @@ export interface GroupPlaybackState {
   mingleBeat: MingleClusterBeat | null;
   revealedCount: number;
   elapsedMs: number;
+  skipped: boolean;
 }
 
 export const INITIAL_GROUP_PLAYBACK_STATE: Readonly<GroupPlaybackState> = {
@@ -22,6 +23,7 @@ export const INITIAL_GROUP_PLAYBACK_STATE: Readonly<GroupPlaybackState> = {
   mingleBeat: null,
   revealedCount: 0,
   elapsedMs: 0,
+  skipped: false,
 };
 
 export interface CardDealStep {
@@ -34,7 +36,6 @@ export interface CardDealStep {
 
 export interface InFlightCardStep {
   step: CardDealStep;
-  launchAtMs: number;
   progress: number;
 }
 
@@ -458,26 +459,24 @@ export function getRevealedCardCount(
 export function getInFlightCardSteps(
   plan: CardDealPlan,
   elapsedMs: number,
-  flightDurationMs = CARD_FLIGHT_DURATION_MS,
 ): InFlightCardStep[] {
   if (
     plan.totalCards === 0 ||
     elapsedMs < 0 ||
-    elapsedMs >= plan.totalDurationMs ||
-    flightDurationMs <= 0
+    elapsedMs >= plan.totalDurationMs
   ) {
     return [];
   }
   const active: InFlightCardStep[] = [];
   for (const step of plan.steps) {
-    const launchAtMs = Math.max(0, step.revealAtMs - flightDurationMs);
+    const launchAtMs = Math.max(0, step.revealAtMs - CARD_FLIGHT_DURATION_MS);
     if (elapsedMs < launchAtMs) {
       break;
     }
     if (elapsedMs < step.revealAtMs) {
       const span = step.revealAtMs - launchAtMs;
       const progress = span > 0 ? clampUnit((elapsedMs - launchAtMs) / span) : 1;
-      active.push({ step, launchAtMs, progress });
+      active.push({ step, progress });
     }
   }
   return active;
@@ -543,6 +542,7 @@ export function startGroupPlayback(
       mingleBeat: null,
       revealedCount: totalCards,
       elapsedMs: 0,
+      skipped: false,
     };
   }
 
@@ -555,6 +555,7 @@ export function startGroupPlayback(
       mingleBeat: "mingle",
       revealedCount: 0,
       elapsedMs: 0,
+      skipped: false,
     };
   }
 
@@ -566,6 +567,7 @@ export function startGroupPlayback(
     mingleBeat: null,
     revealedCount: 0,
     elapsedMs: 0,
+    skipped: false,
   };
 }
 
@@ -629,6 +631,7 @@ export function skipGroupPlayback(
       mingleBeat: "cluster",
       revealedCount: state.minglePlan.totalStudents,
       elapsedMs: state.minglePlan.totalDurationMs,
+      skipped: true,
     };
   }
   if (!state.plan) {
@@ -639,6 +642,7 @@ export function skipGroupPlayback(
     phase: "settled",
     revealedCount: state.plan.totalCards,
     elapsedMs: state.plan.totalDurationMs,
+    skipped: true,
   };
 }
 

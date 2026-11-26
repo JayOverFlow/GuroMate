@@ -27,6 +27,19 @@ import {
   startGroupPlayback,
 } from "./groupAnimation";
 
+function makeGroups(
+  count: number,
+  groupCount: number,
+  random: () => number = () => 0.35,
+) {
+  const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
+  return generateStudentGroups(
+    filterPresentStudents(roster, new Set()),
+    { mode: "count", value: groupCount },
+    random,
+  );
+}
+
 describe("groupAnimation", () => {
   it("builds a round-robin card deal plan from generated groups and handles empty groups", () => {
     const present = filterPresentStudents(
@@ -79,20 +92,11 @@ describe("groupAnimation", () => {
   });
 
   it("caps adaptive deal duration within 3000-4000ms across small and large Class Sections", () => {
-    const makeGroups = (count: number, groupCount: number) => {
-      const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
-      return generateStudentGroups(
-        filterPresentStudents(roster, new Set()),
-        { mode: "count", value: groupCount },
-        () => 0.25,
-      );
-    };
-
-    const smallPlan = createCardDealPlan(makeGroups(7, 3));
-    const mediumPlan = createCardDealPlan(makeGroups(25, 5));
-    const large45Plan = createCardDealPlan(makeGroups(45, 9));
-    const large50Plan = createCardDealPlan(makeGroups(50, 10));
-    const hugePlan = createCardDealPlan(makeGroups(80, 10));
+    const smallPlan = createCardDealPlan(makeGroups(7, 3, () => 0.25));
+    const mediumPlan = createCardDealPlan(makeGroups(25, 5, () => 0.25));
+    const large45Plan = createCardDealPlan(makeGroups(45, 9, () => 0.25));
+    const large50Plan = createCardDealPlan(makeGroups(50, 10, () => 0.25));
+    const hugePlan = createCardDealPlan(makeGroups(80, 10, () => 0.25));
 
     for (const plan of [smallPlan, mediumPlan, large45Plan, large50Plan, hugePlan]) {
       expect(plan.totalDurationMs).toBeGreaterThanOrEqual(3000);
@@ -157,10 +161,12 @@ describe("groupAnimation", () => {
       () => 0.3,
     );
 
+    expect(INITIAL_GROUP_PLAYBACK_STATE.skipped).toBe(false);
     expect(isGroupSwapAllowed(INITIAL_GROUP_PLAYBACK_STATE, 0)).toBe(false);
 
     const started = startGroupPlayback(groups, "card-deal", false);
     expect(started.phase).toBe("animating");
+    expect(started.skipped).toBe(false);
     expect(started.plan).not.toBeNull();
     expect(started.revealedCount).toBe(0);
     expect(isGroupSwapAllowed(started, groups.length)).toBe(false);
@@ -172,6 +178,7 @@ describe("groupAnimation", () => {
       started.plan!.steps[1]!.revealAtMs,
     );
     expect(afterTwo.phase).toBe("animating");
+    expect(afterTwo.skipped).toBe(false);
     expect(afterTwo.revealedCount).toBe(2);
     expect(isGroupCardRevealed(afterTwo, 0, 0)).toBe(true);
     expect(isGroupCardRevealed(afterTwo, 1, 0)).toBe(true);
@@ -181,6 +188,7 @@ describe("groupAnimation", () => {
     // Skip immediately reveals all cards and unlocks swapping
     const skipped = skipGroupPlayback(afterTwo);
     expect(skipped.phase).toBe("settled");
+    expect(skipped.skipped).toBe(true);
     expect(skipped.revealedCount).toBe(7);
     expect(getRemainingDeckCount(skipped.plan!, skipped.revealedCount)).toBe(0);
     expect(isGroupCardRevealed(skipped, 0, 2)).toBe(true);
@@ -192,26 +200,18 @@ describe("groupAnimation", () => {
       started.plan!.totalDurationMs,
     );
     expect(completed.phase).toBe("settled");
+    expect(completed.skipped).toBe(false);
     expect(completed.revealedCount).toBe(7);
     expect(completed.elapsedMs).toBe(started.plan!.totalDurationMs);
     expect(isGroupSwapAllowed(completed, groups.length)).toBe(true);
   });
 
   it("exposes round-robin in-flight cards, playback elapsedMs, and Solitaire cascade density tiers", () => {
-    const makeGroups = (count: number, groupCount: number) => {
-      const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
-      return generateStudentGroups(
-        filterPresentStudents(roster, new Set()),
-        { mode: "count", value: groupCount },
-        () => 0.3,
-      );
-    };
-
     const emptyPlan = createCardDealPlan([]);
     expect(getInFlightCardSteps(emptyPlan, 100)).toEqual([]);
 
     // Small 7-student class: first card flies before landing, then leaves in-flight on reveal
-    const smallGroups = makeGroups(7, 3);
+    const smallGroups = makeGroups(7, 3, () => 0.3);
     const smallPlan = createCardDealPlan(smallGroups);
     const firstStep = smallPlan.steps[0]!;
     const firstLaunchMs = Math.max(0, firstStep.revealAtMs - CARD_FLIGHT_DURATION_MS);
@@ -347,15 +347,6 @@ describe("groupAnimation", () => {
     expect(emptyPlan.chips).toEqual([]);
     expect(emptyPlan.zones).toEqual([]);
 
-    const makeGroups = (count: number, groupCount: number) => {
-      const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
-      return generateStudentGroups(
-        filterPresentStudents(roster, new Set()),
-        { mode: "count", value: groupCount },
-        () => 0.35,
-      );
-    };
-
     const makeDeterministicRandom = () => {
       let seed = 17;
       return () => {
@@ -482,6 +473,7 @@ describe("groupAnimation", () => {
     );
     expect(started.phase).toBe("animating");
     expect(started.mode).toBe("group-yourselves");
+    expect(started.skipped).toBe(false);
     expect(started.plan).toBeNull();
     expect(started.minglePlan).not.toBeNull();
     expect(started.mingleBeat).toBe("mingle");
@@ -502,12 +494,14 @@ describe("groupAnimation", () => {
       minglePlan.mingleDurationMs - 50,
     );
     expect(midMingle.phase).toBe("animating");
+    expect(midMingle.skipped).toBe(false);
     expect(midMingle.mingleBeat).toBe("mingle");
     expect(isGroupSwapAllowed(midMingle, groups.length)).toBe(false);
 
     // Skip mid-mingle settles immediately and unlocks swapping
     const skippedFromMingle = skipGroupPlayback(midMingle);
     expect(skippedFromMingle.phase).toBe("settled");
+    expect(skippedFromMingle.skipped).toBe(true);
     expect(skippedFromMingle.mingleBeat).toBe("cluster");
     expect(skippedFromMingle.revealedCount).toBe(7);
     expect(isGroupSwapAllowed(skippedFromMingle, groups.length)).toBe(true);
@@ -518,18 +512,21 @@ describe("groupAnimation", () => {
       minglePlan.mingleDurationMs,
     );
     expect(inCluster.phase).toBe("animating");
+    expect(inCluster.skipped).toBe(false);
     expect(inCluster.mingleBeat).toBe("cluster");
     expect(isGroupSwapAllowed(inCluster, groups.length)).toBe(false);
 
     // Skip mid-cluster settles immediately and unlocks swapping
     const skippedFromCluster = skipGroupPlayback(inCluster);
     expect(skippedFromCluster.phase).toBe("settled");
+    expect(skippedFromCluster.skipped).toBe(true);
     expect(skippedFromCluster.revealedCount).toBe(7);
     expect(isGroupSwapAllowed(skippedFromCluster, groups.length)).toBe(true);
 
     // Natural completion settles and unlocks swapping
     const settled = advanceGroupPlayback(inCluster, minglePlan.totalDurationMs);
     expect(settled.phase).toBe("settled");
+    expect(settled.skipped).toBe(false);
     expect(settled.mingleBeat).toBe("cluster");
     expect(settled.revealedCount).toBe(7);
     expect(isGroupSwapAllowed(settled, groups.length)).toBe(true);
@@ -550,15 +547,6 @@ describe("groupAnimation", () => {
       zoneRows: 0,
       densityTier: "comfortable",
     });
-
-    const makeGroups = (count: number, groupCount: number) => {
-      const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
-      return generateStudentGroups(
-        filterPresentStudents(roster, new Set()),
-        { mode: "count", value: groupCount },
-        () => 0.35,
-      );
-    };
 
     const groups = makeGroups(9, 3);
     const first = createSettledMingleLayout(groups);
