@@ -60,10 +60,10 @@ export const WORKSPACES: readonly WorkspaceDef[] = [
     id: "curriculum",
     label: "MATATAG Catalog",
     breadcrumbGroup: "Catalog & Settings",
-    statusTag: "CG + Grade 7 BoW",
+    statusTag: "CG + Grades 7–12 BoW",
     icon: "menu_book",
     description:
-      "Grades 7-10 MATATAG TLE Curriculum Guide and Budget of Work catalog.",
+      "Grades 7–12 MATATAG TLE, SHS Core, and Budget of Work catalog.",
   },
   {
     id: "settings",
@@ -269,7 +269,7 @@ export function AppShell({
         >
           <span className="font-label text-label-md">MATATAG Catalog</span>
           <span className="font-mono text-label-sm text-on-surface-variant tabular-nums">
-            G7–10
+            G7–12
           </span>
         </a>
         <a

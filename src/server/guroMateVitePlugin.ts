@@ -121,7 +121,7 @@ function parseCurriculumFilter(reqUrl: string): CurriculumFilter {
   const componentRaw = url.searchParams.get("component");
   if (componentRaw) {
     if (!TLE_COMPONENTS.includes(componentRaw as TleComponent)) {
-      throw new HttpError(400, `Invalid TLE component: ${componentRaw}`);
+      throw new HttpError(400, `Invalid component: ${componentRaw}`);
     }
     filter.component = componentRaw as TleComponent;
   }
@@ -131,6 +131,17 @@ function parseCurriculumFilter(reqUrl: string): CurriculumFilter {
 
   const query = url.searchParams.get("query");
   if (query) filter.query = query;
+
+  const hasBowRaw = url.searchParams.get("hasBow");
+  if (hasBowRaw !== null && hasBowRaw !== "") {
+    if (hasBowRaw === "true") {
+      filter.hasBow = true;
+    } else if (hasBowRaw === "false") {
+      filter.hasBow = false;
+    } else {
+      throw new HttpError(400, `Invalid hasBow: ${hasBowRaw}`);
+    }
+  }
 
   return filter;
 }
@@ -179,6 +190,9 @@ function parseCustomCompetencyBody(body: unknown): CustomCompetencyInput {
               typeof bow.suggestedPerformanceTasks === "string"
                 ? bow.suggestedPerformanceTasks
                 : "",
+            ...(typeof bow.sourceDocument === "string"
+              ? { sourceDocument: bow.sourceDocument }
+              : {}),
           },
         }
       : {}),
