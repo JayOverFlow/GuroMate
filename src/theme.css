@@ -297,23 +297,38 @@
   }
 }
 
-/* Random Student Picker — 3D Card Flip (compositor-only, opt-in motion) */
+/* Random Student Picker — 3D Card Flip Magician's Hand (compositor-only, opt-in motion) */
+.picker-card-fan {
+  --fan-focus-step: -14px;
+}
+
+.picker-card-fan--projector {
+  --fan-focus-step: -22px;
+}
+
 .picker-card-scene {
   perspective: 1000px;
 }
 
 .picker-card-slot {
+  transform-origin: 50% 135%;
+  z-index: var(--fan-z, 1);
   transform: translate3d(0, var(--fan-y, 0px), 0) rotate(var(--fan-angle, 0deg))
     scale(1);
 }
 
 .picker-card-slot.is-focused {
-  transform: translate3d(0, -10px, 0) rotate(0deg) scale(1.06);
-  z-index: 20;
+  transform: translate3d(
+      calc(var(--fan-offset, 0) * var(--fan-focus-step, -14px)),
+      -16px,
+      0
+    )
+    rotate(0deg) scale(1.08);
+  z-index: 30;
 }
 
 .picker-card-slot.is-dimmed {
-  opacity: 0.72;
+  opacity: 0.58;
 }
 
 .picker-card-inner {
@@ -342,8 +357,8 @@
 .picker-card-back-pattern {
   background-image: repeating-linear-gradient(
     -45deg,
-    rgba(255, 248, 245, 0.07) 0,
-    rgba(255, 248, 245, 0.07) 6px,
+    rgba(255, 248, 245, 0.08) 0,
+    rgba(255, 248, 245, 0.08) 6px,
     transparent 6px,
     transparent 12px
   );
@@ -356,10 +371,12 @@
       opacity 220ms ease-out;
   }
 
-  .picker-card-slot:not(:disabled):not(.is-focused):hover {
-    transform: translate3d(0, calc(var(--fan-y, 0px) - 8px), 0)
-      rotate(var(--fan-angle, 0deg)) scale(1.04);
-    z-index: 15;
+  .picker-card-slot:not(:disabled):not(.is-focused):hover,
+  .picker-card-slot:not(:disabled):not(.is-focused):focus-visible {
+    transform: translate3d(0, calc(var(--fan-y, 0px) - 18px), 0)
+      rotate(var(--fan-angle, 0deg)) scale(1.06);
+    opacity: 1;
+    z-index: 35;
   }
 
   .picker-card-slot.is-shuffling {
@@ -382,10 +399,10 @@
     50% {
       transform: translate3d(
           var(--shuffle-x, 0px),
-          calc(var(--fan-y, 0px) - 8px),
+          calc(var(--fan-y, 0px) - 10px),
           0
         )
-        rotate(calc(var(--fan-angle, 0deg) * 0.35)) scale(1.02);
+        rotate(calc(var(--fan-angle, 0deg) * 0.4)) scale(1.03);
     }
   }
 
