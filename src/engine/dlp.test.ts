@@ -264,7 +264,10 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(derived.sourceSessionNumber).toBe(3);
     expect(derived.learningAreas).toBe("FCS");
     expect(derived.gradeAndSection).toBe("Grade 7 - Sampaguita");
-    expect(derived.references).toBe("MATATAG TLE CG & BoW");
+    expect(derived.references).toContain("MATATAG TLE CG & BoW");
+    expect(derived.references).toContain(
+      "Grade 7/[G7] TLE_ AFA _ FCS _ IA.pdf",
+    );
     expect(derived.intentions.learningCompetencies).toEqual([fcs.learningCompetency]);
     expect(derived.intentions.contentStandards).toEqual([fcs.contentStandard]);
     expect(derived.intentions.performanceStandards).toEqual([fcs.performanceStandard]);

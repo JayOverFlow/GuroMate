@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AiGenerateRequest, AiProviderAdapter } from "./types";
+import { computeCatalogCoverage } from "./catalogCoverage";
 import { createGuroMateEngine } from "./createGuroMateEngine";
 import { createLiveAiAdapter } from "./liveAiAdapter";
 
@@ -645,6 +646,86 @@ describe("createGuroMateEngine", () => {
     expect(iaMeasure?.budgetOfWork?.suggestedPerformanceTasks).toContain(
       "Personal Measurement Exercise",
     );
+  });
+
+  it("provides complete Grade 7-12 Budget of Work coverage across TLE Components, all 6 Grade 11 SHS Core subjects, and all 31 Grade 12 Tech-Pro electives", async () => {
+    const dataDir = await makeTempDir();
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+
+    const all = await engine.listCurriculum();
+    const coverage = computeCatalogCoverage(all);
+
+    // Every grade 7-12 and every component has BoW-enriched competencies
+    expect(coverage.totalCompetencies).toBeGreaterThanOrEqual(1200);
+    expect(coverage.totalBowCompetencies).toBe(coverage.totalCompetencies);
+    for (const gradeRow of coverage.byGrade) {
+      expect(gradeRow.total).toBeGreaterThan(0);
+      expect(gradeRow.bowCount).toBe(gradeRow.total);
+    }
+    for (const compRow of coverage.byComponent) {
+      expect(compRow.total).toBeGreaterThan(0);
+      expect(compRow.bowCount).toBe(compRow.total);
+    }
+
+    // All 6 Grade 11 SHS Core subjects present with normalized First/Second/Third Term values
+    const g11 = await engine.listCurriculum({
+      gradeLevel: 11,
+      component: "SHS_CORE",
+    });
+    const g11Subjects = new Set(g11.map((item) => item.sector));
+    expect(g11Subjects).toEqual(
+      new Set([
+        "Effective Communication",
+        "General Mathematics",
+        "General Science",
+        "Life and Career Skills",
+        "Mabisang Komunikasyon",
+        "Pag-aaral ng Kasaysayan at Lipunang Pilipino",
+      ]),
+    );
+    for (const item of g11) {
+      expect(["First Term", "Second Term", "Third Term"]).toContain(
+        item.budgetOfWork?.term,
+      );
+      expect(item.budgetOfWork?.sourceDocument).toMatch(/^Grade 11\//);
+    }
+    // Filipino competency text preserved
+    const filipinoHistory = g11.filter(
+      (item) => item.sector === "Pag-aaral ng Kasaysayan at Lipunang Pilipino",
+    );
+    expect(
+      filipinoHistory.some((item) =>
+        item.learningCompetency.includes("kamalayang pangkasaysayan"),
+      ),
+    ).toBe(true);
+
+    // All 31 Grade 12 Tech-Pro electives present as One-Term mapped onto ICT, FCS, IA
+    const g12 = await engine.listCurriculum({ gradeLevel: 12 });
+    const g12Electives = new Set(g12.map((item) => item.sector));
+    expect(g12Electives.size).toBe(31);
+    for (const item of g12) {
+      expect(["ICT", "FCS", "IA"]).toContain(item.component);
+      expect(item.budgetOfWork?.term).toBe("One-Term");
+      expect(item.sectorDescription).toBeTruthy();
+      expect(item.budgetOfWork?.sourceDocument).toMatch(/^Grade 12\//);
+    }
+    // Maritime cluster split per ADR-0003
+    expect(
+      g12.find((i) => i.sector === "Ships Catering Services")?.component,
+    ).toBe("FCS");
+    expect(
+      g12.find(
+        (i) => i.sector === "Maritime Engineering at the Support Level",
+      )?.component,
+    ).toBe("IA");
+    expect(
+      g12.find(
+        (i) => i.sector === "Maritime Transportation at the Support Level",
+      )?.component,
+    ).toBe("IA");
   });
 
   it("creates, updates, persists, and deletes custom Learning Competencies with validation", async () => {
