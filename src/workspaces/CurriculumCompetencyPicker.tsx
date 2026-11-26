@@ -90,32 +90,31 @@ export function CurriculumCompetencyPicker({
     }
   }, [filteredCurriculum, pickedCompetencyId, onPickCompetencyId]);
 
-  function handleGradeChange(raw: string) {
-    const nextGrade = raw ? (Number(raw) as GradeLevel) : "";
-    setFilterGrade(nextGrade);
+  function clearSectorIfOutOfScope(
+    nextGrade: GradeLevel | "",
+    nextComponent: TleComponent | "",
+  ) {
     if (
       filterSector &&
       !listAvailableSectors(curriculum, {
         grade: nextGrade,
-        component: filterComponent,
+        component: nextComponent,
       }).includes(filterSector)
     ) {
       setFilterSector("");
     }
   }
 
+  function handleGradeChange(raw: string) {
+    const nextGrade = raw ? (Number(raw) as GradeLevel) : "";
+    setFilterGrade(nextGrade);
+    clearSectorIfOutOfScope(nextGrade, filterComponent);
+  }
+
   function handleComponentChange(raw: string) {
     const nextComponent = raw ? (raw as TleComponent) : "";
     setFilterComponent(nextComponent);
-    if (
-      filterSector &&
-      !listAvailableSectors(curriculum, {
-        grade: filterGrade,
-        component: nextComponent,
-      }).includes(filterSector)
-    ) {
-      setFilterSector("");
-    }
+    clearSectorIfOutOfScope(filterGrade, nextComponent);
   }
 
   const pickedBow = pickedCompetency?.budgetOfWork;
@@ -184,7 +183,7 @@ export function CurriculumCompetencyPicker({
             <option value="">
               {availableSectors.length === 0
                 ? "None available"
-                : "All Sectors & Subjects"}
+                : "All Sectors"}
             </option>
             {availableSectors.map((sector) => (
               <option key={sector} value={sector}>

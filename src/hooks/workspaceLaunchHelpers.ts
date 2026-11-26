@@ -65,7 +65,10 @@ export function applyDllLaunchTarget(
   });
 }
 
-function appendUniqueId(ids: ReadonlyArray<string>, id: string): string[] {
+export function appendUniqueId(
+  ids: ReadonlyArray<string>,
+  id: string,
+): string[] {
   const trimmed = id.trim();
   if (!trimmed) return [...ids];
   return ids.includes(trimmed) ? [...ids] : [...ids, trimmed];

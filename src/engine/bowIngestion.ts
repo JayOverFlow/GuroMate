@@ -350,8 +350,6 @@ interface TableRowBlock {
   weekRange: string;
   lcLines: string[];
   actLines: string[];
-  isPerformanceTask: boolean;
-  perfLines: string[];
 }
 
 function findActivitySplitColumn(
@@ -620,8 +618,6 @@ function parseTabularTerm(
         weekRange,
         lcLines,
         actLines,
-        isPerformanceTask: false,
-        perfLines: [],
       });
     }
   }
@@ -885,16 +881,18 @@ export function mergeBowIntoCatalog(
   existingCatalog: readonly CurriculumCompetency[],
   parsedRows: readonly ParsedBowRow[],
 ): MergeBowResult {
-  // Base built-in CG items (strip previously generated standalone `bow-*` items for idempotency)
+  // Base built-in CG items (strip previously generated standalone `bow-*` items and stale BoW metadata for clean re-ingestion)
   const cgItems: CurriculumCompetency[] = existingCatalog
     .filter((item) => item.source === "built-in" && !item.id.startsWith("bow-"))
-    .map((item) => ({
-      ...item,
-      gradeLevels: [...item.gradeLevels],
-      quarters: [...item.quarters],
-      contentSubTopics: [...item.contentSubTopics],
-      ...(item.budgetOfWork ? { budgetOfWork: { ...item.budgetOfWork } } : {}),
-    }));
+    .map((item) => {
+      const { budgetOfWork: _staleBow, ...rest } = item;
+      return {
+        ...rest,
+        gradeLevels: [...item.gradeLevels],
+        quarters: [...item.quarters],
+        contentSubTopics: [...item.contentSubTopics],
+      };
+    });
 
   const customItems: CurriculumCompetency[] = existingCatalog
     .filter((item) => item.source === "custom")

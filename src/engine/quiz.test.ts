@@ -497,7 +497,7 @@ describe("GuroMateEngine Formative Quiz Maker", () => {
       },
     });
 
-    await engine.generateQuiz({
+    const generatedQuiz = await engine.generateQuiz({
       sourceKind: "standalone",
       gradeAndSection: "Grade 11 - Rizal",
       competencyIds: [shsComp.id],
@@ -509,6 +509,9 @@ describe("GuroMateEngine Formative Quiz Maker", () => {
         essayRubric: 1,
       },
     });
+
+    expect(generatedQuiz.learningAreas).toBe("SHS Core");
+    expect(generatedQuiz.learningAreas).not.toContain("SHS_CORE");
 
     expect(requests).toHaveLength(1);
     const prompt = requests[0]!.prompt;

@@ -803,4 +803,47 @@ describe("mergeBowIntoCatalog", () => {
     expect(secondPass.catalog).toEqual(firstPass.catalog);
     expect(secondPass.stats).toEqual(firstPass.stats);
   });
+
+  it("clears stale budgetOfWork on built-in CG items when a previously matched BoW row is removed on re-ingestion while keeping custom items untouched", () => {
+    const firstPass = mergeBowIntoCatalog(baseCg, sampleRows);
+    expect(
+      firstPass.catalog.find((c) => c.id === "cg-g7-ict-q1-01")?.budgetOfWork,
+    ).toBeDefined();
+
+    const customWithBow: CurriculumCompetency = {
+      ...baseCg.find((c) => c.id === "custom-teacher-01")!,
+      budgetOfWork: {
+        term: "First Term",
+        weekRange: "1",
+        suggestedActivities: "- Custom activity",
+        suggestedPerformanceTasks: "",
+        sourceDocument: "Custom.pdf",
+      },
+    };
+    const catalogWithCustomBow = firstPass.catalog.map((c) =>
+      c.id === "custom-teacher-01" ? customWithBow : c,
+    );
+
+    // Re-run without the Grade 7 ICT BoW row
+    const rowsWithoutG7Ict = sampleRows.filter(
+      (row) => !(row.gradeLevels.includes(7) && row.component === "ICT"),
+    );
+    const reingested = mergeBowIntoCatalog(catalogWithCustomBow, rowsWithoutG7Ict);
+
+    const g7Cg = reingested.catalog.find((c) => c.id === "cg-g7-ict-q1-01");
+    expect(g7Cg?.budgetOfWork).toBeUndefined();
+    expect(g7Cg?.customNotes).toBe("Keep teacher note");
+
+    // Still-matched CG item retains its fresh BoW
+    const g910Cg = reingested.catalog.find(
+      (c) => c.id === "cg-g9-10-fcs-handicrafts-01",
+    );
+    expect(g910Cg?.budgetOfWork).toBeDefined();
+
+    // Custom competency (including any budgetOfWork it had) is preserved untouched
+    const customItem = reingested.catalog.find(
+      (c) => c.id === "custom-teacher-01",
+    );
+    expect(customItem).toEqual(customWithBow);
+  });
 });

@@ -1,6 +1,7 @@
 import {
   dedupeOrdered,
   formatCompetencyLines,
+  formatLearningAreas,
   parseAiJsonObject,
 } from "./lessonHelpers";
 import {
@@ -371,7 +372,7 @@ export function renderDllMarkdown(dll: DailyLessonLog): string {
     const label =
       session.mode === "non-instructional"
         ? `Non-Instructional (${session.nonInstructionalReason || "Holiday"})`
-        : session.components.join(", ");
+        : formatLearningAreas(session.components);
     lines.push(`### Session ${session.sessionNumber}${label ? ` — ${label}` : ""}`);
     lines.push("");
     lines.push(`- **Learning Objectives:** ${session.learningObjectives || "—"}`);

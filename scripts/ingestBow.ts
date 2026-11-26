@@ -6,6 +6,7 @@ import {
   parseBowDocument,
   type ParsedBowRow,
 } from "../src/engine/bowIngestion.ts";
+import { computeCatalogCoverage } from "../src/engine/catalogCoverage.ts";
 import type { CurriculumCompetency } from "../src/engine/types.ts";
 
 function parseArgs(argv: string[]): { sourceDir: string; catalogPath: string } {
@@ -90,22 +91,7 @@ function main(): void {
   );
 
   // Print concise deterministic summary
-  const byGrade = new Map<number, { total: number; bow: number }>();
-  const byComp = new Map<string, { total: number; bow: number }>();
-  for (const item of merged.catalog) {
-    const hasBow = Boolean(item.budgetOfWork);
-    const compStats = byComp.get(item.component) ?? { total: 0, bow: 0 };
-    compStats.total += 1;
-    if (hasBow) compStats.bow += 1;
-    byComp.set(item.component, compStats);
-
-    for (const g of item.gradeLevels) {
-      const gStats = byGrade.get(g) ?? { total: 0, bow: 0 };
-      gStats.total += 1;
-      if (hasBow) gStats.bow += 1;
-      byGrade.set(g, gStats);
-    }
-  }
+  const coverage = computeCatalogCoverage(merged.catalog);
 
   console.log(`Ingested ${pdfFiles.length} PDFs (${allParsedRows.length} BoW rows parsed).`);
   console.log(
@@ -115,14 +101,12 @@ function main(): void {
     console.warn(`WARNING: ${emptyFiles.length} PDFs parsed 0 rows:\n  - ${emptyFiles.join("\n  - ")}`);
   }
   console.log("By Grade:");
-  for (const g of [7, 8, 9, 10, 11, 12]) {
-    const s = byGrade.get(g) ?? { total: 0, bow: 0 };
-    console.log(`  Grade ${g}: ${s.total} total (${s.bow} with BoW)`);
+  for (const row of coverage.byGrade) {
+    console.log(`  Grade ${row.gradeLevel}: ${row.total} total (${row.bowCount} with BoW)`);
   }
   console.log("By Component:");
-  for (const c of ["ICT", "AFA", "FCS", "IA", "SHS_CORE"]) {
-    const s = byComp.get(c) ?? { total: 0, bow: 0 };
-    console.log(`  ${c}: ${s.total} total (${s.bow} with BoW)`);
+  for (const row of coverage.byComponent) {
+    console.log(`  ${row.component}: ${row.total} total (${row.bowCount} with BoW)`);
   }
 }
 

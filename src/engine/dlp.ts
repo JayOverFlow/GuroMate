@@ -1,6 +1,7 @@
 import {
   dedupeOrdered,
   formatCompetencyLines,
+  formatLearningAreas,
   parseAiJsonObject,
 } from "./lessonHelpers";
 import {
@@ -96,7 +97,7 @@ export function resolveScratchDlpContext(
 
   return {
     gradeAndSection: trimmedGrade,
-    learningAreas: dedupeOrdered(competencies.map((c) => c.component)).join(", "),
+    learningAreas: formatLearningAreas(competencies.map((c) => c.component)),
     competencyIds: ids,
     learningCompetencies: dedupeOrdered(competencies.map((c) => c.learningCompetency)),
     contentStandards: dedupeOrdered(competencies.map((c) => c.contentStandard)),
@@ -138,7 +139,7 @@ export function resolveDerivedDlpContext(
 
   return {
     gradeAndSection: dll.gradeAndSection,
-    learningAreas: components.join(", ") || dll.learningAreas,
+    learningAreas: formatLearningAreas(components) || dll.learningAreas,
     competencyIds: [...session.competencyIds],
     learningCompetencies:
       competencies.length > 0

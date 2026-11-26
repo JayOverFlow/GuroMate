@@ -1,4 +1,16 @@
-import type { BudgetOfWorkInfo, CurriculumCompetency } from "./types";
+import type {
+  BudgetOfWorkInfo,
+  CurriculumCompetency,
+  TleComponent,
+} from "./types";
+
+export function formatComponentLabel(component: TleComponent): string {
+  return component === "SHS_CORE" ? "SHS Core" : component;
+}
+
+export function formatLearningAreas(components: readonly TleComponent[]): string {
+  return dedupeOrdered([...components]).map(formatComponentLabel).join(", ");
+}
 
 export function dedupeOrdered<T>(items: T[]): T[] {
   const seen = new Set<T>();
@@ -42,7 +54,7 @@ export function formatCompetencyLines(competencies: CurriculumCompetency[]): str
   return competencies
     .map((c) => {
       const parts = [
-        `- [${c.component}${c.sector ? ` / ${c.sector}` : ""}] Topic: ${c.contentTopic}`,
+        `- [${formatComponentLabel(c.component)}${c.sector ? ` / ${c.sector}` : ""}] Topic: ${c.contentTopic}`,
         c.contentSubTopics.length > 0
           ? `  Sub-topics: ${c.contentSubTopics.join("; ")}`
           : "",

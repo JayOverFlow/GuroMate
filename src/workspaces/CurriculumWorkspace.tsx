@@ -15,6 +15,7 @@ import {
   formFromItem,
   toggleArrayValue,
   useCurriculumWorkspace,
+  type BowFilterMode,
 } from "../hooks/useCurriculumWorkspace";
 
 const COMPONENT_BADGE_CLASSES: Record<TleComponent, string> = {
@@ -289,7 +290,7 @@ export function CurriculumWorkspace({
                 htmlFor={`${baseId}-custom-sector`}
                 className="font-label text-label-md text-on-surface"
               >
-                Sector / Subject (optional)
+                Sector (optional)
               </label>
               <input
                 id={`${baseId}-custom-sector`}
@@ -628,7 +629,7 @@ export function CurriculumWorkspace({
             htmlFor={`${baseId}-sector`}
             className="font-label text-label-md text-on-surface"
           >
-            Sector / Subject
+            Sector
           </label>
           <select
             id={`${baseId}-sector`}
@@ -640,7 +641,7 @@ export function CurriculumWorkspace({
             <option value="">
               {availableSectors.length === 0
                 ? "None available"
-                : "All Sectors & Subjects"}
+                : "All Sectors"}
             </option>
             {availableSectors.map((s) => (
               <option key={s} value={s}>
@@ -735,14 +736,12 @@ export function CurriculumWorkspace({
           <select
             id={`${baseId}-has-bow`}
             value={hasBow}
-            onChange={(e) =>
-              setHasBow(e.target.value as "" | "true" | "false")
-            }
+            onChange={(e) => setHasBow(e.target.value as BowFilterMode)}
             className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
           >
-            <option value="">All Competencies</option>
-            <option value="true">Has BoW</option>
-            <option value="false">Without BoW</option>
+            <option value="all">All Competencies</option>
+            <option value="with_bow">Has BoW</option>
+            <option value="without_bow">Without BoW</option>
           </select>
         </div>
       </search>

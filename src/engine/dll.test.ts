@@ -507,6 +507,8 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(prompt).toContain("Barangay inventory CLI prototype");
     expect(prompt).toContain("Grade 12 Tech-Pro ICT Computer Programming Budget of Work");
 
+    expect(autoRefDll.learningAreas).toBe("SHS Core, ICT");
+    expect(autoRefDll.learningAreas).not.toContain("SHS_CORE");
     expect(autoRefDll.references).toBe(
       "Grade 11 SHS Core General Mathematics Budget of Work; Grade 12 Tech-Pro ICT Computer Programming Budget of Work",
     );
@@ -522,6 +524,8 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
         { sessionNumber: 5, mode: "instructional", competencyIds: [shsComp.id] },
       ],
     });
+    expect(customRefDll.learningAreas).toBe("SHS Core");
+    expect(customRefDll.learningAreas).not.toContain("SHS_CORE");
     expect(customRefDll.references).toBe("Teacher Custom Module 2026");
   });
 });
