@@ -21,6 +21,9 @@ interface ClassroomWorkspaceProps {
 const INPUT_CLASS =
   "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
+const OVERLAY_STAGE_CLASS =
+  "fixed inset-0 z-50 rounded-none border-0 overflow-auto bg-surface p-gutter-xl";
+
 export function ClassroomWorkspace({
   timer,
   openTimerTabSignal = 0,
@@ -29,8 +32,12 @@ export function ClassroomWorkspace({
   const baseId = useId();
 
   const {
-    timerBoxRef,
+    stageRefs,
     tabRefs,
+    prefersReducedMotion,
+    soundEnabled,
+    toggleSound,
+    classroomAudio,
     sections,
     selectedSectionId,
     setSelectedSectionId,
@@ -60,8 +67,8 @@ export function ClassroomWorkspace({
     setGroupValue,
     groups,
     swapSelection,
-    isFullscreenOverlay,
-    isFullscreenActive,
+    projectorTab,
+    projectorOverlayTab,
     handleSaveSection,
     handleDeleteSection,
     toggleAbsent,
@@ -71,7 +78,7 @@ export function ClassroomWorkspace({
     handleGenerateGroups,
     handleGroupStudentClick,
     handleCustomDurationSubmit,
-    toggleFullscreen,
+    toggleProjectorView,
     handleTabKeyDown,
   } = useClassroomWorkspace(timer, openTimerTabSignal);
 
@@ -82,6 +89,20 @@ export function ClassroomWorkspace({
       : timer.remainingSeconds === timer.durationSeconds
         ? "Ready"
         : "Paused";
+
+  const isPickerProjector = projectorTab === "picker";
+  const isPickerOverlay = projectorOverlayTab === "picker";
+  const isGroupsProjector = projectorTab === "groups";
+  const isGroupsOverlay = projectorOverlayTab === "groups";
+  const isTimerProjector = projectorTab === "timer";
+  const isTimerOverlay = projectorOverlayTab === "timer";
+
+  function handleSoundToggle() {
+    if (!soundEnabled) {
+      classroomAudio.unlock();
+    }
+    toggleSound();
+  }
 
   return (
     <section
@@ -423,19 +444,18 @@ export function ClassroomWorkspace({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setActiveTab("timer");
-              void toggleFullscreen();
-            }}
+            onClick={() => void toggleProjectorView("timer")}
             className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary text-label-md font-label hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span
               className="material-symbols-outlined text-title-md"
               aria-hidden="true"
             >
-              fullscreen
+              {isTimerProjector ? "fullscreen_exit" : "fullscreen"}
             </span>
-            <span>Projector View</span>
+            <span>
+              {isTimerProjector ? "Exit Projector View" : "Projector View"}
+            </span>
           </button>
         </div>
       </section>
@@ -454,44 +474,52 @@ export function ClassroomWorkspace({
         </div>
       )}
 
-      {/* Tool Tabs */}
+      {/* Tool Tabs & Shared Classroom Audio Control */}
       <div className="flex flex-col gap-gutter-md">
-        <div
-          role="tablist"
-          aria-label="Classroom Tools"
-          className="inline-flex flex-wrap items-center gap-gutter-xs p-gutter-xs rounded bg-surface-container border border-outline-variant self-start"
-        >
-          {TOOL_TABS.map((tab, idx) => {
-            const selected = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                ref={(el) => {
-                  tabRefs.current[tab.id] = el;
-                }}
-                id={`${baseId}-tab-${tab.id}`}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
-                onClick={() => setActiveTab(tab.id)}
-                onKeyDown={(e) => handleTabKeyDown(e, idx)}
-                className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
-                  selected
-                    ? "bg-surface-container-lowest text-primary border border-outline-variant"
-                    : "text-on-surface-variant hover:text-on-surface"
-                }`}
-              >
-                <span
-                  className="material-symbols-outlined text-title-md"
-                  aria-hidden="true"
+        <div className="flex flex-wrap items-center justify-between gap-gutter-sm">
+          <div
+            role="tablist"
+            aria-label="Classroom Tools"
+            className="inline-flex flex-wrap items-center gap-gutter-xs p-gutter-xs rounded bg-surface-container border border-outline-variant"
+          >
+            {TOOL_TABS.map((tab, idx) => {
+              const selected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  ref={(el) => {
+                    tabRefs.current[tab.id] = el;
+                  }}
+                  id={`${baseId}-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => setActiveTab(tab.id)}
+                  onKeyDown={(e) => handleTabKeyDown(e, idx)}
+                  className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+                    selected
+                      ? "bg-surface-container-lowest text-primary border border-outline-variant"
+                      : "text-on-surface-variant hover:text-on-surface"
+                  }`}
                 >
-                  {tab.icon}
-                </span>
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    {tab.icon}
+                  </span>
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <SoundToggleButton
+            soundEnabled={soundEnabled}
+            prefersReducedMotion={prefersReducedMotion}
+            onToggle={handleSoundToggle}
+          />
         </div>
 
         {/* Panel 1: Random Student Picker */}
@@ -506,81 +534,137 @@ export function ClassroomWorkspace({
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter-lg items-start">
-              {/* Spotlight Draw Card */}
-              <div className="lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col items-center text-center gap-gutter-md">
-                <span className="font-label text-label-md text-on-surface-variant uppercase tracking-wider">
-                  Selected Student
-                </span>
+              {/* Spotlight Draw Card (Projector View Stage) */}
+              <div
+                ref={(el) => {
+                  stageRefs.current.picker = el;
+                }}
+                role={isPickerOverlay ? "dialog" : undefined}
+                aria-modal={isPickerOverlay ? true : undefined}
+                aria-label={
+                  isPickerOverlay
+                    ? "Random Student Picker Projector View"
+                    : undefined
+                }
+                tabIndex={isPickerOverlay ? -1 : undefined}
+                className={`classroom-projector-stage lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col items-center text-center gap-gutter-md ${
+                  isPickerOverlay ? OVERLAY_STAGE_CLASS : ""
+                }`}
+              >
                 <div
-                  role="status"
-                  aria-live="polite"
-                  className="w-full py-gutter-lg px-gutter-md rounded-md bg-surface-container-low border border-primary flex flex-col items-center gap-gutter-xs"
+                  className={`w-full flex flex-col items-center gap-gutter-md ${
+                    isPickerProjector ? "max-w-3xl mx-auto my-auto" : ""
+                  }`}
                 >
-                  {poolExhausted ? (
-                    <p className="font-title text-title-lg text-on-surface-variant">
-                      {presentStudents.length === 0
-                        ? "All students are marked absent."
-                        : "Every present student has been called. Reset pool to draw again."}
-                    </p>
-                  ) : pickedStudent ? (
-                    <p className="font-display text-display-lg text-primary text-balance">
-                      {pickedStudent.name}
-                    </p>
-                  ) : (
-                    <p className="font-title text-title-lg text-on-surface-variant">
-                      Ready to pick a student
-                    </p>
-                  )}
-                  <span className="font-body text-body-sm text-on-surface-variant">
-                    {activeSection.sectionName} · Present:{" "}
-                    {presentStudents.length}/{activeSection.students.length} ·
-                    Pool remaining: {remainingInPoolCount}
-                  </span>
-                </div>
-
-                <label className="inline-flex items-center gap-gutter-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={removePickedFromPool}
-                    onChange={(e) => {
-                      setRemovePickedFromPool(e.target.checked);
-                      setPoolExhausted(false);
-                    }}
-                    className="accent-primary"
-                  />
-                  <span className="font-body text-body-sm text-on-surface">
-                    Remove picked student from pool until reset (no repeats)
-                  </span>
-                </label>
-
-                <div className="flex flex-wrap justify-center items-center gap-gutter-sm pt-gutter-xs">
-                  <button
-                    type="button"
-                    disabled={presentStudents.length === 0}
-                    onClick={handlePickStudent}
-                    className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
-                  >
-                    <span
-                      className="material-symbols-outlined text-title-md"
-                      aria-hidden="true"
-                    >
-                      casino
+                  <div className="w-full flex flex-wrap items-center justify-between gap-gutter-sm">
+                    <span className="font-label text-label-md text-on-surface-variant uppercase tracking-wider">
+                      {isPickerProjector
+                        ? "Random Student Picker"
+                        : "Selected Student"}
                     </span>
-                    <span>Pick Random Student</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleResetPool}
-                    className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+                    <div className="flex items-center gap-gutter-xs">
+                      {isPickerProjector && (
+                        <SoundToggleButton
+                          soundEnabled={soundEnabled}
+                          prefersReducedMotion={prefersReducedMotion}
+                          onToggle={handleSoundToggle}
+                        />
+                      )}
+                      <ProjectorToggleButton
+                        active={isPickerProjector}
+                        onToggle={() => void toggleProjectorView("picker")}
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className={`w-full rounded-md bg-surface-container-low border border-primary flex flex-col items-center gap-gutter-xs ${
+                      isPickerProjector
+                        ? "py-gutter-xl px-gutter-xl"
+                        : "py-gutter-lg px-gutter-md"
+                    }`}
                   >
-                    <span
-                      className="material-symbols-outlined text-title-md"
-                      aria-hidden="true"
-                    >
-                      refresh
+                    {poolExhausted ? (
+                      <p className="font-title text-title-lg text-on-surface-variant">
+                        {presentStudents.length === 0
+                          ? "All students are marked absent."
+                          : "Every present student has been called. Reset pool to draw again."}
+                      </p>
+                    ) : pickedStudent ? (
+                      <p
+                        className="font-display font-bold text-primary text-balance leading-tight"
+                        style={
+                          isPickerProjector
+                            ? { fontSize: "clamp(2.5rem, 8vw, 5.5rem)" }
+                            : undefined
+                        }
+                      >
+                        <span
+                          className={
+                            isPickerProjector ? "" : "text-display-lg"
+                          }
+                        >
+                          {pickedStudent.name}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="font-title text-title-lg text-on-surface-variant">
+                        Ready to pick a student
+                      </p>
+                    )}
+                    <span className="font-body text-body-sm text-on-surface-variant">
+                      {activeSection.sectionName} · Present:{" "}
+                      {presentStudents.length}/{activeSection.students.length} ·
+                      Pool remaining: {remainingInPoolCount}
                     </span>
-                    <span>Reset Pool</span>
-                  </button>
+                  </div>
+
+                  <label className="inline-flex items-center gap-gutter-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={removePickedFromPool}
+                      onChange={(e) => {
+                        setRemovePickedFromPool(e.target.checked);
+                        setPoolExhausted(false);
+                      }}
+                      className="accent-primary"
+                    />
+                    <span className="font-body text-body-sm text-on-surface">
+                      Remove picked student from pool until reset (no repeats)
+                    </span>
+                  </label>
+
+                  <div className="flex flex-wrap justify-center items-center gap-gutter-sm pt-gutter-xs">
+                    <button
+                      type="button"
+                      disabled={presentStudents.length === 0}
+                      onClick={handlePickStudent}
+                      className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
+                    >
+                      <span
+                        className="material-symbols-outlined text-title-md"
+                        aria-hidden="true"
+                      >
+                        casino
+                      </span>
+                      <span>Pick Random Student</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetPool}
+                      className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+                    >
+                      <span
+                        className="material-symbols-outlined text-title-md"
+                        aria-hidden="true"
+                      >
+                        refresh
+                      </span>
+                      <span>Reset Pool</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -608,138 +692,182 @@ export function ClassroomWorkspace({
             </div>
           ) : (
             <div className="flex flex-col gap-gutter-lg">
-              <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
-                <div className="flex flex-wrap items-end justify-between gap-gutter-md pb-gutter-md border-b border-outline-variant">
-                  <div className="flex flex-wrap items-end gap-gutter-md">
-                    <div className="flex flex-col gap-gutter-xs">
-                      <label
-                        htmlFor={`${baseId}-group-mode`}
-                        className="font-label text-label-md text-on-surface"
-                      >
-                        Split By
-                      </label>
-                      <select
-                        id={`${baseId}-group-mode`}
-                        value={groupMode}
-                        onChange={(e) =>
-                          setGroupMode(
-                            e.target.value as GroupGenerationOptions["mode"],
-                          )
-                        }
-                        className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
-                      >
-                        <option value="count">Number of Groups</option>
-                        <option value="size">Students per Group</option>
-                      </select>
+              <div
+                ref={(el) => {
+                  stageRefs.current.groups = el;
+                }}
+                role={isGroupsOverlay ? "dialog" : undefined}
+                aria-modal={isGroupsOverlay ? true : undefined}
+                aria-label={
+                  isGroupsOverlay ? "Group Maker Projector View" : undefined
+                }
+                tabIndex={isGroupsOverlay ? -1 : undefined}
+                className={`classroom-projector-stage bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md ${
+                  isGroupsOverlay ? OVERLAY_STAGE_CLASS : ""
+                }`}
+              >
+                <div
+                  className={`w-full flex flex-col gap-gutter-md ${
+                    isGroupsProjector ? "max-w-7xl mx-auto my-auto" : ""
+                  }`}
+                >
+                  <div className="flex flex-wrap items-end justify-between gap-gutter-md pb-gutter-md border-b border-outline-variant">
+                    <div className="flex flex-wrap items-end gap-gutter-md">
+                      <div className="flex flex-col gap-gutter-xs">
+                        <label
+                          htmlFor={`${baseId}-group-mode`}
+                          className="font-label text-label-md text-on-surface"
+                        >
+                          Split By
+                        </label>
+                        <select
+                          id={`${baseId}-group-mode`}
+                          value={groupMode}
+                          onChange={(e) =>
+                            setGroupMode(
+                              e.target.value as GroupGenerationOptions["mode"],
+                            )
+                          }
+                          className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+                        >
+                          <option value="count">Number of Groups</option>
+                          <option value="size">Students per Group</option>
+                        </select>
+                      </div>
+
+                      <div className="flex flex-col gap-gutter-xs">
+                        <label
+                          htmlFor={`${baseId}-group-value`}
+                          className="font-label text-label-md text-on-surface"
+                        >
+                          {groupMode === "count"
+                            ? "Number of Groups"
+                            : "Max Students per Group"}
+                        </label>
+                        <input
+                          id={`${baseId}-group-value`}
+                          type="number"
+                          min={1}
+                          max={Math.max(1, presentStudents.length)}
+                          value={groupValue}
+                          onChange={(e) =>
+                            setGroupValue(
+                              Math.max(
+                                1,
+                                Number.parseInt(e.target.value || "1", 10),
+                              ),
+                            )
+                          }
+                          className="w-28 px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-mono text-mono-md text-on-surface tabular-nums focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+                        />
+                      </div>
                     </div>
 
-                    <div className="flex flex-col gap-gutter-xs">
-                      <label
-                        htmlFor={`${baseId}-group-value`}
-                        className="font-label text-label-md text-on-surface"
+                    <div className="flex flex-wrap items-center gap-gutter-sm">
+                      <button
+                        type="button"
+                        disabled={presentStudents.length === 0}
+                        onClick={handleGenerateGroups}
+                        className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
                       >
-                        {groupMode === "count"
-                          ? "Number of Groups"
-                          : "Max Students per Group"}
-                      </label>
-                      <input
-                        id={`${baseId}-group-value`}
-                        type="number"
-                        min={1}
-                        max={Math.max(1, presentStudents.length)}
-                        value={groupValue}
-                        onChange={(e) =>
-                          setGroupValue(
-                            Math.max(
-                              1,
-                              Number.parseInt(e.target.value || "1", 10),
-                            ),
-                          )
-                        }
-                        className="w-28 px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-mono text-mono-md text-on-surface tabular-nums focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+                        <span
+                          className="material-symbols-outlined text-title-md"
+                          aria-hidden="true"
+                        >
+                          shuffle
+                        </span>
+                        <span>
+                          {groups.length > 0
+                            ? "Reshuffle Groups"
+                            : "Generate Groups"}
+                        </span>
+                      </button>
+
+                      {isGroupsProjector && (
+                        <SoundToggleButton
+                          soundEnabled={soundEnabled}
+                          prefersReducedMotion={prefersReducedMotion}
+                          onToggle={handleSoundToggle}
+                        />
+                      )}
+
+                      <ProjectorToggleButton
+                        active={isGroupsProjector}
+                        onToggle={() => void toggleProjectorView("groups")}
                       />
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={presentStudents.length === 0}
-                    onClick={handleGenerateGroups}
-                    className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
-                  >
-                    <span
-                      className="material-symbols-outlined text-title-md"
-                      aria-hidden="true"
-                    >
-                      shuffle
-                    </span>
-                    <span>
-                      {groups.length > 0
-                        ? "Reshuffle Groups"
-                        : "Generate Groups"}
-                    </span>
-                  </button>
-                </div>
-
-                {groups.length > 0 ? (
-                  <div className="flex flex-col gap-gutter-sm">
-                    <p className="font-body text-body-sm text-on-surface-variant">
-                      {swapSelection
-                        ? "Select a second student to complete the swap (or click the same student to cancel)."
-                        : "Click any two students across groups to swap them manually."}
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md">
-                      {groups.map((group, groupIndex) => (
-                        <section
-                          key={groupIndex}
-                          aria-label={`Group ${groupIndex + 1}`}
-                          className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
-                        >
-                          <h3 className="font-title text-title-md text-on-surface flex items-center justify-between">
-                            <span>Group {groupIndex + 1}</span>
-                            <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-lowest border border-outline-variant font-mono text-label-sm tabular-nums">
-                              {group.length}
-                            </span>
-                          </h3>
-                          <ul className="flex flex-col gap-gutter-xs">
-                            {group.map((student, studentIndex) => {
-                              const isSelected =
-                                swapSelection?.groupIndex === groupIndex &&
-                                swapSelection?.studentIndex === studentIndex;
-                              return (
-                                <li key={`${student.index}-${studentIndex}`}>
-                                  <button
-                                    type="button"
-                                    aria-pressed={isSelected}
-                                    onClick={() =>
-                                      handleGroupStudentClick({
-                                        groupIndex,
-                                        studentIndex,
-                                      })
-                                    }
-                                    className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body text-body-sm transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
-                                      isSelected
-                                        ? "bg-primary text-on-primary border-primary font-semibold"
-                                        : "bg-surface-container-lowest border-outline-variant text-on-surface hover:border-primary"
-                                    }`}
-                                  >
-                                    {student.name}
-                                  </button>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </section>
-                      ))}
+                  {groups.length > 0 ? (
+                    <div className="flex flex-col gap-gutter-sm">
+                      <p className="font-body text-body-sm text-on-surface-variant">
+                        {swapSelection
+                          ? "Select a second student to complete the swap (or click the same student to cancel)."
+                          : "Click any two students across groups to swap them manually."}
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md">
+                        {groups.map((group, groupIndex) => (
+                          <section
+                            key={groupIndex}
+                            aria-label={`Group ${groupIndex + 1}`}
+                            className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
+                          >
+                            <h3
+                              className={`font-title text-on-surface flex items-center justify-between ${
+                                isGroupsProjector
+                                  ? "text-title-lg"
+                                  : "text-title-md"
+                              }`}
+                            >
+                              <span>Group {groupIndex + 1}</span>
+                              <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-lowest border border-outline-variant font-mono text-label-sm tabular-nums">
+                                {group.length}
+                              </span>
+                            </h3>
+                            <ul className="flex flex-col gap-gutter-xs">
+                              {group.map((student, studentIndex) => {
+                                const isSelected =
+                                  swapSelection?.groupIndex === groupIndex &&
+                                  swapSelection?.studentIndex === studentIndex;
+                                return (
+                                  <li key={`${student.index}-${studentIndex}`}>
+                                    <button
+                                      type="button"
+                                      aria-pressed={isSelected}
+                                      onClick={() =>
+                                        handleGroupStudentClick({
+                                          groupIndex,
+                                          studentIndex,
+                                        })
+                                      }
+                                      className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+                                        isGroupsProjector
+                                          ? "text-body-md"
+                                          : "text-body-sm"
+                                      } ${
+                                        isSelected
+                                          ? "bg-primary text-on-primary border-primary font-semibold"
+                                          : "bg-surface-container-lowest border-outline-variant text-on-surface hover:border-primary"
+                                      }`}
+                                    >
+                                      {student.name}
+                                    </button>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </section>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <p className="font-body text-body-sm text-on-surface-variant">
-                    Configure group count or max group size and click{" "}
-                    <strong>Generate Groups</strong> ({presentStudents.length}{" "}
-                    present students).
-                  </p>
-                )}
+                  ) : (
+                    <p className="font-body text-body-sm text-on-surface-variant">
+                      Configure group count or max group size and click{" "}
+                      <strong>Generate Groups</strong> ({presentStudents.length}{" "}
+                      present students).
+                    </p>
+                  )}
+                </div>
               </div>
 
               <AttendancePoolGrid
@@ -753,166 +881,253 @@ export function ClassroomWorkspace({
           )}
         </div>
 
-        {/* Panel 3: Classroom Timer (Full Projector Mode & Custom Duration) */}
+        {/* Panel 3: Classroom Timer (Projector View & Custom Duration) */}
         <div
           role="tabpanel"
           aria-labelledby={`${baseId}-tab-timer`}
           hidden={activeTab !== "timer"}
         >
           <div
-            ref={timerBoxRef}
-            className={`bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col items-center gap-gutter-lg ${
-              isFullscreenOverlay
-                ? "fixed inset-0 z-50 rounded-none border-0 justify-center overflow-auto bg-surface"
-                : ""
+            ref={(el) => {
+              stageRefs.current.timer = el;
+            }}
+            role={isTimerOverlay ? "dialog" : undefined}
+            aria-modal={isTimerOverlay ? true : undefined}
+            aria-label={
+              isTimerOverlay ? "Classroom Timer Projector View" : undefined
+            }
+            tabIndex={isTimerOverlay ? -1 : undefined}
+            className={`classroom-projector-stage bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col items-center gap-gutter-lg ${
+              isTimerOverlay ? `${OVERLAY_STAGE_CLASS} justify-center` : ""
             }`}
           >
             <div
-              className="flex flex-wrap justify-center gap-gutter-sm"
-              role="group"
-              aria-label="Timer Presets"
-            >
-              {TIMER_PRESET_MINUTES.map((mins) => (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() => timer.selectPreset(mins)}
-                  className={`px-gutter-md py-gutter-xs rounded font-mono text-label-lg transition-colors duration-state-change ${
-                    timer.durationSeconds === mins * 60
-                      ? "bg-primary text-on-primary"
-                      : "bg-surface-container border border-outline-variant text-on-surface hover:bg-surface-container-high"
-                  }`}
-                >
-                  {mins} min
-                </button>
-              ))}
-            </div>
-
-            <div
-              className={`w-full max-w-2xl py-gutter-xl px-gutter-lg rounded-md border flex flex-col items-center gap-gutter-sm ${
-                timer.timerExpired
-                  ? "bg-error-container border-error text-on-error-container"
-                  : "bg-surface-container-low border-outline-variant text-on-surface"
+              className={`w-full flex flex-col items-center gap-gutter-lg ${
+                isTimerProjector ? "max-w-3xl mx-auto my-auto" : ""
               }`}
             >
-              <span className="font-label text-label-lg uppercase tracking-wider">
-                {timerStatusLabel}
-              </span>
-              <p
-                className="font-mono font-bold tabular-nums leading-none"
-                style={{
-                  fontSize: isFullscreenActive
-                    ? "clamp(5rem, 16vw, 11rem)"
-                    : "clamp(3.5rem, 10vw, 6.5rem)",
-                }}
-                aria-live="off"
+              <div
+                className="flex flex-wrap justify-center gap-gutter-sm"
+                role="group"
+                aria-label="Timer Presets"
               >
-                {formatClock(timer.remainingSeconds)}
-              </p>
-              <div className="visually-hidden" role="status" aria-live="polite">
-                {timer.timerExpired
-                  ? "Classroom timer finished. Time is up."
-                  : ""}
+                {TIMER_PRESET_MINUTES.map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() => timer.selectPreset(mins)}
+                    className={`px-gutter-md py-gutter-xs rounded font-mono text-label-lg transition-colors duration-state-change ${
+                      timer.durationSeconds === mins * 60
+                        ? "bg-primary text-on-primary"
+                        : "bg-surface-container border border-outline-variant text-on-surface hover:bg-surface-container-high"
+                    }`}
+                  >
+                    {mins} min
+                  </button>
+                ))}
               </div>
-            </div>
 
-            <div className="flex flex-wrap justify-center gap-gutter-sm">
-              <button
-                type="button"
-                onClick={
-                  timer.timerRunning ? timer.pauseTimer : timer.startTimer
-                }
-                className="px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary"
+              <div
+                className={`w-full max-w-2xl py-gutter-xl px-gutter-lg rounded-md border flex flex-col items-center gap-gutter-sm ${
+                  timer.timerExpired
+                    ? "bg-error-container border-error text-on-error-container"
+                    : "bg-surface-container-low border-outline-variant text-on-surface"
+                }`}
               >
-                {timer.timerRunning
-                  ? "Pause"
-                  : timer.remainingSeconds < timer.durationSeconds &&
-                      timer.remainingSeconds > 0
-                    ? "Resume"
-                    : "Start"}
-              </button>
-              <button
-                type="button"
-                onClick={timer.resetTimer}
-                className="px-gutter-lg py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={() => void toggleFullscreen()}
-                className="px-gutter-lg py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                {isFullscreenActive ? "Exit Fullscreen" : "Fullscreen"}
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleCustomDurationSubmit}
-              className="flex flex-wrap items-end justify-center gap-gutter-md pt-gutter-md border-t border-outline-variant"
-            >
-              <div className="flex flex-col gap-gutter-xs w-28">
-                <label
-                  htmlFor={`${baseId}-custom-mins`}
-                  className="font-label text-label-md text-on-surface"
+                <span className="font-label text-label-lg uppercase tracking-wider">
+                  {timerStatusLabel}
+                </span>
+                <p
+                  className="font-mono font-bold tabular-nums leading-none"
+                  style={{
+                    fontSize: isTimerProjector
+                      ? "clamp(5rem, 16vw, 11rem)"
+                      : "clamp(3.5rem, 10vw, 6.5rem)",
+                  }}
+                  aria-live="off"
                 >
-                  Minutes
-                </label>
-                <input
-                  id={`${baseId}-custom-mins`}
-                  type="number"
-                  min={0}
-                  max={180}
-                  value={timer.customMinutes}
-                  onChange={(e) =>
-                    timer.setCustomMinutes(
-                      Math.max(
-                        0,
-                        Number.parseInt(e.target.value || "0", 10) || 0,
-                      ),
-                    )
+                  {formatClock(timer.remainingSeconds)}
+                </p>
+                <div
+                  className="visually-hidden"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {timer.timerExpired
+                    ? "Classroom timer finished. Time is up."
+                    : ""}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap justify-center items-center gap-gutter-sm">
+                <button
+                  type="button"
+                  onClick={
+                    timer.timerRunning ? timer.pauseTimer : timer.startTimer
                   }
-                  className={INPUT_CLASS}
-                />
-              </div>
-              <div className="flex flex-col gap-gutter-xs w-28">
-                <label
-                  htmlFor={`${baseId}-custom-secs`}
-                  className="font-label text-label-md text-on-surface"
+                  className="px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary"
                 >
-                  Seconds
-                </label>
-                <input
-                  id={`${baseId}-custom-secs`}
-                  type="number"
-                  min={0}
-                  max={59}
-                  value={timer.customSeconds}
-                  onChange={(e) =>
-                    timer.setCustomSeconds(
-                      Math.min(
-                        59,
+                  {timer.timerRunning
+                    ? "Pause"
+                    : timer.remainingSeconds < timer.durationSeconds &&
+                        timer.remainingSeconds > 0
+                      ? "Resume"
+                      : "Start"}
+                </button>
+                <button
+                  type="button"
+                  onClick={timer.resetTimer}
+                  className="px-gutter-lg py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  Reset
+                </button>
+                <ProjectorToggleButton
+                  active={isTimerProjector}
+                  onToggle={() => void toggleProjectorView("timer")}
+                />
+                {isTimerProjector && (
+                  <SoundToggleButton
+                    soundEnabled={soundEnabled}
+                    prefersReducedMotion={prefersReducedMotion}
+                    onToggle={handleSoundToggle}
+                  />
+                )}
+              </div>
+
+              <form
+                onSubmit={handleCustomDurationSubmit}
+                className="flex flex-wrap items-end justify-center gap-gutter-md pt-gutter-md border-t border-outline-variant"
+              >
+                <div className="flex flex-col gap-gutter-xs w-28">
+                  <label
+                    htmlFor={`${baseId}-custom-mins`}
+                    className="font-label text-label-md text-on-surface"
+                  >
+                    Minutes
+                  </label>
+                  <input
+                    id={`${baseId}-custom-mins`}
+                    type="number"
+                    min={0}
+                    max={180}
+                    value={timer.customMinutes}
+                    onChange={(e) =>
+                      timer.setCustomMinutes(
                         Math.max(
                           0,
                           Number.parseInt(e.target.value || "0", 10) || 0,
                         ),
-                      ),
-                    )
-                  }
-                  className={INPUT_CLASS}
-                />
-              </div>
-              <button
-                type="submit"
-                className="px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                Set Custom Time
-              </button>
-            </form>
+                      )
+                    }
+                    className={INPUT_CLASS}
+                  />
+                </div>
+                <div className="flex flex-col gap-gutter-xs w-28">
+                  <label
+                    htmlFor={`${baseId}-custom-secs`}
+                    className="font-label text-label-md text-on-surface"
+                  >
+                    Seconds
+                  </label>
+                  <input
+                    id={`${baseId}-custom-secs`}
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={timer.customSeconds}
+                    onChange={(e) =>
+                      timer.setCustomSeconds(
+                        Math.min(
+                          59,
+                          Math.max(
+                            0,
+                            Number.parseInt(e.target.value || "0", 10) || 0,
+                          ),
+                        ),
+                      )
+                    }
+                    className={INPUT_CLASS}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="px-gutter-md py-gutter-sm rounded bg-surface-container-low border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  Set Custom Time
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function SoundToggleButton({
+  soundEnabled,
+  prefersReducedMotion,
+  onToggle,
+}: {
+  soundEnabled: boolean;
+  prefersReducedMotion: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="Sound"
+      aria-pressed={soundEnabled}
+      title={
+        prefersReducedMotion
+          ? "Classroom cues are silenced while reduced motion is active"
+          : soundEnabled
+            ? "Mute classroom sound cues"
+            : "Enable classroom sound cues"
+      }
+      onClick={onToggle}
+      className={`shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded border font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+        soundEnabled && !prefersReducedMotion
+          ? "bg-surface-container-lowest border-primary/40 text-primary hover:bg-surface-container-low"
+          : "bg-surface-container-low border-outline-variant text-on-surface-variant hover:bg-surface-container"
+      }`}
+    >
+      <span
+        className="material-symbols-outlined text-title-md"
+        aria-hidden="true"
+      >
+        {soundEnabled ? "volume_up" : "volume_off"}
+      </span>
+      <span aria-hidden="true">{soundEnabled ? "Sound On" : "Sound Off"}</span>
+    </button>
+  );
+}
+
+function ProjectorToggleButton({
+  active,
+  onToggle,
+}: {
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded border font-label text-label-md transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+        active
+          ? "bg-secondary text-on-secondary border-secondary hover:bg-secondary/90"
+          : "bg-surface-container-lowest border-outline-variant text-on-surface hover:bg-surface-container-low"
+      }`}
+    >
+      <span
+        className="material-symbols-outlined text-title-md"
+        aria-hidden="true"
+      >
+        {active ? "fullscreen_exit" : "fullscreen"}
+      </span>
+      <span>{active ? "Exit Projector View" : "Projector View"}</span>
+    </button>
   );
 }
 
