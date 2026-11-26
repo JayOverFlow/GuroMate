@@ -444,4 +444,86 @@ describe("GuroMateEngine Formative Quiz Maker", () => {
     expect(answerPageXml).toContain("A. Phillips screwdriver");
     expect(answerPageXml).toContain("Prevents accidents and tool damage.");
   });
+
+  it("grounds Grade 7–12 Quiz generation prompts in BoW pacing, Suggested Activities, Suggested Performance Tasks, and sourceDocument citations", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        return {
+          text: JSON.stringify({
+            title: "SHS Core Functions Formative Quiz",
+            sections: [
+              {
+                type: "essayRubric",
+                directions: "Complete the performance task using the rubric.",
+                items: [
+                  {
+                    prompt: "Model a barangay tricycle fare table as a piecewise function.",
+                    answer: "Sample piecewise function with base fare and per-km increment.",
+                    rubric: "3 pts accurate formula; 2 pts clear explanation.",
+                  },
+                ],
+              },
+            ],
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const shsComp = await engine.saveCustomCompetency({
+      gradeLevels: [11],
+      quarters: [1],
+      component: "SHS_CORE",
+      sector: "General Mathematics",
+      contentTopic: "Functions",
+      contentStandard: "Demonstrates understanding of key concepts of functions.",
+      performanceStandard: "Constructs mathematical models using functions.",
+      learningCompetency: "Represent real-life situations using functions.",
+      budgetOfWork: {
+        term: "First Term",
+        weekRange: "1 to 2",
+        suggestedActivities: "Barangay utility bill modeling workshop",
+        suggestedPerformanceTasks: "Local tricycle fare piecewise function portfolio",
+        sourceDocument: "Grade 11 SHS Core General Mathematics Budget of Work",
+      },
+    });
+
+    const generatedQuiz = await engine.generateQuiz({
+      sourceKind: "standalone",
+      gradeAndSection: "Grade 11 - Rizal",
+      competencyIds: [shsComp.id],
+      promptNotes: "Use Philippine peso examples.",
+      itemCounts: {
+        multipleChoice: 0,
+        trueFalse: 0,
+        identification: 0,
+        essayRubric: 1,
+      },
+    });
+
+    expect(generatedQuiz.learningAreas).toBe("SHS Core");
+    expect(generatedQuiz.learningAreas).not.toContain("SHS_CORE");
+
+    expect(requests).toHaveLength(1);
+    const prompt = requests[0]!.prompt;
+    expect(prompt).toMatch(/Grades 7[–-]12/i);
+    expect(prompt).toMatch(/Technical-Professional|Tech-Pro/i);
+    expect(prompt).toContain("SHS Core");
+    expect(prompt).toContain("Suggested Performance Tasks");
+    expect(prompt).toContain("Prompt Notes");
+    expect(prompt).toContain("First Term");
+    expect(prompt).toContain("Week 1 to 2");
+    expect(prompt).toContain("Barangay utility bill modeling workshop");
+    expect(prompt).toContain("Local tricycle fare piecewise function portfolio");
+    expect(prompt).toContain("Grade 11 SHS Core General Mathematics Budget of Work");
+  });
 });

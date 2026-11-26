@@ -9,11 +9,13 @@ import {
 } from "../engine/types";
 import {
   COMPONENT_LABELS,
+  COMPONENT_SHORT_LABELS,
   emptyCustomForm,
   formatGradeLabel,
   formFromItem,
   toggleArrayValue,
   useCurriculumWorkspace,
+  type BowFilterMode,
 } from "../hooks/useCurriculumWorkspace";
 
 const COMPONENT_BADGE_CLASSES: Record<TleComponent, string> = {
@@ -21,6 +23,7 @@ const COMPONENT_BADGE_CLASSES: Record<TleComponent, string> = {
   FCS: "bg-secondary-container text-on-secondary-container",
   AFA: "bg-success-container text-on-success-container",
   IA: "bg-surface-variant text-on-surface-variant",
+  SHS_CORE: "bg-primary-container text-on-primary-container",
 };
 
 function CompetencyBadges({
@@ -37,7 +40,7 @@ function CompetencyBadges({
       <span
         className={`px-gutter-sm py-0.5 rounded-full font-label text-label-sm ${COMPONENT_BADGE_CLASSES[item.component]}`}
       >
-        {item.component}
+        {COMPONENT_SHORT_LABELS[item.component]}
       </span>
       <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label text-label-sm">
         {formatGradeLabel(item.gradeLevels)}
@@ -67,7 +70,17 @@ function CompetencyBadges({
 const INPUT_CLASS =
   "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
-export function CurriculumWorkspace() {
+interface CurriculumWorkspaceProps {
+  onUseInDll?: (competencyId: string) => void;
+  onUseInDlp?: (competencyId: string) => void;
+  onUseInQuiz?: (competencyId: string) => void;
+}
+
+export function CurriculumWorkspace({
+  onUseInDll,
+  onUseInDlp,
+  onUseInQuiz,
+}: CurriculumWorkspaceProps = {}) {
   const headingId = useId();
   const baseId = useId();
 
@@ -82,6 +95,8 @@ export function CurriculumWorkspace() {
     component,
     sector,
     setSector,
+    hasBow,
+    setHasBow,
     query,
     setQuery,
     availableSectors,
@@ -117,11 +132,11 @@ export function CurriculumWorkspace() {
             tabIndex={-1}
             className="font-headline text-headline-lg text-on-surface text-balance"
           >
-            Grades 7–10 MATATAG TLE Catalog
+            Grades 7–12 MATATAG Curriculum Catalog
           </h1>
           <p className="font-body text-body-md text-on-surface-variant">
-            Browse DepEd CG standards across ICT, AFA, FCS, and IA, enriched
-            with Grade 7 Budget of Work and custom competencies (
+            Browse DepEd standards across ICT, AFA, FCS, IA, and SHS Core,
+            enriched with Grades 7–12 Budgets of Work and custom competencies (
             <code className="font-mono text-mono-md">
               ./data/curriculum-custom.json
             </code>
@@ -249,7 +264,7 @@ export function CurriculumWorkspace() {
                 htmlFor={`${baseId}-custom-component`}
                 className="font-label text-label-md text-on-surface"
               >
-                TLE Component
+                Component
               </label>
               <select
                 id={`${baseId}-custom-component`}
@@ -275,7 +290,7 @@ export function CurriculumWorkspace() {
                 htmlFor={`${baseId}-custom-sector`}
                 className="font-label text-label-md text-on-surface"
               >
-                Sector (optional, Grades 9–10)
+                Sector (optional)
               </label>
               <input
                 id={`${baseId}-custom-sector`}
@@ -285,7 +300,7 @@ export function CurriculumWorkspace() {
                 onChange={(e) =>
                   setFormState((prev) => ({ ...prev, sector: e.target.value }))
                 }
-                placeholder="e.g. COMPUTER PROGRAMMING"
+                placeholder="e.g. COMPUTER PROGRAMMING or General Mathematics"
                 className={INPUT_CLASS}
               />
               <datalist id={`${baseId}-sector-options`}>
@@ -418,7 +433,8 @@ export function CurriculumWorkspace() {
               <input
                 id={`${baseId}-custom-bow-term`}
                 type="text"
-                placeholder="e.g. First Term"
+                list={`${baseId}-bow-term-options`}
+                placeholder="e.g. First Term or One-Term"
                 value={formState.budgetOfWork.term}
                 onChange={(e) =>
                   setFormState((prev) => ({
@@ -428,6 +444,11 @@ export function CurriculumWorkspace() {
                 }
                 className={INPUT_CLASS}
               />
+              <datalist id={`${baseId}-bow-term-options`}>
+                {BOW_TERMS.map((term) => (
+                  <option key={term} value={term} />
+                ))}
+              </datalist>
             </div>
 
             <div className="flex flex-col gap-gutter-xs">
@@ -502,6 +523,31 @@ export function CurriculumWorkspace() {
                 className={INPUT_CLASS}
               />
             </div>
+
+            <div className="flex flex-col gap-gutter-xs md:col-span-2">
+              <label
+                htmlFor={`${baseId}-custom-bow-source`}
+                className="font-label text-label-md text-on-surface"
+              >
+                BoW Source Document (optional)
+              </label>
+              <input
+                id={`${baseId}-custom-bow-source`}
+                type="text"
+                placeholder="e.g. DepEd MATATAG BoW — Grade 11 General Mathematics"
+                value={formState.budgetOfWork.sourceDocument}
+                onChange={(e) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    budgetOfWork: {
+                      ...prev.budgetOfWork,
+                      sourceDocument: e.target.value,
+                    },
+                  }))
+                }
+                className={INPUT_CLASS}
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-gutter-xs">
@@ -553,7 +599,7 @@ export function CurriculumWorkspace() {
 
       {/* Search & Filter Bar */}
       <search className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-md grid grid-cols-1 md:grid-cols-12 gap-gutter-md items-end">
-        <div className="flex flex-col gap-gutter-xs md:col-span-4">
+        <div className="flex flex-col gap-gutter-xs md:col-span-6">
           <label
             htmlFor={`${baseId}-query`}
             className="font-label text-label-md text-on-surface"
@@ -572,13 +618,40 @@ export function CurriculumWorkspace() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search competency, topic, standard, or notes..."
+              placeholder="Search competency, topic, standard, source, or notes..."
               className="w-full pl-10 pr-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface placeholder:text-on-surface-variant focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
             />
           </div>
         </div>
 
-        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+        <div className="flex flex-col gap-gutter-xs md:col-span-6">
+          <label
+            htmlFor={`${baseId}-sector`}
+            className="font-label text-label-md text-on-surface"
+          >
+            Sector
+          </label>
+          <select
+            id={`${baseId}-sector`}
+            value={sector}
+            onChange={(e) => setSector(e.target.value)}
+            disabled={availableSectors.length === 0}
+            className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+          >
+            <option value="">
+              {availableSectors.length === 0
+                ? "None available"
+                : "All Sectors"}
+            </option>
+            {availableSectors.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-gutter-xs md:col-span-3">
           <label
             htmlFor={`${baseId}-grade`}
             className="font-label text-label-md text-on-surface"
@@ -591,7 +664,7 @@ export function CurriculumWorkspace() {
             onChange={(e) => handleGradeChange(e.target.value)}
             className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
           >
-            <option value="">All Grades (7–10)</option>
+            <option value="">All Grades (7–12)</option>
             {GRADE_LEVELS.map((g) => (
               <option key={g} value={String(g)}>
                 Grade {g}
@@ -600,12 +673,12 @@ export function CurriculumWorkspace() {
           </select>
         </div>
 
-        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+        <div className="flex flex-col gap-gutter-xs md:col-span-3">
           <label
             htmlFor={`${baseId}-component`}
             className="font-label text-label-md text-on-surface"
           >
-            TLE Component
+            Component
           </label>
           <select
             id={`${baseId}-component`}
@@ -616,13 +689,13 @@ export function CurriculumWorkspace() {
             <option value="">All Components</option>
             {TLE_COMPONENTS.map((value) => (
               <option key={value} value={value}>
-                {value}
+                {COMPONENT_SHORT_LABELS[value]}
               </option>
             ))}
           </select>
         </div>
 
-        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+        <div className="flex flex-col gap-gutter-xs md:col-span-3">
           <label
             htmlFor={`${baseId}-quarter`}
             className="font-label text-label-md text-on-surface"
@@ -643,7 +716,7 @@ export function CurriculumWorkspace() {
                 </option>
               ))}
             </optgroup>
-            <optgroup label="Grade 7 Budget of Work Terms">
+            <optgroup label="Budget of Work Terms">
               {BOW_TERMS.map((term) => (
                 <option key={term} value={`t:${term}`}>
                   {term} (BoW)
@@ -653,30 +726,22 @@ export function CurriculumWorkspace() {
           </select>
         </div>
 
-        <div className="flex flex-col gap-gutter-xs md:col-span-2">
+        <div className="flex flex-col gap-gutter-xs md:col-span-3">
           <label
-            htmlFor={`${baseId}-sector`}
+            htmlFor={`${baseId}-has-bow`}
             className="font-label text-label-md text-on-surface"
           >
-            G9–10 Sector
+            Budget of Work
           </label>
           <select
-            id={`${baseId}-sector`}
-            value={sector}
-            onChange={(e) => setSector(e.target.value)}
-            disabled={availableSectors.length === 0}
-            className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+            id={`${baseId}-has-bow`}
+            value={hasBow}
+            onChange={(e) => setHasBow(e.target.value as BowFilterMode)}
+            className="w-full px-gutter-sm py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
           >
-            <option value="">
-              {availableSectors.length === 0
-                ? "None (Grades 7–8)"
-                : "All Sectors"}
-            </option>
-            {availableSectors.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
+            <option value="all">All Competencies</option>
+            <option value="with_bow">Has BoW</option>
+            <option value="without_bow">Without BoW</option>
           </select>
         </div>
       </search>
@@ -782,6 +847,53 @@ export function CurriculumWorkspace() {
                   )}
                 </header>
 
+                {/* Direct Generator Shortcuts */}
+                <div
+                  role="group"
+                  aria-label="Create lesson or quiz from this Learning Competency"
+                  className="flex flex-wrap items-center gap-gutter-sm"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onUseInDll?.(selectedItem.id)}
+                    className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-primary text-on-primary font-label text-label-md hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
+                  >
+                    <span
+                      className="material-symbols-outlined text-title-md"
+                      aria-hidden="true"
+                    >
+                      view_week
+                    </span>
+                    <span>Use in DLL</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUseInDlp?.(selectedItem.id)}
+                    className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
+                  >
+                    <span
+                      className="material-symbols-outlined text-title-md text-primary"
+                      aria-hidden="true"
+                    >
+                      splitscreen
+                    </span>
+                    <span>Use in DLP</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUseInQuiz?.(selectedItem.id)}
+                    className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
+                  >
+                    <span
+                      className="material-symbols-outlined text-title-md text-primary"
+                      aria-hidden="true"
+                    >
+                      quiz
+                    </span>
+                    <span>Use in Quiz</span>
+                  </button>
+                </div>
+
                 <div className="flex flex-col gap-gutter-sm">
                   <div className="flex flex-col gap-gutter-xs">
                     <span className="font-label text-label-md text-primary">
@@ -840,6 +952,15 @@ export function CurriculumWorkspace() {
                         </span>
                       )}
                     </div>
+
+                    {selectedItem.budgetOfWork.sourceDocument && (
+                      <p className="font-body text-body-sm text-on-surface-variant">
+                        Source:{" "}
+                        <span className="font-mono text-mono-md text-on-surface">
+                          {selectedItem.budgetOfWork.sourceDocument}
+                        </span>
+                      </p>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
                       {selectedItem.budgetOfWork.suggestedActivities && (

@@ -1,6 +1,7 @@
 import {
   dedupeOrdered,
   formatCompetencyLines,
+  formatLearningAreas,
   parseAiJsonObject,
 } from "./lessonHelpers";
 import {
@@ -18,24 +19,25 @@ export class DllValidationError extends Error {}
 export class DllNotFoundError extends Error {}
 
 /** Built-in DepEd MATATAG / ILAW Framework System Instructions for 5-Session DLL generation. */
-export const DLL_SYSTEM_INSTRUCTION = `You are a Philippine DepEd MATATAG TLE (Grades 7–10) instructional designer generating a 5-Session Daily Lesson Log (DLL) using the ILAW Framework.
+export const DLL_SYSTEM_INSTRUCTION = `You are a Philippine DepEd MATATAG (Grades 7–12: TLE, Grade 12 Technical-Professional electives, and Grade 11 SHS Core) instructional designer generating a 5-Session Daily Lesson Log (DLL) using the ILAW Framework.
 
 Core Rules:
 - Use strict ILAW Framework terminology (Intentions, Learning Experience, Assessing Learning, Ways Forward). Never use 4As, 5Es, or DepEd DO 42 headers.
-- Ground every instructional Session in Philippine TLE classroom authenticity: hands-on and collaborative tasks, OSH/PPE safety practices where relevant, Philippine localization, and alignment with the provided Curriculum Guide and Budget of Work.
+- Ground every instructional Session in Philippine Grades 7–12 classroom authenticity (DepEd MATATAG TLE, Grade 12 Technical-Professional electives, and Grade 11 SHS Core): hands-on and collaborative tasks, OSH/PPE safety practices where relevant, Philippine localization, and alignment with the provided Curriculum Guide and Budget of Work (BoW).
+- Whenever Budget of Work (BoW) metadata is present on a target Learning Competency, actively adapt its Suggested Activities into Learning Experience (Pre-Lesson and Lesson Flow) and its Suggested Performance Tasks into Assessing Learning (Formative Assessment) and/or Ways Forward (Extended Learning Opportunities), while respecting the BoW term/week pacing.
 - Omit Learner Context and Reflections completely (both remain blank for manual teacher completion). Never copy Prompt Notes into Learner Context.
-- Respect per-lesson teacher Prompt Notes (such as pacing, equipment constraints, or custom assessment formats); Prompt Notes override default section formats when specified.
+- Respect per-lesson teacher Prompt Notes (such as pacing, equipment constraints, or custom assessment formats); Prompt Notes override default section formats and BoW defaults when specified.
 - For non-instructional Sessions, follow the user prompt's brief note rule.
 - Respond ONLY with valid JSON matching the schema in the user prompt.
 
 Section Formatting Rules for Every Instructional Session:
 - Learning Objectives: Always write 3 bulleted SMART objectives (each starting with "• " on its own line) ordered Cognitive → Psychomotor → Affective with measurable criteria. Do not include domain-label prefixes (no "Cognitive:", "Psychomotor:", or "Affective:").
 - Pre-Lesson: Start with a titled hook in the format Pre-lesson activity: “<Title>” followed by 1–2 concise sentences.
-- Lesson Flow: Start with a short activity title followed by 1–2 concise sentences describing the main collaborative or hands-on task.
+- Lesson Flow: Start with a short activity title followed by 1–2 concise sentences describing the main collaborative or hands-on task (adapting BoW Suggested Activities when provided, unless overridden by Prompt Notes).
 - Learning Resources: Write a short "• " bulleted list starting with presentation/visual aids followed by accessible classroom or shop activity materials.
 - Opportunities for Integration and Contextualization: Write 1 concise Philippine, cross-disciplinary, or technology connection, or "N/A" if none fits naturally.
-- Formative Assessment: Default to a 5-item multiple-choice quiz (titled + 1 concise sentence) aligned to the Session's Learning Objectives, unless overridden by Prompt Notes.
-- Extended Learning Opportunities: Write 1 concise, practical out-of-class activity for home or community.`;
+- Formative Assessment: Default to a 5-item multiple-choice quiz (titled + 1 concise sentence) aligned to the Session's Learning Objectives, or adapt BoW Suggested Performance Tasks when appropriate for performance-based sessions, unless overridden by Prompt Notes.
+- Extended Learning Opportunities: Write 1 concise, practical out-of-class activity for home or community (drawing on BoW Suggested Performance Tasks where fitting).`;
 
 interface AiSessionPayload {
   sessionNumber?: number;
@@ -172,7 +174,7 @@ export function buildDllPrompt(params: {
   const promptNotes = params.promptNotes?.trim();
 
   return [
-    "Generate a 5-Session DepEd MATATAG TLE Daily Lesson Log (DLL) following the ILAW Framework.",
+    "Generate a 5-Session DepEd MATATAG (Grades 7–12: TLE, Grade 12 Technical-Professional electives, and Grade 11 SHS Core) Daily Lesson Log (DLL) following the ILAW Framework.",
     `Learning Area/s: ${params.learningAreas}`,
     `Grade Level and Section: ${params.gradeAndSection}`,
     params.lessonTitle?.trim() ? `Requested Lesson Title: ${params.lessonTitle.trim()}` : "",
@@ -370,7 +372,7 @@ export function renderDllMarkdown(dll: DailyLessonLog): string {
     const label =
       session.mode === "non-instructional"
         ? `Non-Instructional (${session.nonInstructionalReason || "Holiday"})`
-        : session.components.join(", ");
+        : formatLearningAreas(session.components);
     lines.push(`### Session ${session.sessionNumber}${label ? ` — ${label}` : ""}`);
     lines.push("");
     lines.push(`- **Learning Objectives:** ${session.learningObjectives || "—"}`);

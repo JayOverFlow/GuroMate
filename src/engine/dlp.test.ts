@@ -264,7 +264,10 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(derived.sourceSessionNumber).toBe(3);
     expect(derived.learningAreas).toBe("FCS");
     expect(derived.gradeAndSection).toBe("Grade 7 - Sampaguita");
-    expect(derived.references).toBe("MATATAG TLE CG & BoW");
+    expect(derived.references).toContain("MATATAG TLE CG & BoW");
+    expect(derived.references).toContain(
+      "Grade 7/[G7] TLE_ AFA _ FCS _ IA.pdf",
+    );
     expect(derived.intentions.learningCompetencies).toEqual([fcs.learningCompetency]);
     expect(derived.intentions.contentStandards).toEqual([fcs.contentStandard]);
     expect(derived.intentions.performanceStandards).toEqual([fcs.performanceStandard]);
@@ -421,5 +424,100 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(tables[6]![1]![0]).toBe("MARIA SANTOS");
     expect(tables[6]![1]![1]).toBe("ELENA REYES");
     expect(tables[6]![1]![2]).toBe("ROBERTO GARCIA");
+  });
+
+  it("grounds Grade 7–12 DLP generation in BoW metadata, updates System Instructions for Tech-Pro and SHS Core, and auto-populates BoW sourceDocument references when blank", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Grade 12 Tech-Pro BoW Practicum",
+            references: "DepEd MATATAG Curriculum Guide",
+            learningObjectives: "• Design a structured algorithm.",
+            preLesson: { teacherActivity: "Greet and hook.", studentActivity: "Respond." },
+            lessonFlow: { teacherActivity: "Guide lab.", studentActivity: "Build prototype." },
+            learningResources: { teacherActivity: "• Slides", studentActivity: "• Worksheet" },
+            integrationAndContextualization: { teacherActivity: "Local business link.", studentActivity: "" },
+            formativeAssessment: { teacherActivity: "Facilitate check.", studentActivity: "Complete task." },
+            extendedLearningOpportunities: { teacherActivity: "Home extension.", studentActivity: "" },
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const g12Comp = await engine.saveCustomCompetency({
+      gradeLevels: [12],
+      quarters: [1],
+      component: "ICT",
+      sector: "Computer Programming",
+      contentTopic: "Modular Algorithms",
+      contentStandard: "Demonstrates understanding of modular coding.",
+      performanceStandard: "Builds a working console application.",
+      learningCompetency: "Design modular algorithms for business workflows.",
+      budgetOfWork: {
+        term: "One-Term",
+        weekRange: "5 to 6",
+        suggestedActivities: "Pseudocode pair-debugging sprint",
+        suggestedPerformanceTasks: "Barangay inventory CLI prototype",
+        sourceDocument: "Grade 12 Tech-Pro ICT Computer Programming Budget of Work",
+      },
+    });
+
+    const autoRefDlp = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 12 - Turing",
+      competencyIds: [g12Comp.id],
+    });
+
+    expect(requests).toHaveLength(1);
+    const sys = requests[0]!.systemInstruction ?? "";
+    expect(sys).toMatch(/Grades 7[–-]12/i);
+    expect(sys).toMatch(/Technical-Professional|Tech-Pro/i);
+    expect(sys).toContain("SHS Core");
+    expect(sys).toContain("Suggested Activities");
+    expect(sys).toContain("Suggested Performance Tasks");
+    expect(sys).toMatch(/Learning Experience/i);
+    expect(sys).toMatch(/Assessing Learning/i);
+    expect(sys).toMatch(/Ways Forward/i);
+
+    const prompt = requests[0]!.prompt;
+    expect(prompt).toContain("One-Term");
+    expect(prompt).toContain("Week 5 to 6");
+    expect(prompt).toContain("Pseudocode pair-debugging sprint");
+    expect(prompt).toContain("Barangay inventory CLI prototype");
+    expect(prompt).toContain("Grade 12 Tech-Pro ICT Computer Programming Budget of Work");
+
+    expect(autoRefDlp.references).toBe(
+      "DepEd MATATAG Curriculum Guide; Grade 12 Tech-Pro ICT Computer Programming Budget of Work",
+    );
+
+    const customRefDlp = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 12 - Turing",
+      competencyIds: [g12Comp.id],
+      references: "Teacher Custom Handout p. 8",
+    });
+    expect(customRefDlp.references).toBe("Teacher Custom Handout p. 8");
+
+    const shsComp = (
+      await engine.listCurriculum({ gradeLevel: 11, component: "SHS_CORE" })
+    )[0]!;
+    const shsScratchDlp = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 11 - Mabini",
+      competencyIds: [shsComp.id],
+    });
+    expect(shsScratchDlp.learningAreas).toBe("SHS Core");
+    expect(shsScratchDlp.learningAreas).not.toContain("SHS_CORE");
   });
 });

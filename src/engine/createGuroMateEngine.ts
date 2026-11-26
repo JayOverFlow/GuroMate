@@ -41,6 +41,7 @@ import {
 } from "./quiz";
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
+import { formatLearningAreas, resolveLessonReferences } from "./lessonHelpers";
 import { createLiveAiAdapter } from "./liveAiAdapter";
 import {
   AI_PROVIDER_MAP,
@@ -131,7 +132,14 @@ function normalizeBudgetOfWork(
   const weekRange = (bow.weekRange ?? "").trim();
   const suggestedActivities = (bow.suggestedActivities ?? "").trim();
   const suggestedPerformanceTasks = (bow.suggestedPerformanceTasks ?? "").trim();
-  if (!term && !weekRange && !suggestedActivities && !suggestedPerformanceTasks) {
+  const sourceDocument = (bow.sourceDocument ?? "").trim();
+  if (
+    !term &&
+    !weekRange &&
+    !suggestedActivities &&
+    !suggestedPerformanceTasks &&
+    !sourceDocument
+  ) {
     return undefined;
   }
   return {
@@ -139,6 +147,7 @@ function normalizeBudgetOfWork(
     weekRange,
     suggestedActivities,
     suggestedPerformanceTasks,
+    ...(sourceDocument ? { sourceDocument } : {}),
   };
 }
 
@@ -151,7 +160,7 @@ function validateAndBuildCustomCompetency(
   );
   if (gradeLevels.length === 0) {
     throw new CurriculumValidationError(
-      "At least one valid Grade Level (7-10) is required.",
+      "At least one valid Grade Level (7-12) is required.",
     );
   }
   const quarters = [...new Set(input.quarters)]
@@ -164,7 +173,7 @@ function validateAndBuildCustomCompetency(
   }
   if (!VALID_COMPONENTS.has(input.component)) {
     throw new CurriculumValidationError(
-      `Unsupported TLE Component: ${String(input.component)}`,
+      `Unsupported component: ${String(input.component)}`,
     );
   }
   const contentTopic = input.contentTopic.trim();
@@ -235,6 +244,9 @@ function matchesCurriculumFilter(
   if (filter.sector && item.sector !== filter.sector) {
     return false;
   }
+  if (filter.hasBow !== undefined && Boolean(item.budgetOfWork) !== filter.hasBow) {
+    return false;
+  }
   const q = filter.query?.trim().toLowerCase();
   if (q) {
     const haystack = [
@@ -244,6 +256,8 @@ function matchesCurriculumFilter(
       item.contentStandard,
       item.performanceStandard,
       item.sector ?? "",
+      item.sectorDescription ?? "",
+      item.budgetOfWork?.sourceDocument ?? "",
       item.customNotes ?? "",
     ]
       .join(" ")
@@ -293,7 +307,7 @@ function validateAndBuildClassSection(
 ): ClassSection {
   if (!VALID_GRADES.has(input.gradeLevel)) {
     throw new ClassSectionValidationError(
-      "Grade Level must be between 7 and 10.",
+      "Grade Level must be between 7 and 12.",
     );
   }
   const sectionName = input.sectionName.trim();
@@ -785,7 +799,7 @@ export function createGuroMateEngine(
     const catalog = await listCurriculum();
     const competencyMap = new Map(catalog.map((c) => [c.id, c]));
     const resolved = resolveDllSessions(input, competencyMap);
-    const learningAreas = resolved.components.join(", ");
+    const learningAreas = formatLearningAreas(resolved.components);
 
     const prompt = buildDllPrompt({
       lessonTitle: input.lessonTitle,
@@ -807,6 +821,10 @@ export function createGuroMateEngine(
     const now = new Date().toISOString();
     const fallbackTitle = `${learningAreas} (${resolved.gradeAndSection})`;
 
+    const selectedCompetencies = resolved.orderedConfigs.flatMap(
+      (cfg) => resolved.sessionCompetencies.get(cfg.sessionNumber) ?? [],
+    );
+
     const dll: DailyLessonLog = {
       id: `dll-${randomUUID().slice(0, 8)}`,
       createdAt: now,
@@ -817,9 +835,11 @@ export function createGuroMateEngine(
         fallbackTitle,
       learningAreas,
       gradeAndSection: resolved.gradeAndSection,
-      references:
-        input.references?.trim() ||
-        (typeof parsed.references === "string" ? parsed.references.trim() : ""),
+      references: resolveLessonReferences(
+        input.references,
+        parsed.references,
+        selectedCompetencies,
+      ),
       promptNotes: input.promptNotes?.trim() ?? "",
       intentions: {
         learningCompetencies: resolved.learningCompetencies,
@@ -943,9 +963,11 @@ export function createGuroMateEngine(
         fallbackTitle,
       learningAreas: resolved.learningAreas,
       gradeAndSection: resolved.gradeAndSection,
-      references:
-        resolved.references ||
-        (typeof parsed.references === "string" ? parsed.references.trim() : ""),
+      references: resolveLessonReferences(
+        resolved.references,
+        parsed.references,
+        resolved.competencies,
+      ),
       promptNotes: input.promptNotes?.trim() ?? "",
       intentions: {
         learningCompetencies: resolved.learningCompetencies,

@@ -5,11 +5,16 @@ import {
   INTENTIONS_LIST_FIELDS,
   SESSION_ILAW_FIELDS,
   useDllWorkspace,
+  type DllLaunchTarget,
 } from "../hooks/useDllWorkspace";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
 import { renderMarkdownBlocks } from "./lessonViewHelpers";
 
+export type { DllLaunchTarget };
+
 interface DllWorkspaceProps {
+  initialLaunchTarget?: DllLaunchTarget | null;
+  onConsumeLaunchTarget?: () => void;
   onDeriveDlp?: (dllId: string, sessionNumber: SessionNumber) => void;
   onCreateQuiz?: (dllId: string, sessionNumber: SessionNumber) => void;
 }
@@ -17,7 +22,12 @@ interface DllWorkspaceProps {
 const INPUT_CLASS =
   "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
-export function DllWorkspace({ onDeriveDlp, onCreateQuiz }: DllWorkspaceProps) {
+export function DllWorkspace({
+  initialLaunchTarget,
+  onConsumeLaunchTarget,
+  onDeriveDlp,
+  onCreateQuiz,
+}: DllWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
 
@@ -56,7 +66,7 @@ export function DllWorkspace({ onDeriveDlp, onCreateQuiz }: DllWorkspaceProps) {
     updateDraftSessionField,
     handleSaveEdits,
     handleDeleteDll,
-  } = useDllWorkspace();
+  } = useDllWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
 
   return (
     <section

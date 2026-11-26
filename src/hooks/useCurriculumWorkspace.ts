@@ -12,7 +12,18 @@ export const COMPONENT_LABELS: Record<TleComponent, string> = {
   AFA: "AFA — Agriculture & Fishery Arts",
   FCS: "FCS — Family & Consumer Science",
   IA: "IA — Industrial Arts",
+  SHS_CORE: "SHS Core — Senior High School Core",
 };
+
+export const COMPONENT_SHORT_LABELS: Record<TleComponent, string> = {
+  ICT: "ICT",
+  AFA: "AFA",
+  FCS: "FCS",
+  IA: "IA",
+  SHS_CORE: "SHS Core",
+};
+
+export type BowFilterMode = "all" | "with_bow" | "without_bow";
 
 export interface CurriculumStatusState {
   tone: "success" | "error";
@@ -30,7 +41,7 @@ export interface CustomFormState {
   contentStandard: string;
   performanceStandard: string;
   learningCompetency: string;
-  budgetOfWork: BudgetOfWorkInfo;
+  budgetOfWork: Required<BudgetOfWorkInfo>;
   customNotes: string;
 }
 
@@ -50,6 +61,7 @@ export function emptyCustomForm(): CustomFormState {
       weekRange: "",
       suggestedActivities: "",
       suggestedPerformanceTasks: "",
+      sourceDocument: "",
     },
     customNotes: "",
   };
@@ -73,6 +85,7 @@ export function formFromItem(item: CurriculumCompetency): CustomFormState {
       suggestedActivities: item.budgetOfWork?.suggestedActivities ?? "",
       suggestedPerformanceTasks:
         item.budgetOfWork?.suggestedPerformanceTasks ?? "",
+      sourceDocument: item.budgetOfWork?.sourceDocument ?? "",
     },
     customNotes: item.customNotes ?? "",
   };
@@ -109,6 +122,7 @@ export function useCurriculumWorkspace() {
   const [quarterOrTerm, setQuarterOrTerm] = useState<string>("");
   const [component, setComponent] = useState<TleComponent | "">("");
   const [sector, setSector] = useState<string>("");
+  const [hasBow, setHasBow] = useState<BowFilterMode>("all");
   const [query, setQuery] = useState<string>("");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -160,10 +174,12 @@ export function useCurriculumWorkspace() {
     }
     if (component !== "") params.set("component", component);
     if (sector) params.set("sector", sector);
+    if (hasBow === "with_bow") params.set("hasBow", "true");
+    else if (hasBow === "without_bow") params.set("hasBow", "false");
     if (query.trim()) params.set("query", query.trim());
     const qs = params.toString();
     return qs ? `/api/curriculum?${qs}` : "/api/curriculum";
-  }, [gradeLevel, quarterOrTerm, component, sector, query]);
+  }, [gradeLevel, quarterOrTerm, component, sector, hasBow, query]);
 
   const reloadFullCatalog = useCallback(async (signal?: AbortSignal) => {
     const res = await fetch("/api/curriculum", { signal });
@@ -343,6 +359,8 @@ export function useCurriculumWorkspace() {
     component,
     sector,
     setSector,
+    hasBow,
+    setHasBow,
     query,
     setQuery,
     availableSectors,

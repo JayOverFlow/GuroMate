@@ -181,7 +181,7 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     expect(termItems).toHaveLength(3);
 
     const badFilterRes = await fetch(
-      `${baseUrl}/api/curriculum?gradeLevel=11`,
+      `${baseUrl}/api/curriculum?gradeLevel=13`,
     );
     expect(badFilterRes.status).toBe(400);
 
@@ -249,6 +249,118 @@ describe("guroMateVitePlugin HTTP middleware", () => {
       },
     );
     expect(missingNoteRes.status).toBe(404);
+  });
+
+  it("supports Grades 11-12, SHS_CORE, One-Term, hasBow, and sourceDocument over /api/curriculum and /api/class-sections", async () => {
+    const baseUrl = await startTestServer();
+
+    const createShsRes = await fetch(`${baseUrl}/api/curriculum/custom`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeLevels: [11],
+        quarters: [1],
+        component: "SHS_CORE",
+        sector: "Effective Communication",
+        contentTopic: "Workplace Communication",
+        contentStandard: "The learners demonstrate understanding of workplace communication.",
+        performanceStandard: "The learners deliver clear oral presentations.",
+        learningCompetency: "compose concise technical memos",
+        budgetOfWork: {
+          term: "One-Term",
+          weekRange: "1 to 2",
+          suggestedActivities: "- Memo drafting workshop",
+          suggestedPerformanceTasks: "- Technical memo portfolio",
+          sourceDocument: "SHS Core BoW - Effective Communication.pdf",
+        },
+      }),
+    });
+    expect(createShsRes.status).toBe(201);
+    const createdShs = (await createShsRes.json()) as {
+      id: string;
+      component: string;
+      budgetOfWork?: { term: string; sourceDocument?: string };
+    };
+    expect(createdShs.component).toBe("SHS_CORE");
+    expect(createdShs.budgetOfWork?.sourceDocument).toBe(
+      "SHS Core BoW - Effective Communication.pdf",
+    );
+
+    const createG12Res = await fetch(`${baseUrl}/api/curriculum/custom`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeLevels: [12],
+        quarters: [1],
+        component: "IA",
+        sector: "Electrical Installation",
+        contentTopic: "Circuit Diagnostics",
+        contentStandard: "The learners demonstrate understanding of diagnostics.",
+        performanceStandard: "The learners troubleshoot circuits safely.",
+        learningCompetency: "diagnose branch circuit faults",
+      }),
+    });
+    expect(createG12Res.status).toBe(201);
+
+    const shsFilterRes = await fetch(
+      `${baseUrl}/api/curriculum?gradeLevel=11&component=SHS_CORE&term=${encodeURIComponent("One-Term")}&hasBow=true`,
+    );
+    expect(shsFilterRes.status).toBe(200);
+    const shsFiltered = (await shsFilterRes.json()) as Array<{
+      id: string;
+      budgetOfWork?: { sourceDocument?: string };
+    }>;
+    expect(shsFiltered).toHaveLength(1);
+    expect(shsFiltered[0]?.id).toBe(createdShs.id);
+    expect(shsFiltered[0]?.budgetOfWork?.sourceDocument).toBe(
+      "SHS Core BoW - Effective Communication.pdf",
+    );
+
+    const g12NoBowRes = await fetch(
+      `${baseUrl}/api/curriculum?gradeLevel=12&hasBow=false`,
+    );
+    expect(g12NoBowRes.status).toBe(200);
+    const g12NoBow = (await g12NoBowRes.json()) as Array<{
+      id: string;
+      budgetOfWork?: unknown;
+    }>;
+    expect(g12NoBow.length).toBeGreaterThanOrEqual(1);
+    expect(g12NoBow.every((item) => !item.budgetOfWork)).toBe(true);
+
+    const badHasBowRes = await fetch(
+      `${baseUrl}/api/curriculum?hasBow=maybe`,
+    );
+    expect(badHasBowRes.status).toBe(400);
+
+    const g11SectionRes = await fetch(`${baseUrl}/api/class-sections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeLevel: 11,
+        sectionName: "11-STEM-A",
+        students: ["Ana Cruz", "Ben Reyes"],
+      }),
+    });
+    expect(g11SectionRes.status).toBe(201);
+    expect(await g11SectionRes.json()).toMatchObject({
+      gradeLevel: 11,
+      sectionName: "11-STEM-A",
+    });
+
+    const g12SectionRes = await fetch(`${baseUrl}/api/class-sections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeLevel: 12,
+        sectionName: "12-TVL-ICT",
+        students: ["Cara Lim"],
+      }),
+    });
+    expect(g12SectionRes.status).toBe(201);
+    expect(await g12SectionRes.json()).toMatchObject({
+      gradeLevel: 12,
+      sectionName: "12-TVL-ICT",
+    });
   });
 
   it("serves Class Section CRUD and error status codes over /api/class-sections", async () => {

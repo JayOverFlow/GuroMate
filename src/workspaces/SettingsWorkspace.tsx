@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { AI_PROVIDERS, formatModelOptionLabel } from "../engine/providers";
-import type { GuroMateSettings } from "../engine/types";
+import { TLE_COMPONENTS, type GuroMateSettings } from "../engine/types";
+import { COMPONENT_SHORT_LABELS } from "../hooks/useCurriculumWorkspace";
 import {
   CUSTOM_MODEL_OPTION,
   SIGNATORY_FIELDS,
@@ -29,6 +30,8 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
     status,
     invalidFields,
     activeProvider,
+    catalogCoverage,
+    catalogError,
     syncFieldValidity,
     updateProfileField,
     updateProvider,
@@ -659,6 +662,134 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
           </div>
         </section>
       </form>
+
+      {/* Section 4: Read-Only Curriculum & BoW Catalog Coverage */}
+      <section
+        aria-labelledby={`${baseId}-coverage-heading`}
+        className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-gutter-sm pb-gutter-sm border-b border-outline-variant">
+          <div className="flex flex-col gap-gutter-xs">
+            <h2
+              id={`${baseId}-coverage-heading`}
+              className="font-title text-title-lg text-on-surface"
+            >
+              Curriculum &amp; BoW Catalog Coverage (Grades 7–12)
+            </h2>
+            <p className="font-body text-body-sm text-on-surface-variant">
+              Read-only summary of loaded Learning Competencies and Budget of
+              Work enrichment across Junior High TLE, Grade 11 SHS Core, and
+              Grade 12 Technical-Professional electives.
+            </p>
+          </div>
+          {catalogCoverage && (
+            <div className="flex flex-wrap items-center gap-gutter-xs">
+              <span className="px-gutter-sm py-gutter-xs rounded-full bg-surface-container font-mono text-label-sm text-on-surface tabular-nums">
+                {catalogCoverage.totalCompetencies} Total
+              </span>
+              <span className="px-gutter-sm py-gutter-xs rounded-full bg-success-container text-on-success-container font-mono text-label-sm tabular-nums">
+                {catalogCoverage.totalBowCompetencies} With BoW
+              </span>
+            </div>
+          )}
+        </div>
+
+        {catalogError ? (
+          <p className="font-body text-body-sm text-error">
+            Unable to load catalog coverage ({catalogError}).
+          </p>
+        ) : !catalogCoverage ? (
+          <p className="font-body text-body-sm text-on-surface-variant">
+            Loading catalog coverage...
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-left">
+              <thead>
+                <tr className="border-b border-outline-variant text-on-surface-variant font-label text-label-sm">
+                  <th scope="col" className="py-gutter-sm pr-gutter-md">
+                    Grade Level
+                  </th>
+                  <th
+                    scope="col"
+                    className="py-gutter-sm px-gutter-sm text-right"
+                  >
+                    Total
+                  </th>
+                  <th
+                    scope="col"
+                    className="py-gutter-sm px-gutter-sm text-right"
+                  >
+                    With BoW
+                  </th>
+                  {TLE_COMPONENTS.map((comp) => (
+                    <th
+                      key={comp}
+                      scope="col"
+                      className="py-gutter-sm px-gutter-sm text-right"
+                    >
+                      {COMPONENT_SHORT_LABELS[comp]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/60 font-mono text-body-sm tabular-nums">
+                {catalogCoverage.byGrade.map((row) => (
+                  <tr key={row.gradeLevel}>
+                    <th
+                      scope="row"
+                      className="py-gutter-sm pr-gutter-md font-label text-label-md text-on-surface"
+                    >
+                      Grade {row.gradeLevel}
+                    </th>
+                    <td className="py-gutter-sm px-gutter-sm text-right text-on-surface font-semibold">
+                      {row.total}
+                    </td>
+                    <td className="py-gutter-sm px-gutter-sm text-right text-primary font-semibold">
+                      {row.bowCount}
+                    </td>
+                    {TLE_COMPONENTS.map((comp) => (
+                      <td
+                        key={comp}
+                        className="py-gutter-sm px-gutter-sm text-right text-on-surface-variant"
+                      >
+                        {row.byComponent[comp]}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-outline-variant font-mono text-body-sm tabular-nums bg-surface-container-low">
+                  <th
+                    scope="row"
+                    className="py-gutter-sm pr-gutter-md pl-gutter-xs font-label text-label-md text-on-surface"
+                  >
+                    Unique Total (BoW)
+                  </th>
+                  <td className="py-gutter-sm px-gutter-sm text-right font-semibold text-on-surface">
+                    {catalogCoverage.totalCompetencies}
+                  </td>
+                  <td className="py-gutter-sm px-gutter-sm text-right font-semibold text-primary">
+                    {catalogCoverage.totalBowCompetencies}
+                  </td>
+                  {catalogCoverage.byComponent.map((compRow) => (
+                    <td
+                      key={compRow.component}
+                      className="py-gutter-sm px-gutter-sm text-right text-on-surface"
+                    >
+                      {compRow.total}{" "}
+                      <span className="text-on-surface-variant">
+                        ({compRow.bowCount})
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </section>
     </section>
   );
 }

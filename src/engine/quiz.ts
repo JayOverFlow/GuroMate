@@ -1,6 +1,7 @@
 import {
   dedupeOrdered,
   formatCompetencyLines,
+  formatLearningAreas,
   parseAiJsonObject,
 } from "./lessonHelpers";
 import {
@@ -103,7 +104,7 @@ export function resolveStandaloneQuizContext(
   }
   return {
     gradeAndSection: trimmedGrade,
-    learningAreas: dedupeOrdered(competencies.map((c) => c.component)).join(", "),
+    learningAreas: formatLearningAreas(competencies.map((c) => c.component)),
     source: { kind: "standalone", competencyIds: ids },
     competencyIds: ids,
     learningCompetencies: dedupeOrdered(
@@ -140,7 +141,7 @@ export function resolveDllSessionQuizContext(
 
   return {
     gradeAndSection: dll.gradeAndSection,
-    learningAreas: components.join(", ") || dll.learningAreas,
+    learningAreas: formatLearningAreas(components) || dll.learningAreas,
     source: { kind: "dll", dllId: dll.id, sessionNumber: session.sessionNumber },
     competencyIds: [...session.competencyIds],
     learningCompetencies:
@@ -211,7 +212,8 @@ export function buildQuizPrompt(params: {
   const promptNotes = params.promptNotes?.trim();
 
   return [
-    "Generate a DepEd MATATAG TLE printable formative Quiz with a complete Answer Key.",
+    "Generate a DepEd MATATAG (Grades 7–12: TLE, Grade 12 Technical-Professional electives, and Grade 11 SHS Core) printable formative Quiz with a complete Answer Key.",
+    "When Budget of Work (BoW) metadata is present on target Learning Competencies, align items with the BoW term/week pacing and Suggested Activities, and adapt BoW Suggested Performance Tasks for Essay / Performance Task items and rubrics; Teacher Prompt Notes override these defaults when specified.",
     `Learning Area/s: ${context.learningAreas}`,
     `Grade Level and Section: ${context.gradeAndSection}`,
     params.title?.trim() ? `Requested Quiz Title: ${params.title.trim()}` : "",

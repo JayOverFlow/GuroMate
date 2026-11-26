@@ -71,16 +71,21 @@ export interface SettingsPatch {
   ai?: Partial<AiProviderSettings>;
 }
 
-export const GRADE_LEVELS = [7, 8, 9, 10] as const;
+export const GRADE_LEVELS = [7, 8, 9, 10, 11, 12] as const;
 export type GradeLevel = (typeof GRADE_LEVELS)[number];
 
 export const QUARTERS = [1, 2, 3, 4] as const;
 export type QuarterNumber = (typeof QUARTERS)[number];
 
-export const TLE_COMPONENTS = ["ICT", "AFA", "FCS", "IA"] as const;
+export const TLE_COMPONENTS = ["ICT", "AFA", "FCS", "IA", "SHS_CORE"] as const;
 export type TleComponent = (typeof TLE_COMPONENTS)[number];
 
-export const BOW_TERMS = ["First Term", "Second Term", "Third Term"] as const;
+export const BOW_TERMS = [
+  "First Term",
+  "Second Term",
+  "Third Term",
+  "One-Term",
+] as const;
 export type BowTerm = (typeof BOW_TERMS)[number];
 
 export interface BudgetOfWorkInfo {
@@ -88,6 +93,7 @@ export interface BudgetOfWorkInfo {
   weekRange: string;
   suggestedActivities: string;
   suggestedPerformanceTasks: string;
+  sourceDocument?: string;
 }
 
 export interface CurriculumCompetency {
@@ -116,6 +122,7 @@ export interface CurriculumFilter {
   component?: TleComponent;
   sector?: string;
   query?: string;
+  hasBow?: boolean;
 }
 
 export interface CustomCompetencyInput {
