@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   INITIAL_CONFIRM_STATE,
   buildDeleteCustomCompetencyPrompt,
+  buildDeleteDllPrompt,
   buildDeleteDlpPrompt,
   buildDeleteQuizPrompt,
+  buildRemoveDllCompetencyPrompt,
   buildRemoveDlpCompetencyPrompt,
   buildRemoveQuizCompetencyPrompt,
   confirmDialogReducer,
@@ -133,6 +135,41 @@ describe("buildDeleteCustomCompetencyPrompt & formatConfirmError", () => {
     expect(formatConfirmError(new Error("   "))).toBe(
       "Action failed. Please try again.",
     );
+  });
+
+  it("builds the canonical Delete Daily Lesson Log confirmation prompt", () => {
+    expect(buildDeleteDllPrompt("  Week 3 ICT & FCS Plan  ")).toEqual({
+      title: "Delete Daily Lesson Log?",
+      body: 'Permanently delete "Week 3 ICT & FCS Plan" from local storage? This cannot be undone.',
+      confirmLabel: "Delete DLL",
+      busyLabel: "Deleting...",
+    });
+
+    expect(buildDeleteDllPrompt("   ")).toEqual({
+      title: "Delete Daily Lesson Log?",
+      body: 'Permanently delete "this Daily Lesson Log" from local storage? This cannot be undone.',
+      confirmLabel: "Delete DLL",
+      busyLabel: "Deleting...",
+    });
+  });
+
+  it("builds the canonical Remove Learning Competency from DLL Session confirmation prompt", () => {
+    expect(
+      buildRemoveDllCompetencyPrompt(
+        "  Identify basic hand tools in carpentry.  ",
+        3,
+      ),
+    ).toEqual({
+      title: "Remove Learning Competency?",
+      body: 'Remove "Identify basic hand tools in carpentry." from Session 3? You can add it back anytime.',
+      confirmLabel: "Remove",
+    });
+
+    expect(buildRemoveDllCompetencyPrompt("   ", 1)).toEqual({
+      title: "Remove Learning Competency?",
+      body: 'Remove "this Learning Competency" from Session 1? You can add it back anytime.',
+      confirmLabel: "Remove",
+    });
   });
 
   it("builds the canonical Delete Daily Lesson Plan prompt", () => {
