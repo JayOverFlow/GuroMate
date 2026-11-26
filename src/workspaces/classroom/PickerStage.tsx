@@ -1,11 +1,22 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { PickerAnimationMode } from "../../engine/classroomPreferences";
 import type { RosterStudent } from "../../engine/classroomTools";
 import {
+  getMysteryCardCount,
   normalizeAvailablePickerMode,
   type AvailablePickerMode,
+  type CardFlipFrame,
+  type CardFlipPlan,
   type SlotReelWindow,
 } from "../../engine/pickerAnimation";
+import type { RevealedMysteryCard } from "../../hooks/useClassroomWorkspace";
+
+type CardSlotStyle = CSSProperties & {
+  "--fan-angle": string;
+  "--fan-y": string;
+  "--shuffle-x": string;
+  "--shuffle-delay": string;
+};
 
 const OVERLAY_STAGE_CLASS =
   "fixed inset-0 z-50 rounded-none border-0 overflow-auto bg-surface p-gutter-xl";
@@ -15,6 +26,7 @@ const MODE_OPTIONS: ReadonlyArray<{
   label: string;
 }> = [
   { id: "slot", label: "Slot Machine" },
+  { id: "card-flip", label: "Card Flip" },
   { id: "instant", label: "Instant" },
 ];
 
@@ -38,8 +50,15 @@ export interface PickerStageProps {
   isSingleStudentSpotlight: boolean;
   reelWindow: SlotReelWindow | null;
   lastLandedWindow: SlotReelWindow | null;
+  cardFlipPlan: CardFlipPlan | null;
+  cardFlipDrawId: number | null;
+  cardFlipWinner: RosterStudent | null;
+  cardFlipFrame: CardFlipFrame | null;
+  revealedCard: RevealedMysteryCard | null;
   revealCount: number;
   onPickStudent: () => void;
+  onPickCardSlot: (slotIndex: number) => void;
+  onResetCardSpread: () => void;
   onSkip: () => void;
   onResetPool: () => void;
   soundControl?: ReactNode;
@@ -66,8 +85,15 @@ export function PickerStage({
   isSingleStudentSpotlight,
   reelWindow,
   lastLandedWindow,
+  cardFlipPlan,
+  cardFlipDrawId,
+  cardFlipWinner,
+  cardFlipFrame,
+  revealedCard,
   revealCount,
   onPickStudent,
+  onPickCardSlot,
+  onResetCardSpread,
   onSkip,
   onResetPool,
   soundControl,
@@ -77,7 +103,15 @@ export function PickerStage({
   const effectivePlaybackMode =
     normalizeAvailablePickerMode(effectivePickerMode);
   const showSlotReel = effectivePlaybackMode === "slot";
+  const showCardFlip = effectivePlaybackMode === "card-flip";
   const rowHeightPx = isProjector ? 84 : 52;
+  const isCardFlipAnimating = isAnimating && cardFlipPlan !== null;
+  const nextSpreadCardCount = getMysteryCardCount(remainingInPoolCount);
+  const displayCardCount = isCardFlipAnimating
+    ? cardFlipPlan.cardCount
+    : revealedCard
+      ? revealedCard.cardCount
+      : nextSpreadCardCount;
 
   const exhaustedMessage =
     presentStudents.length === 0
@@ -164,7 +198,7 @@ export function PickerStage({
           {liveAnnouncement}
         </div>
 
-        {/* Display Area: 3-Row Slot Machine Reel or Instant Spotlight */}
+        {/* Display Area: 3-Row Slot Machine Reel, 3D Card Flip Spread, or Instant Spotlight */}
         {showSlotReel ? (
           <div className="w-full rounded-md bg-surface-container-low border border-outline-variant p-gutter-md flex flex-col items-center gap-gutter-sm">
             {poolExhausted ? (
@@ -411,6 +445,226 @@ export function PickerStage({
                 {totalStudents} · Pool remaining: {remainingInPoolCount}
               </span>
             </div>
+          </div>
+        ) : showCardFlip ? (
+          /* Interactive 3D Card Flip Mystery Spread */
+          <div className="w-full rounded-md bg-surface-container-low border border-outline-variant p-gutter-md flex flex-col items-center gap-gutter-md">
+            {poolExhausted || displayCardCount === 0 ? (
+              <div
+                className={`w-full flex items-center justify-center ${
+                  isProjector ? "min-h-60" : "min-h-40"
+                }`}
+              >
+                <p className="font-title text-title-lg text-on-surface-variant">
+                  {exhaustedMessage}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div
+                  role="group"
+                  aria-label="Mystery cards"
+                  className={`w-full flex flex-wrap items-center justify-center ${
+                    isProjector
+                      ? "gap-gutter-md py-gutter-lg min-h-64"
+                      : "gap-gutter-xs sm:gap-gutter-sm py-gutter-md min-h-44"
+                  }`}
+                >
+                  {Array.from({ length: displayCardCount }, (_, slotIndex) => {
+                    const cardNumber = slotIndex + 1;
+                    const mid = (displayCardCount - 1) / 2;
+                    const offset = slotIndex - mid;
+                    const fanAngle = offset * (displayCardCount >= 5 ? 5 : 6);
+                    const fanY = Math.round(offset * offset * 3);
+                    const shuffleX = Math.round(-offset * 12);
+
+                    const isShuffling =
+                      isCardFlipAnimating &&
+                      cardFlipFrame?.phase === "shuffling";
+                    const isShuffleHighlight =
+                      isShuffling &&
+                      cardFlipFrame?.activeSlotIndex === slotIndex;
+                    const isThisFlipping =
+                      isCardFlipAnimating &&
+                      cardFlipFrame?.phase === "flipping" &&
+                      cardFlipPlan.chosenSlotIndex === slotIndex;
+                    const isThisRevealed =
+                      !isCardFlipAnimating &&
+                      revealedCard !== null &&
+                      revealedCard.chosenSlotIndex === slotIndex;
+                    const isFocused = isThisFlipping || isThisRevealed;
+                    const isDimmed =
+                      (isCardFlipAnimating &&
+                        cardFlipFrame?.phase === "flipping" &&
+                        !isThisFlipping) ||
+                      (!isCardFlipAnimating &&
+                        revealedCard !== null &&
+                        !isThisRevealed);
+                    const faceWinner = isThisFlipping
+                      ? cardFlipWinner
+                      : isThisRevealed
+                        ? revealedCard.winner
+                        : null;
+                    const cardInnerKey = isThisFlipping
+                      ? `flip-${cardFlipDrawId ?? 0}-${slotIndex}`
+                      : isThisRevealed
+                        ? `rev-${revealedCard.drawId}-${slotIndex}`
+                        : `idle-${slotIndex}`;
+
+                    const slotStyle: CardSlotStyle = {
+                      "--fan-angle": `${fanAngle}deg`,
+                      "--fan-y": `${fanY}px`,
+                      "--shuffle-x": `${shuffleX}px`,
+                      "--shuffle-delay": `${slotIndex * 55}ms`,
+                    };
+
+                    return (
+                      <button
+                        key={slotIndex}
+                        type="button"
+                        disabled={isAnimating || presentStudents.length === 0}
+                        aria-label={
+                          isThisRevealed && faceWinner
+                            ? `Card ${cardNumber}: ${faceWinner.name}. Pick card ${cardNumber}`
+                            : `Pick card ${cardNumber}`
+                        }
+                        onClick={() => onPickCardSlot(slotIndex)}
+                        style={slotStyle}
+                        className={`picker-card-scene picker-card-slot relative rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed ${
+                          isProjector
+                            ? "w-28 sm:w-36 h-44 sm:h-52"
+                            : "w-[4.75rem] sm:w-[5.25rem] h-32 sm:h-36"
+                        } ${isFocused ? "is-focused" : ""} ${
+                          isDimmed ? "is-dimmed" : ""
+                        } ${isShuffling ? "is-shuffling" : ""}`}
+                      >
+                        <span
+                          key={cardInnerKey}
+                          className={`picker-card-inner block rounded-md ${
+                            isThisFlipping
+                              ? "is-flipping"
+                              : isThisRevealed
+                                ? "is-revealed"
+                                : ""
+                          }`}
+                        >
+                          {/* Back Face: Numbered Face-Down Mystery Card */}
+                          <span
+                            aria-hidden="true"
+                            className={`picker-card-face picker-card-back-pattern rounded-md border-2 bg-primary text-on-primary shadow-sm flex flex-col items-center justify-between p-gutter-xs sm:p-gutter-sm ${
+                              isShuffleHighlight
+                                ? "border-secondary-container ring-2 ring-secondary-container"
+                                : "border-primary-container"
+                            }`}
+                          >
+                            <span className="w-full flex items-center justify-between font-mono text-label-sm text-on-primary-container">
+                              <span>{cardNumber}</span>
+                              <span className="material-symbols-outlined text-body-sm text-secondary-container">
+                                style
+                              </span>
+                            </span>
+                            <span
+                              className={`rounded-full bg-surface-container-low text-primary border-2 border-secondary font-display font-bold flex items-center justify-center shadow-xs ${
+                                isProjector
+                                  ? "w-14 h-14 text-headline-lg"
+                                  : "w-9 h-9 text-title-lg"
+                              }`}
+                            >
+                              {cardNumber}
+                            </span>
+                            <span className="w-full flex items-center justify-between font-mono text-label-sm text-on-primary-container">
+                              <span className="uppercase tracking-wider text-[10px]">
+                                Card
+                              </span>
+                              <span>{cardNumber}</span>
+                            </span>
+                          </span>
+
+                          {/* Front Face: Revealed Student Name */}
+                          <span
+                            aria-hidden={isAnimating}
+                            className="picker-card-face picker-card-front rounded-md border-2 border-primary bg-surface-container-lowest text-on-surface shadow-md flex flex-col items-center justify-between p-gutter-xs sm:p-gutter-sm text-center"
+                          >
+                            <span className="px-1.5 py-0.5 rounded-full bg-warning-container text-secondary font-mono text-[10px] font-semibold">
+                              #{cardNumber}
+                            </span>
+                            <span
+                              className={`font-display font-bold text-primary leading-tight line-clamp-3 break-words w-full ${
+                                isProjector
+                                  ? "text-title-lg sm:text-headline-md"
+                                  : "text-label-lg"
+                              }`}
+                            >
+                              {faceWinner?.name ?? ""}
+                            </span>
+                            <span className="font-label text-[10px] uppercase tracking-wider text-success">
+                              Selected
+                            </span>
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Revealed Student Spotlight Readout & Spread Controls */}
+                {!isAnimating && pickedStudent && !poolExhausted && (
+                  <div
+                    key={revealCount}
+                    className="picker-reveal-pop w-full rounded bg-surface-container-lowest border border-primary/40 px-gutter-md py-gutter-sm flex flex-col items-center gap-gutter-xs"
+                  >
+                    <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
+                      {revealedCard
+                        ? `Card #${revealedCard.chosenSlotIndex + 1} · Selected`
+                        : "Selected"}
+                    </span>
+                    <p
+                      className="font-display font-bold text-primary text-balance leading-tight"
+                      style={
+                        isProjector
+                          ? { fontSize: "clamp(2rem, 6vw, 4.25rem)" }
+                          : undefined
+                      }
+                    >
+                      <span className={isProjector ? "" : "text-headline-md"}>
+                        {pickedStudent.name}
+                      </span>
+                    </p>
+                    {revealedCard &&
+                      nextSpreadCardCount > 0 &&
+                      nextSpreadCardCount < revealedCard.cardCount && (
+                        <button
+                          type="button"
+                          onClick={onResetCardSpread}
+                          className="mt-gutter-xs px-gutter-sm py-0.5 rounded border border-outline-variant bg-surface-container-low font-label text-label-sm text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
+                        >
+                          Deal {nextSpreadCardCount} Remaining{" "}
+                          {nextSpreadCardCount === 1 ? "Card" : "Cards"}
+                        </button>
+                      )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-center gap-gutter-xs">
+                  {isAnimating && (
+                    <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                      {cardFlipFrame?.phase === "shuffling"
+                        ? "Shuffling mystery cards…"
+                        : "Flipping mystery card…"}
+                    </span>
+                  )}
+                  {!isAnimating && !pickedStudent && (
+                    <span className="font-body text-body-sm text-on-surface-variant">
+                      Click a numbered mystery card or press Pick Random Student
+                    </span>
+                  )}
+                  <span className="font-body text-body-sm text-on-surface-variant">
+                    {sectionName} · Present: {presentStudents.length}/
+                    {totalStudents} · Pool remaining: {remainingInPoolCount}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           /* Instant / Reduced-Motion Direct Reveal Card */

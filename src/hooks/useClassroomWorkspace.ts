@@ -46,8 +46,10 @@ import {
   isPickerLocked,
   normalizeAvailablePickerMode,
   resetPickerPool,
+  sampleCardFlipFrame,
   sampleSlotReelWindow,
   startPickerDraw,
+  type CardFlipFrame,
   type PickerLifecycleState,
   type SlotReelWindow,
 } from "../engine/pickerAnimation";
@@ -70,6 +72,13 @@ export const TOOL_TABS: ReadonlyArray<{
 export interface ClassroomStatusState {
   tone: "success" | "error";
   text: string;
+}
+
+export interface RevealedMysteryCard {
+  drawId: number;
+  cardCount: number;
+  chosenSlotIndex: number;
+  winner: RosterStudent;
 }
 
 export interface SectionFormState {
@@ -157,6 +166,10 @@ export function useClassroomWorkspace(
     useState<SlotReelWindow | null>(null);
   const [pickerLastLandedWindow, setPickerLastLandedWindow] =
     useState<SlotReelWindow | null>(null);
+  const [pickerCardFlipFrame, setPickerCardFlipFrame] =
+    useState<CardFlipFrame | null>(null);
+  const [pickerRevealedCard, setPickerRevealedCard] =
+    useState<RevealedMysteryCard | null>(null);
   const [pickerRevealCount, setPickerRevealCount] = useState(0);
 
   const updatePickerState = useCallback((next: PickerLifecycleState) => {
@@ -232,6 +245,7 @@ export function useClassroomWorkspace(
   const setPickerAnimationMode = useCallback(
     (pickerMode: PickerAnimationMode) => {
       if (isPickerLocked(pickerStateRef.current)) return;
+      setPickerRevealedCard(null);
       updatePreferences((prev) => ({ ...prev, pickerMode }));
     },
     [updatePreferences],
@@ -277,6 +291,7 @@ export function useClassroomWorkspace(
 
   const setRemovePickedFromPool = useCallback((checked: boolean) => {
     if (isPickerLocked(pickerStateRef.current)) return;
+    setPickerRevealedCard(null);
     setRemovePickedFromPoolState(checked);
   }, []);
 
@@ -317,6 +332,8 @@ export function useClassroomWorkspace(
     updatePickerState(createInitialPickerState());
     setPickerReelWindow(null);
     setPickerLastLandedWindow(null);
+    setPickerCardFlipFrame(null);
+    setPickerRevealedCard(null);
     setPickerRevealCount(0);
     setGroups([]);
     setSwapSelection(null);
@@ -480,6 +497,7 @@ export function useClassroomWorkspace(
     });
     setPoolExhausted(false);
     setPickerLastLandedWindow(null);
+    setPickerRevealedCard(null);
     setGroups([]);
     setSwapSelection(null);
     setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
@@ -490,6 +508,7 @@ export function useClassroomWorkspace(
     setAbsentIndices(new Set());
     setPoolExhausted(false);
     setPickerLastLandedWindow(null);
+    setPickerRevealedCard(null);
     setGroups([]);
     setSwapSelection(null);
     setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
@@ -512,9 +531,17 @@ export function useClassroomWorkspace(
     (expectedDrawId?: number, playChime = true) => {
       cancelPickerFrame();
       const pending = pickerStateRef.current.pendingDraw;
-      const landedWindow = pending
-        ? sampleSlotReelWindow(pending.plan, 1)
-        : null;
+      const landedWindow =
+        pending?.mode === "slot" ? sampleSlotReelWindow(pending.plan, 1) : null;
+      const revealedCard: RevealedMysteryCard | null =
+        pending?.mode === "card-flip"
+          ? {
+              drawId: pending.drawId,
+              cardCount: pending.plan.cardCount,
+              chosenSlotIndex: pending.plan.chosenSlotIndex,
+              winner: pending.winner,
+            }
+          : null;
       const committed = commitPendingDraw(
         pickerStateRef.current,
         expectedDrawId,
@@ -523,7 +550,9 @@ export function useClassroomWorkspace(
 
       updatePickerState(committed.state);
       setPickerReelWindow(null);
+      setPickerCardFlipFrame(null);
       setPickerLastLandedWindow(landedWindow);
+      setPickerRevealedCard(revealedCard);
       setPickerRevealCount((count) => count + 1);
       if (playChime && canPlayClassroomCueRef.current(false)) {
         classroomAudio.playRevealChime();
@@ -543,6 +572,67 @@ export function useClassroomWorkspace(
 
     let cancelled = false;
     const startTime = performance.now();
+
+    if (pendingDraw.mode === "card-flip") {
+      const plan = pendingDraw.plan;
+      let lastShuffleStep = -1;
+      let lastPhase: CardFlipFrame["phase"] | null = null;
+      let lastActiveSlot = -1;
+      let playedFlipSound = false;
+
+      if (plan.shuffleDurationMs === 0) {
+        playedFlipSound = true;
+        if (canPlayClassroomCueRef.current(false)) {
+          classroomAudio.playCardFlip();
+        }
+      }
+
+      const tickCardFlip = (now: number) => {
+        if (cancelled) return;
+        const frame = sampleCardFlipFrame(plan, now - startTime);
+
+        if (
+          frame.phase === "shuffling" &&
+          frame.shuffleStep > lastShuffleStep
+        ) {
+          lastShuffleStep = frame.shuffleStep;
+          if (canPlayClassroomCueRef.current(false)) {
+            classroomAudio.playCardDeal(frame.progress);
+          }
+        }
+
+        if (frame.phase === "flipping" && !playedFlipSound) {
+          playedFlipSound = true;
+          if (canPlayClassroomCueRef.current(false)) {
+            classroomAudio.playCardFlip();
+          }
+        }
+
+        if (frame.isComplete) {
+          finalizePickerDraw(pendingDraw.drawId, true);
+          return;
+        }
+
+        if (
+          frame.phase !== lastPhase ||
+          frame.activeSlotIndex !== lastActiveSlot
+        ) {
+          lastPhase = frame.phase;
+          lastActiveSlot = frame.activeSlotIndex;
+          setPickerCardFlipFrame(frame);
+        }
+
+        pickerRafRef.current = window.requestAnimationFrame(tickCardFlip);
+      };
+
+      pickerRafRef.current = window.requestAnimationFrame(tickCardFlip);
+
+      return () => {
+        cancelled = true;
+        cancelPickerFrame();
+      };
+    }
+
     let lastStepIndex = 0;
     let lastTickSoundAt = 0;
 
@@ -598,7 +688,7 @@ export function useClassroomWorkspace(
     finalizePickerDraw,
   ]);
 
-  function handlePickStudent() {
+  function triggerPickerDraw(requestedSlotIndex?: number) {
     if (isPickerLocked(pickerStateRef.current)) return;
 
     const effectiveMode = resolveEffectivePickerMode(
@@ -614,6 +704,7 @@ export function useClassroomWorkspace(
       presentStudents,
       removeFromPool: removePickedFromPool,
       effectiveMode,
+      requestedSlotIndex,
     });
 
     if (result.outcome === "ignored-locked") return;
@@ -622,11 +713,33 @@ export function useClassroomWorkspace(
     if (result.outcome === "instant-revealed") {
       setPickerReelWindow(null);
       setPickerLastLandedWindow(null);
+      setPickerCardFlipFrame(null);
+      setPickerRevealedCard(null);
       setPickerRevealCount((count) => count + 1);
     } else if (result.outcome === "animating") {
       setPickerLastLandedWindow(null);
-      setPickerReelWindow(sampleSlotReelWindow(result.pendingDraw.plan, 0));
+      setPickerRevealedCard(null);
+      if (result.pendingDraw.mode === "card-flip") {
+        setPickerReelWindow(null);
+        setPickerCardFlipFrame(sampleCardFlipFrame(result.pendingDraw.plan, 0));
+      } else {
+        setPickerCardFlipFrame(null);
+        setPickerReelWindow(sampleSlotReelWindow(result.pendingDraw.plan, 0));
+      }
     }
+  }
+
+  function handlePickStudent() {
+    triggerPickerDraw();
+  }
+
+  function handlePickCardSlot(slotIndex: number) {
+    triggerPickerDraw(slotIndex);
+  }
+
+  function handleResetCardSpread() {
+    if (isPickerLocked(pickerStateRef.current)) return;
+    setPickerRevealedCard(null);
   }
 
   function handleSkipPicker() {
@@ -638,6 +751,8 @@ export function useClassroomWorkspace(
     updatePickerState(resetPickerPool(pickerStateRef.current));
     setPickerReelWindow(null);
     setPickerLastLandedWindow(null);
+    setPickerCardFlipFrame(null);
+    setPickerRevealedCard(null);
     setPickerRevealCount(0);
   }
 
@@ -872,9 +987,24 @@ export function useClassroomWorkspace(
     remainingInPoolCount,
     isPickerAnimating,
     isPickerSingleSpotlight:
-      pickerState.pendingDraw?.plan.isSingleStudentSpotlight ?? false,
+      pickerState.pendingDraw?.mode === "slot" &&
+      pickerState.pendingDraw.plan.isSingleStudentSpotlight,
     pickerReelWindow,
     pickerLastLandedWindow,
+    pickerCardFlipPlan:
+      pickerState.pendingDraw?.mode === "card-flip"
+        ? pickerState.pendingDraw.plan
+        : null,
+    pickerCardFlipDrawId:
+      pickerState.pendingDraw?.mode === "card-flip"
+        ? pickerState.pendingDraw.drawId
+        : null,
+    pickerCardFlipWinner:
+      pickerState.pendingDraw?.mode === "card-flip"
+        ? pickerState.pendingDraw.winner
+        : null,
+    pickerCardFlipFrame,
+    pickerRevealedCard,
     pickerRevealCount,
     groupMode,
     setGroupMode,
@@ -893,6 +1023,8 @@ export function useClassroomWorkspace(
     toggleAbsent,
     resetAllAttendance,
     handlePickStudent,
+    handlePickCardSlot,
+    handleResetCardSpread,
     handleSkipPicker,
     handleResetPool,
     handleGenerateGroups,
