@@ -1,4 +1,6 @@
 import { useId } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FieldError, fieldBorderClass } from "../components/FieldError";
 import {
   BOW_TERMS,
   GRADE_LEVELS,
@@ -7,16 +9,16 @@ import {
   type CurriculumCompetency,
   type TleComponent,
 } from "../engine/types";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import {
   COMPONENT_LABELS,
   COMPONENT_SHORT_LABELS,
-  emptyCustomForm,
   formatGradeLabel,
-  formFromItem,
-  toggleArrayValue,
   useCurriculumWorkspace,
   type BowFilterMode,
 } from "../hooks/useCurriculumWorkspace";
+import { buildDeleteCustomCompetencyPrompt } from "../utils/confirmAction";
+import { buildDescribedBy } from "../utils/formValidation";
 
 const COMPONENT_BADGE_CLASSES: Record<TleComponent, string> = {
   ICT: "bg-tertiary-container text-on-tertiary-container",
@@ -70,6 +72,10 @@ function CompetencyBadges({
 const INPUT_CLASS =
   "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
+function validatedInputClass(invalid: boolean): string {
+  return `w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border text-body-md text-on-surface focus-visible:outline-2 focus-visible:outline-primary ${fieldBorderClass(invalid)}`;
+}
+
 interface CurriculumWorkspaceProps {
   onUseInDll?: (competencyId: string) => void;
   onUseInDlp?: (competencyId: string) => void;
@@ -83,6 +89,7 @@ export function CurriculumWorkspace({
 }: CurriculumWorkspaceProps = {}) {
   const headingId = useId();
   const baseId = useId();
+  const confirmDialog = useConfirmDialog();
 
   const {
     allCatalog,
@@ -107,17 +114,32 @@ export function CurriculumWorkspace({
     notesDraft,
     setNotesDraft,
     savingNotes,
+    customFormRef,
     showForm,
-    setShowForm,
     formState,
     setFormState,
+    customFieldErrors,
     savingCustom,
+    toggleNewCustomForm,
+    openEditCustomForm,
+    closeCustomForm,
+    validateCustomField,
+    updateCustomTextField,
+    toggleCustomGradeLevel,
+    toggleCustomQuarter,
     handleGradeChange,
     handleComponentChange,
     handleSaveNotes,
     handleSaveCustom,
     handleDeleteCustom,
   } = useCurriculumWorkspace();
+
+  const gradeLevelsErrId = `${baseId}-custom-grades-err`;
+  const quartersErrId = `${baseId}-custom-quarters-err`;
+  const topicErrId = `${baseId}-custom-topic-err`;
+  const csErrId = `${baseId}-custom-cs-err`;
+  const psErrId = `${baseId}-custom-ps-err`;
+  const lcErrId = `${baseId}-custom-lc-err`;
 
   return (
     <section
@@ -146,10 +168,7 @@ export function CurriculumWorkspace({
 
         <button
           type="button"
-          onClick={() => {
-            setFormState(emptyCustomForm());
-            setShowForm((prev) => !prev);
-          }}
+          onClick={toggleNewCustomForm}
           className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
         >
           <span
@@ -187,6 +206,8 @@ export function CurriculumWorkspace({
       {/* Add / Edit Custom Competency Form */}
       {showForm && (
         <form
+          ref={customFormRef}
+          noValidate
           onSubmit={(e) => void handleSaveCustom(e)}
           className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md"
         >
@@ -197,9 +218,27 @@ export function CurriculumWorkspace({
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
-            <fieldset className="flex flex-col gap-gutter-xs">
-              <legend className="font-label text-label-md text-on-surface mb-1">
-                Grade Level(s)
+            <fieldset
+              data-field-group="gradeLevels"
+              tabIndex={-1}
+              aria-describedby={buildDescribedBy(
+                null,
+                gradeLevelsErrId,
+                Boolean(customFieldErrors.gradeLevels),
+              )}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget)) {
+                  validateCustomField("gradeLevels");
+                }
+              }}
+              className={`flex flex-col gap-gutter-xs rounded p-gutter-sm border focus-visible:outline-2 focus-visible:outline-primary ${
+                customFieldErrors.gradeLevels
+                  ? "border-error bg-error-container/20"
+                  : "border-outline-variant/60"
+              }`}
+            >
+              <legend className="font-label text-label-md text-on-surface px-1">
+                Grade Level(s) <span aria-hidden="true">*</span>
               </legend>
               <div className="flex flex-wrap gap-gutter-sm">
                 {GRADE_LEVELS.map((g) => (
@@ -214,23 +253,48 @@ export function CurriculumWorkspace({
                     <input
                       type="checkbox"
                       checked={formState.gradeLevels.includes(g)}
-                      onChange={() =>
-                        setFormState((prev) => ({
-                          ...prev,
-                          gradeLevels: toggleArrayValue(prev.gradeLevels, g),
-                        }))
+                      aria-invalid={
+                        customFieldErrors.gradeLevels ? "true" : "false"
                       }
+                      aria-describedby={buildDescribedBy(
+                        null,
+                        gradeLevelsErrId,
+                        Boolean(customFieldErrors.gradeLevels),
+                      )}
+                      onChange={() => toggleCustomGradeLevel(g)}
                       className="accent-primary"
                     />
                     <span>G{g}</span>
                   </label>
                 ))}
               </div>
+              <FieldError
+                id={gradeLevelsErrId}
+                message={customFieldErrors.gradeLevels}
+              />
             </fieldset>
 
-            <fieldset className="flex flex-col gap-gutter-xs">
-              <legend className="font-label text-label-md text-on-surface mb-1">
-                Quarter(s)
+            <fieldset
+              data-field-group="quarters"
+              tabIndex={-1}
+              aria-describedby={buildDescribedBy(
+                null,
+                quartersErrId,
+                Boolean(customFieldErrors.quarters),
+              )}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget)) {
+                  validateCustomField("quarters");
+                }
+              }}
+              className={`flex flex-col gap-gutter-xs rounded p-gutter-sm border focus-visible:outline-2 focus-visible:outline-primary ${
+                customFieldErrors.quarters
+                  ? "border-error bg-error-container/20"
+                  : "border-outline-variant/60"
+              }`}
+            >
+              <legend className="font-label text-label-md text-on-surface px-1">
+                Quarter(s) <span aria-hidden="true">*</span>
               </legend>
               <div className="flex flex-wrap gap-gutter-sm">
                 {QUARTERS.map((q) => (
@@ -245,18 +309,25 @@ export function CurriculumWorkspace({
                     <input
                       type="checkbox"
                       checked={formState.quarters.includes(q)}
-                      onChange={() =>
-                        setFormState((prev) => ({
-                          ...prev,
-                          quarters: toggleArrayValue(prev.quarters, q),
-                        }))
+                      aria-invalid={
+                        customFieldErrors.quarters ? "true" : "false"
                       }
+                      aria-describedby={buildDescribedBy(
+                        null,
+                        quartersErrId,
+                        Boolean(customFieldErrors.quarters),
+                      )}
+                      onChange={() => toggleCustomQuarter(q)}
                       className="accent-primary"
                     />
                     <span>Q{q}</span>
                   </label>
                 ))}
               </div>
+              <FieldError
+                id={quartersErrId}
+                message={customFieldErrors.quarters}
+              />
             </fieldset>
 
             <div className="flex flex-col gap-gutter-xs">
@@ -316,20 +387,31 @@ export function CurriculumWorkspace({
               htmlFor={`${baseId}-custom-topic`}
               className="font-label text-label-md text-on-surface"
             >
-              Content Topic *
+              Content Topic <span aria-hidden="true">*</span>
             </label>
             <input
               id={`${baseId}-custom-topic`}
+              name="contentTopic"
               type="text"
               required
               value={formState.contentTopic}
+              aria-invalid={customFieldErrors.contentTopic ? "true" : "false"}
+              aria-describedby={buildDescribedBy(
+                null,
+                topicErrId,
+                Boolean(customFieldErrors.contentTopic),
+              )}
               onChange={(e) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  contentTopic: e.target.value,
-                }))
+                updateCustomTextField("contentTopic", e.target.value)
               }
-              className={INPUT_CLASS}
+              onBlur={() => validateCustomField("contentTopic")}
+              className={validatedInputClass(
+                Boolean(customFieldErrors.contentTopic),
+              )}
+            />
+            <FieldError
+              id={topicErrId}
+              message={customFieldErrors.contentTopic}
             />
           </div>
 
@@ -360,20 +442,33 @@ export function CurriculumWorkspace({
                 htmlFor={`${baseId}-custom-cs`}
                 className="font-label text-label-md text-on-surface"
               >
-                Content Standard *
+                Content Standard <span aria-hidden="true">*</span>
               </label>
               <textarea
                 id={`${baseId}-custom-cs`}
+                name="contentStandard"
                 rows={2}
                 required
                 value={formState.contentStandard}
-                onChange={(e) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    contentStandard: e.target.value,
-                  }))
+                aria-invalid={
+                  customFieldErrors.contentStandard ? "true" : "false"
                 }
-                className={INPUT_CLASS}
+                aria-describedby={buildDescribedBy(
+                  null,
+                  csErrId,
+                  Boolean(customFieldErrors.contentStandard),
+                )}
+                onChange={(e) =>
+                  updateCustomTextField("contentStandard", e.target.value)
+                }
+                onBlur={() => validateCustomField("contentStandard")}
+                className={validatedInputClass(
+                  Boolean(customFieldErrors.contentStandard),
+                )}
+              />
+              <FieldError
+                id={csErrId}
+                message={customFieldErrors.contentStandard}
               />
             </div>
 
@@ -382,20 +477,33 @@ export function CurriculumWorkspace({
                 htmlFor={`${baseId}-custom-ps`}
                 className="font-label text-label-md text-on-surface"
               >
-                Performance Standard *
+                Performance Standard <span aria-hidden="true">*</span>
               </label>
               <textarea
                 id={`${baseId}-custom-ps`}
+                name="performanceStandard"
                 rows={2}
                 required
                 value={formState.performanceStandard}
-                onChange={(e) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    performanceStandard: e.target.value,
-                  }))
+                aria-invalid={
+                  customFieldErrors.performanceStandard ? "true" : "false"
                 }
-                className={INPUT_CLASS}
+                aria-describedby={buildDescribedBy(
+                  null,
+                  psErrId,
+                  Boolean(customFieldErrors.performanceStandard),
+                )}
+                onChange={(e) =>
+                  updateCustomTextField("performanceStandard", e.target.value)
+                }
+                onBlur={() => validateCustomField("performanceStandard")}
+                className={validatedInputClass(
+                  Boolean(customFieldErrors.performanceStandard),
+                )}
+              />
+              <FieldError
+                id={psErrId}
+                message={customFieldErrors.performanceStandard}
               />
             </div>
           </div>
@@ -405,20 +513,33 @@ export function CurriculumWorkspace({
               htmlFor={`${baseId}-custom-lc`}
               className="font-label text-label-md text-on-surface"
             >
-              Learning Competency *
+              Learning Competency <span aria-hidden="true">*</span>
             </label>
             <textarea
               id={`${baseId}-custom-lc`}
+              name="learningCompetency"
               rows={2}
               required
               value={formState.learningCompetency}
-              onChange={(e) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  learningCompetency: e.target.value,
-                }))
+              aria-invalid={
+                customFieldErrors.learningCompetency ? "true" : "false"
               }
-              className={INPUT_CLASS}
+              aria-describedby={buildDescribedBy(
+                null,
+                lcErrId,
+                Boolean(customFieldErrors.learningCompetency),
+              )}
+              onChange={(e) =>
+                updateCustomTextField("learningCompetency", e.target.value)
+              }
+              onBlur={() => validateCustomField("learningCompetency")}
+              className={validatedInputClass(
+                Boolean(customFieldErrors.learningCompetency),
+              )}
+            />
+            <FieldError
+              id={lcErrId}
+              message={customFieldErrors.learningCompetency}
             />
           </div>
 
@@ -585,10 +706,7 @@ export function CurriculumWorkspace({
             </button>
             <button
               type="button"
-              onClick={() => {
-                setShowForm(false);
-                setFormState(emptyCustomForm());
-              }}
+              onClick={closeCustomForm}
               className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
             >
               Cancel
@@ -828,17 +946,21 @@ export function CurriculumWorkspace({
                     <div className="flex flex-wrap items-center gap-gutter-xs">
                       <button
                         type="button"
-                        onClick={() => {
-                          setFormState(formFromItem(selectedItem));
-                          setShowForm(true);
-                        }}
+                        onClick={() => openEditCustomForm(selectedItem)}
                         className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
                       >
                         Edit Competency
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleDeleteCustom(selectedItem)}
+                        onClick={() =>
+                          confirmDialog.requestConfirm(
+                            buildDeleteCustomCompetencyPrompt(
+                              selectedItem.contentTopic,
+                            ),
+                            () => handleDeleteCustom(selectedItem),
+                          )
+                        }
                         className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-error-container text-on-error-container border border-error/30 font-label text-label-md hover:opacity-90 focus-visible:outline-2 focus-visible:outline-error"
                       >
                         Delete
@@ -1039,6 +1161,12 @@ export function CurriculumWorkspace({
           </article>
         </div>
       )}
+
+      <ConfirmDialog
+        state={confirmDialog.state}
+        onConfirm={confirmDialog.confirm}
+        onCancel={confirmDialog.cancel}
+      />
     </section>
   );
 }
