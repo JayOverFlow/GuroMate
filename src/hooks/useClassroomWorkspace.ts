@@ -674,11 +674,10 @@ export function useClassroomWorkspace(
     );
     setGroupPlayback(initial);
 
-    if (initial.phase !== "animating" || !initial.plan) {
+    if (initial.phase !== "animating") {
       return;
     }
 
-    const plan = initial.plan;
     let currentState = initial;
     let lastRevealed = 0;
     let lastTickAt = -1;
@@ -687,6 +686,8 @@ export function useClassroomWorkspace(
     const stepFrame = (now: number) => {
       const nextState = advanceGroupPlayback(currentState, now - startedAt);
       if (
+        currentState.mode === "card-deal" &&
+        currentState.plan &&
         shouldPlayCardDealTick(
           lastRevealed,
           nextState.revealedCount,
@@ -696,14 +697,24 @@ export function useClassroomWorkspace(
       ) {
         if (canPlayCueRef.current(false)) {
           classroomAudio.playCardDeal(
-            nextState.revealedCount / plan.totalCards,
+            nextState.revealedCount / currentState.plan.totalCards,
           );
         }
         lastTickAt = now;
+      } else if (
+        currentState.mode === "group-yourselves" &&
+        currentState.mingleBeat === "mingle" &&
+        nextState.mingleBeat === "cluster" &&
+        nextState.phase === "animating"
+      ) {
+        if (canPlayCueRef.current(false)) {
+          classroomAudio.playClusterCue();
+        }
       }
 
       const changed =
         nextState.revealedCount !== lastRevealed ||
+        nextState.mingleBeat !== currentState.mingleBeat ||
         nextState.phase !== currentState.phase;
       currentState = nextState;
       lastRevealed = nextState.revealedCount;
