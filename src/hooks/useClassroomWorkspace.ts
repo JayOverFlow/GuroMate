@@ -23,7 +23,6 @@ import {
   type PickerAnimationMode,
 } from "../engine/classroomPreferences";
 import {
-  drawRandomStudent,
   filterPresentStudents,
   generateStudentGroups,
   swapGroupStudents,
@@ -41,6 +40,17 @@ import {
   startGroupPlayback,
   type GroupPlaybackState,
 } from "../engine/groupAnimation";
+import {
+  commitPendingDraw,
+  createInitialPickerState,
+  isPickerLocked,
+  normalizeAvailablePickerMode,
+  resetPickerPool,
+  sampleSlotReelWindow,
+  startPickerDraw,
+  type PickerLifecycleState,
+  type SlotReelWindow,
+} from "../engine/pickerAnimation";
 import { type ClassSection, type GradeLevel } from "../engine/types";
 import type { ClassroomTimerState } from "./useClassroomTimer";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
@@ -123,7 +133,7 @@ export function useClassroomWorkspace(
   );
 
   const [sections, setSections] = useState<ClassSection[]>([]);
-  const [selectedSectionId, setSelectedSectionId] = useState<string>("");
+  const [selectedSectionId, setSelectedSectionIdState] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<ClassroomStatusState | null>(null);
   const [showSectionForm, setShowSectionForm] = useState(false);
@@ -137,12 +147,29 @@ export function useClassroomWorkspace(
     () => new Set(),
   );
 
-  const [removePickedFromPool, setRemovePickedFromPool] = useState(true);
-  const [usedIndices, setUsedIndices] = useState<Set<number>>(() => new Set());
-  const [pickedStudent, setPickedStudent] = useState<RosterStudent | null>(
-    null,
+  const [removePickedFromPool, setRemovePickedFromPoolState] = useState(true);
+  const [pickerState, setPickerState] = useState<PickerLifecycleState>(
+    createInitialPickerState,
   );
-  const [poolExhausted, setPoolExhausted] = useState(false);
+  const pickerStateRef = useRef<PickerLifecycleState>(pickerState);
+  const pickerRafRef = useRef<number | null>(null);
+  const [pickerReelWindow, setPickerReelWindow] =
+    useState<SlotReelWindow | null>(null);
+  const [pickerLastLandedWindow, setPickerLastLandedWindow] =
+    useState<SlotReelWindow | null>(null);
+  const [pickerRevealCount, setPickerRevealCount] = useState(0);
+
+  const updatePickerState = useCallback((next: PickerLifecycleState) => {
+    pickerStateRef.current = next;
+    setPickerState(next);
+  }, []);
+
+  const cancelPickerFrame = useCallback(() => {
+    if (pickerRafRef.current !== null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(pickerRafRef.current);
+      pickerRafRef.current = null;
+    }
+  }, []);
 
   const [groupMode, setGroupMode] =
     useState<GroupGenerationOptions["mode"]>("count");
@@ -172,10 +199,11 @@ export function useClassroomWorkspace(
 
   useEffect(() => {
     return () => {
+      cancelPickerFrame();
       cancelGroupAnimation();
       classroomAudio.dispose();
     };
-  }, [cancelGroupAnimation, classroomAudio]);
+  }, [cancelPickerFrame, cancelGroupAnimation, classroomAudio]);
 
   useEffect(() => {
     if (prefersReducedMotion && groupPlayback.phase === "animating") {
@@ -203,6 +231,7 @@ export function useClassroomWorkspace(
 
   const setPickerAnimationMode = useCallback(
     (pickerMode: PickerAnimationMode) => {
+      if (isPickerLocked(pickerStateRef.current)) return;
       updatePreferences((prev) => ({ ...prev, pickerMode }));
     },
     [updatePreferences],
@@ -234,12 +263,33 @@ export function useClassroomWorkspace(
     if (!res.ok) throw new Error(await readErrorMessage(res));
     const list = (await res.json()) as ClassSection[];
     setSections(list);
-    setSelectedSectionId((prev) => {
+    setSelectedSectionIdState((prev) => {
       const target = preferredId ?? prev;
       if (target && list.some((s) => s.id === target)) return target;
       return list[0]?.id ?? "";
     });
   }, []);
+
+  const setSelectedSectionId = useCallback((id: string) => {
+    if (isPickerLocked(pickerStateRef.current)) return;
+    setSelectedSectionIdState(id);
+  }, []);
+
+  const setRemovePickedFromPool = useCallback((checked: boolean) => {
+    if (isPickerLocked(pickerStateRef.current)) return;
+    setRemovePickedFromPoolState(checked);
+  }, []);
+
+  const setPoolExhausted = useCallback(
+    (exhausted: boolean) => {
+      if (isPickerLocked(pickerStateRef.current)) return;
+      updatePickerState({
+        ...pickerStateRef.current,
+        poolExhausted: exhausted,
+      });
+    },
+    [updatePickerState],
+  );
 
   useEffect(() => {
     let active = true;
@@ -261,16 +311,18 @@ export function useClassroomWorkspace(
   );
 
   const resetRosterState = useCallback(() => {
+    cancelPickerFrame();
     cancelGroupAnimation();
     setAbsentIndices(new Set());
-    setUsedIndices(new Set());
-    setPickedStudent(null);
-    setPoolExhausted(false);
+    updatePickerState(createInitialPickerState());
+    setPickerReelWindow(null);
+    setPickerLastLandedWindow(null);
+    setPickerRevealCount(0);
     setGroups([]);
     setSwapSelection(null);
     setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
     setGroupGenerationCount(0);
-  }, [cancelGroupAnimation]);
+  }, [cancelPickerFrame, cancelGroupAnimation, updatePickerState]);
 
   useEffect(() => {
     resetRosterState();
@@ -283,6 +335,11 @@ export function useClassroomWorkspace(
         : [],
     [activeSection, absentIndices],
   );
+
+  const usedIndices = pickerState.usedIndices;
+  const pickedStudent = pickerState.pickedStudent;
+  const poolExhausted = pickerState.poolExhausted;
+  const isPickerAnimating = isPickerLocked(pickerState);
 
   const remainingInPoolCount = useMemo(() => {
     if (!removePickedFromPool) return presentStudents.length;
@@ -350,6 +407,7 @@ export function useClassroomWorkspace(
 
   async function handleSaveSection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isPickerLocked(pickerStateRef.current)) return;
     setSavingSection(true);
     setStatus(null);
     try {
@@ -389,7 +447,7 @@ export function useClassroomWorkspace(
   }
 
   async function handleDeleteSection() {
-    if (!activeSection) return;
+    if (!activeSection || isPickerLocked(pickerStateRef.current)) return;
     setStatus(null);
     try {
       const res = await fetch(
@@ -410,7 +468,7 @@ export function useClassroomWorkspace(
   }
 
   function toggleAbsent(index: number) {
-    if (isGroupAnimating) return;
+    if (isPickerLocked(pickerStateRef.current) || isGroupAnimating) return;
     setAbsentIndices((prev) => {
       const next = new Set(prev);
       if (next.has(index)) {
@@ -421,37 +479,166 @@ export function useClassroomWorkspace(
       return next;
     });
     setPoolExhausted(false);
+    setPickerLastLandedWindow(null);
     setGroups([]);
     setSwapSelection(null);
     setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
   }
 
   function resetAllAttendance() {
-    if (isGroupAnimating) return;
+    if (isPickerLocked(pickerStateRef.current) || isGroupAnimating) return;
     setAbsentIndices(new Set());
     setPoolExhausted(false);
+    setPickerLastLandedWindow(null);
     setGroups([]);
     setSwapSelection(null);
     setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
   }
 
+  const canPlayClassroomCue = useCallback(
+    (isInstant = false) =>
+      shouldPlayClassroomCue({
+        soundEnabled: preferences.soundEnabled,
+        prefersReducedMotion,
+        isInstant,
+      }),
+    [preferences.soundEnabled, prefersReducedMotion],
+  );
+  const canPlayClassroomCueRef = useRef(canPlayClassroomCue);
+  canPlayClassroomCueRef.current = canPlayClassroomCue;
+  canPlayCueRef.current = canPlayClassroomCue;
+
+  const finalizePickerDraw = useCallback(
+    (expectedDrawId?: number, playChime = true) => {
+      cancelPickerFrame();
+      const pending = pickerStateRef.current.pendingDraw;
+      const landedWindow = pending
+        ? sampleSlotReelWindow(pending.plan, 1)
+        : null;
+      const committed = commitPendingDraw(
+        pickerStateRef.current,
+        expectedDrawId,
+      );
+      if (!committed.committed) return;
+
+      updatePickerState(committed.state);
+      setPickerReelWindow(null);
+      setPickerLastLandedWindow(landedWindow);
+      setPickerRevealCount((count) => count + 1);
+      if (playChime && canPlayClassroomCueRef.current(false)) {
+        classroomAudio.playRevealChime();
+      }
+    },
+    [cancelPickerFrame, classroomAudio, updatePickerState],
+  );
+
+  useEffect(() => {
+    const pendingDraw = pickerState.pendingDraw;
+    if (!pendingDraw) return;
+
+    if (prefersReducedMotion) {
+      finalizePickerDraw(pendingDraw.drawId, false);
+      return;
+    }
+
+    let cancelled = false;
+    const startTime = performance.now();
+    let lastStepIndex = 0;
+    let lastTickSoundAt = 0;
+
+    if (
+      pendingDraw.plan.isSingleStudentSpotlight &&
+      canPlayClassroomCueRef.current(false)
+    ) {
+      classroomAudio.playReelTick(0.85);
+    }
+
+    const tick = (now: number) => {
+      if (cancelled) return;
+      const progress = Math.min(
+        1,
+        (now - startTime) / pendingDraw.plan.durationMs,
+      );
+      const frame = sampleSlotReelWindow(pendingDraw.plan, progress);
+
+      if (
+        !pendingDraw.plan.isSingleStudentSpotlight &&
+        frame.stepIndex > lastStepIndex
+      ) {
+        lastStepIndex = frame.stepIndex;
+        if (
+          now - lastTickSoundAt >= 42 &&
+          canPlayClassroomCueRef.current(false)
+        ) {
+          lastTickSoundAt = now;
+          classroomAudio.playReelTick(frame.progress);
+        }
+      }
+
+      if (frame.isComplete) {
+        finalizePickerDraw(pendingDraw.drawId, true);
+        return;
+      }
+
+      setPickerReelWindow(frame);
+      pickerRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    pickerRafRef.current = window.requestAnimationFrame(tick);
+
+    return () => {
+      cancelled = true;
+      cancelPickerFrame();
+    };
+  }, [
+    pickerState.pendingDraw,
+    prefersReducedMotion,
+    classroomAudio,
+    cancelPickerFrame,
+    finalizePickerDraw,
+  ]);
+
   function handlePickStudent() {
-    const result = drawRandomStudent(
-      presentStudents,
-      usedIndices,
-      removePickedFromPool,
+    if (isPickerLocked(pickerStateRef.current)) return;
+
+    const effectiveMode = resolveEffectivePickerMode(
+      preferences.pickerMode,
+      prefersReducedMotion,
     );
-    setUsedIndices(result.nextUsedIndices);
-    setPoolExhausted(result.exhausted);
-    if (result.picked) {
-      setPickedStudent(result.picked);
+    const playbackMode = normalizeAvailablePickerMode(effectiveMode);
+    if (canPlayClassroomCue(playbackMode === "instant")) {
+      classroomAudio.unlock();
+    }
+
+    const result = startPickerDraw(pickerStateRef.current, {
+      presentStudents,
+      removeFromPool: removePickedFromPool,
+      effectiveMode,
+    });
+
+    if (result.outcome === "ignored-locked") return;
+    updatePickerState(result.state);
+
+    if (result.outcome === "instant-revealed") {
+      setPickerReelWindow(null);
+      setPickerLastLandedWindow(null);
+      setPickerRevealCount((count) => count + 1);
+    } else if (result.outcome === "animating") {
+      setPickerLastLandedWindow(null);
+      setPickerReelWindow(sampleSlotReelWindow(result.pendingDraw.plan, 0));
     }
   }
 
+  function handleSkipPicker() {
+    finalizePickerDraw(undefined, true);
+  }
+
   function handleResetPool() {
-    setUsedIndices(new Set());
-    setPickedStudent(null);
-    setPoolExhausted(false);
+    if (isPickerLocked(pickerStateRef.current)) return;
+    updatePickerState(resetPickerPool(pickerStateRef.current));
+    setPickerReelWindow(null);
+    setPickerLastLandedWindow(null);
+    setPickerRevealCount(0);
   }
 
   function handleGenerateGroups() {
@@ -646,16 +833,6 @@ export function useClassroomWorkspace(
     preferences.groupMode,
     prefersReducedMotion,
   );
-  const canPlayClassroomCue = useCallback(
-    (isInstant = false) =>
-      shouldPlayClassroomCue({
-        soundEnabled: preferences.soundEnabled,
-        prefersReducedMotion,
-        isInstant,
-      }),
-    [preferences.soundEnabled, prefersReducedMotion],
-  );
-  canPlayCueRef.current = canPlayClassroomCue;
 
   return {
     stageRefs,
@@ -693,6 +870,12 @@ export function useClassroomWorkspace(
     poolExhausted,
     setPoolExhausted,
     remainingInPoolCount,
+    isPickerAnimating,
+    isPickerSingleSpotlight:
+      pickerState.pendingDraw?.plan.isSingleStudentSpotlight ?? false,
+    pickerReelWindow,
+    pickerLastLandedWindow,
+    pickerRevealCount,
     groupMode,
     setGroupMode,
     groupValue,
@@ -710,6 +893,7 @@ export function useClassroomWorkspace(
     toggleAbsent,
     resetAllAttendance,
     handlePickStudent,
+    handleSkipPicker,
     handleResetPool,
     handleGenerateGroups,
     handleSkipGroupAnimation,

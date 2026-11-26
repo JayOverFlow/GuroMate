@@ -12,6 +12,7 @@ import {
   useClassroomWorkspace,
 } from "../hooks/useClassroomWorkspace";
 import { GroupMakerStage } from "./classroom/GroupMakerStage";
+import { PickerStage } from "./classroom/PickerStage";
 
 interface ClassroomWorkspaceProps {
   timer: ClassroomTimerState;
@@ -36,7 +37,9 @@ export function ClassroomWorkspace({
     tabRefs,
     preferences,
     prefersReducedMotion,
+    effectivePickerMode,
     soundEnabled,
+    setPickerAnimationMode,
     setGroupAnimationMode,
     toggleSound,
     classroomAudio,
@@ -63,6 +66,11 @@ export function ClassroomWorkspace({
     poolExhausted,
     setPoolExhausted,
     remainingInPoolCount,
+    isPickerAnimating,
+    isPickerSingleSpotlight,
+    pickerReelWindow,
+    pickerLastLandedWindow,
+    pickerRevealCount,
     groupMode,
     setGroupMode,
     groupValue,
@@ -79,6 +87,7 @@ export function ClassroomWorkspace({
     toggleAbsent,
     resetAllAttendance,
     handlePickStudent,
+    handleSkipPicker,
     handleResetPool,
     handleGenerateGroups,
     handleSkipGroupAnimation,
@@ -141,7 +150,7 @@ export function ClassroomWorkspace({
               id={`${baseId}-active-section`}
               aria-label="Active Class Section"
               value={selectedSectionId}
-              disabled={isGroupAnimating}
+              disabled={isPickerAnimating || isGroupAnimating}
               onChange={(e) => setSelectedSectionId(e.target.value)}
               className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
             >
@@ -158,7 +167,7 @@ export function ClassroomWorkspace({
             <>
               <button
                 type="button"
-                disabled={isGroupAnimating}
+                disabled={isPickerAnimating || isGroupAnimating}
                 onClick={() => {
                   setSectionForm(formFromSection(activeSection));
                   setShowSectionForm(true);
@@ -175,7 +184,7 @@ export function ClassroomWorkspace({
               </button>
               <button
                 type="button"
-                disabled={isGroupAnimating}
+                disabled={isPickerAnimating || isGroupAnimating}
                 onClick={() => void handleDeleteSection()}
                 className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-error disabled:opacity-50"
               >
@@ -192,7 +201,7 @@ export function ClassroomWorkspace({
 
           <button
             type="button"
-            disabled={isGroupAnimating}
+            disabled={isPickerAnimating || isGroupAnimating}
             onClick={() => {
               setSectionForm(emptySectionForm());
               setShowSectionForm((prev) =>
@@ -544,145 +553,57 @@ export function ClassroomWorkspace({
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter-lg items-start">
-              {/* Spotlight Draw Card (Projector View Stage) */}
-              <div
-                ref={(el) => {
+              {/* Random Student Picker Stage (Projector View + Slot Machine / Instant) */}
+              <PickerStage
+                stageRef={(el) => {
                   stageRefs.current.picker = el;
                 }}
-                role={isPickerOverlay ? "dialog" : undefined}
-                aria-modal={isPickerOverlay ? true : undefined}
-                aria-label={
-                  isPickerOverlay
-                    ? "Random Student Picker Projector View"
-                    : undefined
+                isProjector={isPickerProjector}
+                isOverlay={isPickerOverlay}
+                sectionName={activeSection.sectionName}
+                totalStudents={activeSection.students.length}
+                presentStudents={presentStudents}
+                remainingInPoolCount={remainingInPoolCount}
+                removePickedFromPool={removePickedFromPool}
+                onRemovePickedFromPoolChange={(checked) => {
+                  setRemovePickedFromPool(checked);
+                  setPoolExhausted(false);
+                }}
+                pickerMode={preferences.pickerMode}
+                effectivePickerMode={effectivePickerMode}
+                prefersReducedMotion={prefersReducedMotion}
+                onPickerModeChange={setPickerAnimationMode}
+                pickedStudent={pickedStudent}
+                poolExhausted={poolExhausted}
+                isAnimating={isPickerAnimating}
+                isSingleStudentSpotlight={isPickerSingleSpotlight}
+                reelWindow={pickerReelWindow}
+                lastLandedWindow={pickerLastLandedWindow}
+                revealCount={pickerRevealCount}
+                onPickStudent={handlePickStudent}
+                onSkip={handleSkipPicker}
+                onResetPool={handleResetPool}
+                soundControl={
+                  <SoundToggleButton
+                    soundEnabled={soundEnabled}
+                    prefersReducedMotion={prefersReducedMotion}
+                    onToggle={handleSoundToggle}
+                  />
                 }
-                tabIndex={isPickerOverlay ? -1 : undefined}
-                className={`classroom-projector-stage lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col items-center text-center gap-gutter-md ${
-                  isPickerOverlay ? OVERLAY_STAGE_CLASS : ""
-                }`}
-              >
-                <div
-                  className={`w-full flex flex-col items-center gap-gutter-md ${
-                    isPickerProjector ? "max-w-3xl mx-auto my-auto" : ""
-                  }`}
-                >
-                  <div className="w-full flex flex-wrap items-center justify-between gap-gutter-sm">
-                    <span className="font-label text-label-md text-on-surface-variant uppercase tracking-wider">
-                      {isPickerProjector
-                        ? "Random Student Picker"
-                        : "Selected Student"}
-                    </span>
-                    <div className="flex items-center gap-gutter-xs">
-                      {isPickerProjector && (
-                        <SoundToggleButton
-                          soundEnabled={soundEnabled}
-                          prefersReducedMotion={prefersReducedMotion}
-                          onToggle={handleSoundToggle}
-                        />
-                      )}
-                      <ProjectorToggleButton
-                        active={isPickerProjector}
-                        onToggle={() => void toggleProjectorView("picker")}
-                      />
-                    </div>
-                  </div>
-
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className={`w-full rounded-md bg-surface-container-low border border-primary flex flex-col items-center gap-gutter-xs ${
-                      isPickerProjector
-                        ? "py-gutter-xl px-gutter-xl"
-                        : "py-gutter-lg px-gutter-md"
-                    }`}
-                  >
-                    {poolExhausted ? (
-                      <p className="font-title text-title-lg text-on-surface-variant">
-                        {presentStudents.length === 0
-                          ? "All students are marked absent."
-                          : "Every present student has been called. Reset pool to draw again."}
-                      </p>
-                    ) : pickedStudent ? (
-                      <p
-                        className="font-display font-bold text-primary text-balance leading-tight"
-                        style={
-                          isPickerProjector
-                            ? { fontSize: "clamp(2.5rem, 8vw, 5.5rem)" }
-                            : undefined
-                        }
-                      >
-                        <span
-                          className={
-                            isPickerProjector ? "" : "text-display-lg"
-                          }
-                        >
-                          {pickedStudent.name}
-                        </span>
-                      </p>
-                    ) : (
-                      <p className="font-title text-title-lg text-on-surface-variant">
-                        Ready to pick a student
-                      </p>
-                    )}
-                    <span className="font-body text-body-sm text-on-surface-variant">
-                      {activeSection.sectionName} · Present:{" "}
-                      {presentStudents.length}/{activeSection.students.length} ·
-                      Pool remaining: {remainingInPoolCount}
-                    </span>
-                  </div>
-
-                  <label className="inline-flex items-center gap-gutter-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={removePickedFromPool}
-                      onChange={(e) => {
-                        setRemovePickedFromPool(e.target.checked);
-                        setPoolExhausted(false);
-                      }}
-                      className="accent-primary"
-                    />
-                    <span className="font-body text-body-sm text-on-surface">
-                      Remove picked student from pool until reset (no repeats)
-                    </span>
-                  </label>
-
-                  <div className="flex flex-wrap justify-center items-center gap-gutter-sm pt-gutter-xs">
-                    <button
-                      type="button"
-                      disabled={presentStudents.length === 0}
-                      onClick={handlePickStudent}
-                      className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
-                    >
-                      <span
-                        className="material-symbols-outlined text-title-md"
-                        aria-hidden="true"
-                      >
-                        casino
-                      </span>
-                      <span>Pick Random Student</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleResetPool}
-                      className="shrink-0 whitespace-nowrap inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-lg text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
-                    >
-                      <span
-                        className="material-symbols-outlined text-title-md"
-                        aria-hidden="true"
-                      >
-                        refresh
-                      </span>
-                      <span>Reset Pool</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
+                projectorControl={
+                  <ProjectorToggleButton
+                    active={isPickerProjector}
+                    onToggle={() => void toggleProjectorView("picker")}
+                  />
+                }
+              />
 
               {/* Roster Attendance & Recitation Pool */}
               <AttendancePoolGrid
                 students={activeSection.students}
                 absentIndices={absentIndices}
                 usedIndices={usedIndices}
+                disabled={isPickerAnimating}
                 onToggle={toggleAbsent}
                 onResetAll={resetAllAttendance}
               />
