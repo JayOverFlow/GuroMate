@@ -11,6 +11,7 @@ export interface GroupPlaybackState {
   minglePlan: MingleClusterPlan | null;
   mingleBeat: MingleClusterBeat | null;
   revealedCount: number;
+  elapsedMs: number;
 }
 
 export const INITIAL_GROUP_PLAYBACK_STATE: Readonly<GroupPlaybackState> = {
@@ -20,6 +21,7 @@ export const INITIAL_GROUP_PLAYBACK_STATE: Readonly<GroupPlaybackState> = {
   minglePlan: null,
   mingleBeat: null,
   revealedCount: 0,
+  elapsedMs: 0,
 };
 
 export interface CardDealStep {
@@ -29,6 +31,14 @@ export interface CardDealStep {
   dealOrder: number;
   revealAtMs: number;
 }
+
+export interface InFlightCardStep {
+  step: CardDealStep;
+  launchAtMs: number;
+  progress: number;
+}
+
+export type SolitaireCascadeTier = "comfortable" | "standard" | "compact";
 
 export interface CardDealPlan {
   steps: readonly CardDealStep[];
@@ -79,10 +89,11 @@ export interface MingleClusterPlan {
   totalDurationMs: number;
 }
 
-export const MIN_CARD_DEAL_DURATION_MS = 2500;
-export const MAX_CARD_DEAL_DURATION_MS = 3500;
+export const MIN_CARD_DEAL_DURATION_MS = 3000;
+export const MAX_CARD_DEAL_DURATION_MS = 4000;
+export const CARD_FLIGHT_DURATION_MS = 340;
 const SINGLE_CARD_DURATION_MS = 600;
-const INITIAL_DEAL_DELAY_MS = 120;
+const INITIAL_DEAL_DELAY_MS = 360;
 const CARD_SETTLE_MS = 240;
 
 function round2(value: number): number {
@@ -116,9 +127,11 @@ function computeMingleTiming(totalStudents: number): {
       totalDurationMs: SINGLE_CARD_DURATION_MS,
     };
   }
+  const minMingleDurationMs = 2500;
+  const maxMingleDurationMs = 3500;
   const totalDurationMs = Math.max(
-    MIN_CARD_DEAL_DURATION_MS,
-    Math.min(MAX_CARD_DEAL_DURATION_MS - 100, 2550 + totalStudents * 17),
+    minMingleDurationMs,
+    Math.min(maxMingleDurationMs - 100, 2550 + totalStudents * 17),
   );
   const mingleDurationMs = Math.round(totalDurationMs * 0.42);
   return {
@@ -286,7 +299,7 @@ function computeAdaptiveDurationMs(totalCards: number): number {
   if (totalCards === 1) return SINGLE_CARD_DURATION_MS;
   return Math.max(
     MIN_CARD_DEAL_DURATION_MS,
-    Math.min(MAX_CARD_DEAL_DURATION_MS - 100, 2400 + totalCards * 22),
+    Math.min(MAX_CARD_DEAL_DURATION_MS - 100, 2850 + totalCards * 22),
   );
 }
 
@@ -374,6 +387,45 @@ export function getRevealedCardCount(
   return count;
 }
 
+/** Returns cards currently flying from the central Dealer Deck to their group slots. */
+export function getInFlightCardSteps(
+  plan: CardDealPlan,
+  elapsedMs: number,
+  flightDurationMs = CARD_FLIGHT_DURATION_MS,
+): InFlightCardStep[] {
+  if (
+    plan.totalCards === 0 ||
+    elapsedMs < 0 ||
+    elapsedMs >= plan.totalDurationMs ||
+    flightDurationMs <= 0
+  ) {
+    return [];
+  }
+  const active: InFlightCardStep[] = [];
+  for (const step of plan.steps) {
+    const launchAtMs = Math.max(0, step.revealAtMs - flightDurationMs);
+    if (elapsedMs < launchAtMs) {
+      break;
+    }
+    if (elapsedMs < step.revealAtMs) {
+      const span = step.revealAtMs - launchAtMs;
+      const progress = span > 0 ? clampUnit((elapsedMs - launchAtMs) / span) : 1;
+      active.push({ step, launchAtMs, progress });
+    }
+  }
+  return active;
+}
+
+/** Selects Solitaire vertical cascade overlap density so small and 35-50 student rosters stay legible. */
+export function getSolitaireCascadeTier(
+  totalStudents: number,
+  maxGroupSize: number,
+): SolitaireCascadeTier {
+  if (totalStudents >= 33 || maxGroupSize >= 8) return "compact";
+  if (totalStudents >= 17 || maxGroupSize >= 6) return "standard";
+  return "comfortable";
+}
+
 /** Returns how many cards still remain in the central shuffled deck. */
 export function getRemainingDeckCount(
   plan: CardDealPlan,
@@ -423,6 +475,7 @@ export function startGroupPlayback(
       minglePlan: null,
       mingleBeat: null,
       revealedCount: totalCards,
+      elapsedMs: 0,
     };
   }
 
@@ -434,6 +487,7 @@ export function startGroupPlayback(
       minglePlan: createMingleClusterPlan(groups, random),
       mingleBeat: "mingle",
       revealedCount: 0,
+      elapsedMs: 0,
     };
   }
 
@@ -444,6 +498,7 @@ export function startGroupPlayback(
     minglePlan: null,
     mingleBeat: null,
     revealedCount: 0,
+    elapsedMs: 0,
   };
 }
 
@@ -462,6 +517,7 @@ export function advanceGroupPlayback(
         phase: "settled",
         mingleBeat: "cluster",
         revealedCount: state.minglePlan.totalStudents,
+        elapsedMs: state.minglePlan.totalDurationMs,
       };
     }
     const nextBeat = getMingleClusterBeat(state.minglePlan, elapsedMs);
@@ -471,6 +527,7 @@ export function advanceGroupPlayback(
     return {
       ...state,
       mingleBeat: nextBeat,
+      elapsedMs: Math.max(0, elapsedMs),
     };
   }
 
@@ -482,11 +539,13 @@ export function advanceGroupPlayback(
       ...state,
       phase: "settled",
       revealedCount: state.plan.totalCards,
+      elapsedMs: state.plan.totalDurationMs,
     };
   }
   return {
     ...state,
     revealedCount: getRevealedCardCount(state.plan, elapsedMs),
+    elapsedMs: Math.max(0, elapsedMs),
   };
 }
 
@@ -502,6 +561,7 @@ export function skipGroupPlayback(
       phase: "settled",
       mingleBeat: "cluster",
       revealedCount: state.minglePlan.totalStudents,
+      elapsedMs: state.minglePlan.totalDurationMs,
     };
   }
   if (!state.plan) {
@@ -511,6 +571,7 @@ export function skipGroupPlayback(
     ...state,
     phase: "settled",
     revealedCount: state.plan.totalCards,
+    elapsedMs: state.plan.totalDurationMs,
   };
 }
 

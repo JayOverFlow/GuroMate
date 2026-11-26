@@ -1,4 +1,10 @@
-import type { CSSProperties, ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   resolveEffectiveGroupMode,
   type GroupAnimationMode,
@@ -9,10 +15,13 @@ import type {
   RosterStudent,
 } from "../../engine/classroomTools";
 import {
+  getInFlightCardSteps,
   getRemainingDeckCount,
+  getSolitaireCascadeTier,
   isGroupCardRevealed,
   type ChipDensityTier,
   type GroupPlaybackState,
+  type SolitaireCascadeTier,
 } from "../../engine/groupAnimation";
 import { OVERLAY_STAGE_CLASS } from "./projectorStyles";
 
@@ -61,6 +70,88 @@ const CHIP_SIZE_CLASS: Record<
     projector: "px-2.5 py-1 text-body-sm max-w-[154px]",
   },
 };
+
+const SOLITAIRE_SUITS = ["♠", "♦", "♣", "♥"] as const;
+
+interface SolitaireCascadeStyle {
+  overlap: string;
+  apron: string;
+  lastApron: string;
+  headerPad: string;
+  nameText: string;
+  slotStepPx: number;
+}
+
+const SOLITAIRE_CASCADE_STYLES: Record<
+  SolitaireCascadeTier,
+  { inline: SolitaireCascadeStyle; projector: SolitaireCascadeStyle }
+> = {
+  comfortable: {
+    inline: {
+      overlap: "-mt-6",
+      apron: "h-7",
+      lastApron: "h-12",
+      headerPad: "px-3 py-2",
+      nameText: "text-body-md",
+      slotStepPx: 42,
+    },
+    projector: {
+      overlap: "-mt-7",
+      apron: "h-8",
+      lastApron: "h-14",
+      headerPad: "px-3.5 py-2.5",
+      nameText: "text-body-lg",
+      slotStepPx: 50,
+    },
+  },
+  standard: {
+    inline: {
+      overlap: "-mt-4",
+      apron: "h-5",
+      lastApron: "h-9",
+      headerPad: "px-2.5 py-1.5",
+      nameText: "text-body-sm",
+      slotStepPx: 34,
+    },
+    projector: {
+      overlap: "-mt-5",
+      apron: "h-6",
+      lastApron: "h-11",
+      headerPad: "px-3 py-2",
+      nameText: "text-body-md",
+      slotStepPx: 42,
+    },
+  },
+  compact: {
+    inline: {
+      overlap: "-mt-3",
+      apron: "h-4",
+      lastApron: "h-7",
+      headerPad: "px-2.5 py-1",
+      nameText: "text-body-sm",
+      slotStepPx: 28,
+    },
+    projector: {
+      overlap: "-mt-3.5",
+      apron: "h-5",
+      lastApron: "h-8",
+      headerPad: "px-3 py-1.5",
+      nameText: "text-body-md",
+      slotStepPx: 34,
+    },
+  },
+};
+
+interface DealFlightGeometry {
+  deckX: number;
+  deckY: number;
+  targets: Array<{ x: number; topY: number; width: number }>;
+}
+
+function easeOutCubic(t: number): number {
+  const inv = 1 - t;
+  return 1 - inv * inv * inv;
+}
 
 export interface GroupMakerStageProps {
   baseId: string;
@@ -120,9 +211,91 @@ export function GroupMakerStage({
     (sum, group) => sum + group.length,
     0,
   );
+  const maxGroupSize = groups.reduce(
+    (max, group) => Math.max(max, group.length),
+    0,
+  );
+  const isCardDealAnimating =
+    isAnimating && playback.mode === "card-deal" && playback.plan !== null;
+  const isSolitaireLayout =
+    isCardDealAnimating || (!isAnimating && selectedUiMode === "card-deal");
+  const inFlightCards =
+    isCardDealAnimating && playback.plan
+      ? getInFlightCardSteps(playback.plan, playback.elapsedMs)
+      : [];
   const remainingCards = playback.plan
-    ? getRemainingDeckCount(playback.plan, playback.revealedCount)
+    ? getRemainingDeckCount(
+        playback.plan,
+        playback.revealedCount + inFlightCards.length,
+      )
     : 0;
+  const deckThicknessLayers =
+    playback.plan && remainingCards > 0
+      ? Math.min(
+          4,
+          Math.max(1, Math.ceil((remainingCards / playback.plan.totalCards) * 4)),
+        )
+      : 0;
+  const solitaireTier = getSolitaireCascadeTier(
+    totalStudentsInGroups,
+    maxGroupSize,
+  );
+  const solitaireStyle = isProjector
+    ? SOLITAIRE_CASCADE_STYLES[solitaireTier].projector
+    : SOLITAIRE_CASCADE_STYLES[solitaireTier].inline;
+
+  const dealStageRef = useRef<HTMLDivElement | null>(null);
+  const dealerDeckRef = useRef<HTMLDivElement | null>(null);
+  const groupSectionRefs = useRef<Array<HTMLElement | null>>([]);
+  const [flightGeometry, setFlightGeometry] =
+    useState<DealFlightGeometry | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isCardDealAnimating || prefersReducedMotion) {
+      setFlightGeometry(null);
+      return;
+    }
+
+    const measure = () => {
+      const stageEl = dealStageRef.current;
+      const deckEl = dealerDeckRef.current;
+      if (!stageEl || !deckEl) return;
+      const stageRect = stageEl.getBoundingClientRect();
+      const deckRect = deckEl.getBoundingClientRect();
+      const targets = groups.map((_, groupIndex) => {
+        const sectionEl = groupSectionRefs.current[groupIndex];
+        if (!sectionEl) {
+          return {
+            x: stageRect.width / 2,
+            topY: deckRect.bottom - stageRect.top + 80,
+            width: 180,
+          };
+        }
+        const secRect = sectionEl.getBoundingClientRect();
+        return {
+          x: secRect.left - stageRect.left + secRect.width / 2,
+          topY: secRect.top - stageRect.top + (isProjector ? 66 : 56),
+          width: Math.max(120, secRect.width - 28),
+        };
+      });
+      setFlightGeometry({
+        deckX: deckRect.left - stageRect.left + deckRect.width / 2,
+        deckY: deckRect.top - stageRect.top + deckRect.height / 2,
+        targets,
+      });
+    };
+
+    measure();
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [
+    isCardDealAnimating,
+    prefersReducedMotion,
+    groups,
+    isProjector,
+    generationCount,
+  ]);
   const minglePlan =
     isAnimating && playback.mode === "group-yourselves"
       ? playback.minglePlan
@@ -269,7 +442,7 @@ export function GroupMakerStage({
         </div>
 
         {groups.length > 0 ? (
-          <div className="flex flex-col gap-gutter-md">
+          <div ref={dealStageRef} className="relative flex flex-col gap-gutter-md">
             <div className="min-h-11 flex flex-wrap items-center justify-between gap-gutter-sm">
               {isAnimating ? (
                 <>
@@ -312,22 +485,55 @@ export function GroupMakerStage({
                         </span>
                       </div>
                     ) : (
-                      <div className="classroom-deck-badge inline-flex items-center gap-gutter-sm px-gutter-md py-gutter-xs rounded-full bg-secondary-container/25 border border-secondary/40 text-on-secondary-container">
-                        <span
-                          className="inline-flex items-center justify-center w-7 h-7 rounded bg-primary text-on-primary"
+                      <div className="inline-flex items-center gap-gutter-md px-gutter-md py-gutter-xs rounded-md bg-surface-container-low border border-outline-variant shadow-xs">
+                        <div
+                          ref={dealerDeckRef}
                           aria-hidden="true"
+                          className={`relative shrink-0 ${
+                            isProjector ? "w-14 h-20" : "w-11 h-16"
+                          }`}
                         >
-                          <span className="material-symbols-outlined text-title-md">
-                            style
+                          {deckThicknessLayers > 0 ? (
+                            Array.from({ length: deckThicknessLayers }).map(
+                              (_, layerIdx) => {
+                                const isTop =
+                                  layerIdx === deckThicknessLayers - 1;
+                                const offsetPx =
+                                  (deckThicknessLayers - 1 - layerIdx) * 2.5;
+                                return (
+                                  <div
+                                    key={layerIdx}
+                                    style={{
+                                      transform: `translate3d(${offsetPx}px, ${offsetPx}px, 0)`,
+                                    }}
+                                    className={`absolute inset-0 rounded border border-surface-container-lowest/80 bg-primary classroom-dealer-card-back shadow-xs flex items-center justify-center ${
+                                      isTop ? "classroom-dealer-deck-top" : ""
+                                    }`}
+                                  >
+                                    {isTop && (
+                                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-surface-container-lowest/15 border border-surface-container-lowest/35 text-on-primary">
+                                        <span className="material-symbols-outlined text-body-md">
+                                          style
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              },
+                            )
+                          ) : (
+                            <div className="absolute inset-0 rounded border border-dashed border-outline-variant/70 bg-surface-container/60" />
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-title text-label-lg text-on-surface">
+                            Dealer Deck
                           </span>
-                        </span>
-                        <span className="font-label text-label-md text-on-surface">
-                          Shuffled Deck
-                        </span>
-                        <span className="px-gutter-sm py-0.5 rounded-full bg-secondary text-on-secondary font-mono text-label-sm tabular-nums">
-                          {remainingCards}{" "}
-                          {remainingCards === 1 ? "card" : "cards"} left
-                        </span>
+                          <span className="inline-flex items-center self-start px-gutter-sm py-0.5 rounded-full bg-secondary text-on-secondary font-mono text-label-sm tabular-nums">
+                            {remainingCards}{" "}
+                            {remainingCards === 1 ? "card" : "cards"} left
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -479,105 +685,409 @@ export function GroupMakerStage({
                 })}
               </div>
             ) : (
-              <div
-                className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md ${
-                  settledFromMingle ? "classroom-group-settle-in" : ""
-                }`}
-              >
-                {groups.map((group, groupIndex) => {
-                  const dealtInGroup = isAnimating
-                    ? group.reduce(
-                        (count, _student, studentIndex) =>
-                          count +
-                          (isGroupCardRevealed(
-                            playback,
-                            groupIndex,
-                            studentIndex,
-                          )
-                            ? 1
-                            : 0),
-                        0,
-                      )
-                    : group.length;
-
-                  return (
-                    <section
-                      key={groupIndex}
-                      aria-label={`Group ${groupIndex + 1}`}
-                      className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
+              <>
+                {isCardDealAnimating &&
+                  !prefersReducedMotion &&
+                  flightGeometry &&
+                  inFlightCards.length > 0 && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 z-20 overflow-visible"
                     >
-                      <h3
-                        className={`font-title text-on-surface flex items-center justify-between ${
-                          isProjector ? "text-title-lg" : "text-title-md"
-                        }`}
-                      >
-                        <span>Group {groupIndex + 1}</span>
-                        <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-lowest border border-outline-variant font-mono text-label-sm tabular-nums">
-                          {isAnimating
-                            ? `${dealtInGroup}/${group.length}`
-                            : group.length}
-                        </span>
-                      </h3>
-                      <ul className="flex flex-col gap-gutter-xs">
-                        {group.map((student, studentIndex) => {
-                          const revealed = isGroupCardRevealed(
-                            playback,
-                            groupIndex,
-                            studentIndex,
-                          );
-                          const isSelected =
-                            !isAnimating &&
-                            swapSelection?.groupIndex === groupIndex &&
-                            swapSelection?.studentIndex === studentIndex;
-                          const sizeClass = isProjector
-                            ? "text-body-md"
-                            : "text-body-sm";
+                      {inFlightCards.map((flight) => {
+                        const target =
+                          flightGeometry.targets[flight.step.groupIndex];
+                        if (!target) return null;
+                        const p = flight.progress;
+                        const eased = easeOutCubic(p);
+                        const targetY =
+                          target.topY +
+                          flight.step.studentIndex * solitaireStyle.slotStepPx;
+                        const x =
+                          flightGeometry.deckX +
+                          (target.x - flightGeometry.deckX) * eased;
+                        const arcLift =
+                          Math.sin(p * Math.PI) * (isProjector ? 34 : 26);
+                        const y =
+                          flightGeometry.deckY +
+                          (targetY - flightGeometry.deckY) * eased -
+                          arcLift;
+                        const tiltDeg =
+                          (flight.step.dealOrder % 2 === 0 ? -9 : 9) *
+                          (1 - eased);
+                        const scale = 0.68 + 0.32 * eased;
+                        const flipProgress =
+                          p <= 0.45 ? 0 : Math.min(1, (p - 0.45) / 0.55);
+                        const flipDeg = flipProgress * 180;
+                        const cardWidth = Math.min(
+                          Math.max(150, target.width),
+                          isProjector ? 260 : 210,
+                        );
+                        const isEmeraldGroup =
+                          flight.step.groupIndex % 2 === 0;
+                        const suit =
+                          SOLITAIRE_SUITS[
+                            flight.step.groupIndex % SOLITAIRE_SUITS.length
+                          ] ?? "♠";
 
-                          return (
-                            <li key={`${student.index}-${studentIndex}`}>
-                              {revealed ? (
-                                <button
-                                  type="button"
-                                  disabled={isAnimating}
-                                  aria-pressed={isSelected}
-                                  onClick={() =>
-                                    onStudentClick({
-                                      groupIndex,
-                                      studentIndex,
-                                    })
-                                  }
-                                  className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${sizeClass} ${
-                                    isAnimating && effectiveMode === "card-deal"
-                                      ? "classroom-card-deal-in"
-                                      : ""
-                                  } ${
-                                    isSelected
-                                      ? "bg-primary text-on-primary border-primary font-semibold"
-                                      : isAnimating
-                                        ? "bg-surface-container-lowest border-primary/40 text-on-surface cursor-default"
-                                        : "bg-surface-container-lowest border-outline-variant text-on-surface hover:border-primary"
-                                  }`}
-                                >
-                                  {student.name}
-                                </button>
-                              ) : (
-                                <div
-                                  aria-hidden="true"
-                                  className={`w-full px-gutter-sm py-gutter-xs rounded border border-dashed border-outline-variant/60 bg-surface-container/50 font-body select-none ${sizeClass}`}
-                                >
-                                  <span className="invisible">
-                                    {student.name}
+                        return (
+                          <div
+                            key={flight.step.dealOrder}
+                            className="classroom-deal-flight-card"
+                            style={{
+                              width: `${cardWidth}px`,
+                              transform: `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%) rotate(${tiltDeg}deg) scale(${scale})`,
+                              zIndex: 20 + flight.step.dealOrder,
+                            }}
+                          >
+                            <div
+                              className="classroom-deal-flight-inner"
+                              style={{
+                                transform: `rotateY(${flipDeg}deg)`,
+                              }}
+                            >
+                              <div className="classroom-deal-flight-face rounded-md border border-surface-container-lowest/80 bg-primary classroom-dealer-card-back shadow-md flex items-center justify-center">
+                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-surface-container-lowest/15 border border-surface-container-lowest/35 text-on-primary">
+                                  <span className="material-symbols-outlined text-title-md">
+                                    style
+                                  </span>
+                                </span>
+                              </div>
+                              <div
+                                className={`classroom-deal-flight-face classroom-deal-flight-front rounded-md border bg-surface-container-lowest shadow-md flex flex-col justify-between p-2.5 ${
+                                  isEmeraldGroup
+                                    ? "border-primary/45"
+                                    : "border-secondary/45"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-gutter-xs">
+                                  <span className="flex items-baseline gap-1.5 min-w-0">
+                                    <span
+                                      className={`shrink-0 font-mono text-label-sm tabular-nums ${
+                                        isEmeraldGroup
+                                          ? "text-primary"
+                                          : "text-secondary"
+                                      }`}
+                                    >
+                                      {flight.step.studentIndex + 1}
+                                      {suit}
+                                    </span>
+                                    <span
+                                      className={`font-body font-medium text-on-surface leading-snug truncate ${solitaireStyle.nameText}`}
+                                    >
+                                      {flight.step.student.name}
+                                    </span>
                                   </span>
                                 </div>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </section>
-                  );
-                })}
-              </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-outline-variant/40 text-label-sm text-on-surface-variant">
+                                  <span className="font-label">
+                                    Group {flight.step.groupIndex + 1}
+                                  </span>
+                                  <span
+                                    className={
+                                      isEmeraldGroup
+                                        ? "text-primary"
+                                        : "text-secondary"
+                                    }
+                                  >
+                                    {suit}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                <div
+                  className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md ${
+                    settledFromMingle ? "classroom-group-settle-in" : ""
+                  }`}
+                >
+                  {groups.map((group, groupIndex) => {
+                    const dealtInGroup = isAnimating
+                      ? group.reduce(
+                          (count, _student, studentIndex) =>
+                            count +
+                            (isGroupCardRevealed(
+                              playback,
+                              groupIndex,
+                              studentIndex,
+                            )
+                              ? 1
+                              : 0),
+                          0,
+                        )
+                      : group.length;
+                    const isEmeraldGroup = groupIndex % 2 === 0;
+                    const suit =
+                      SOLITAIRE_SUITS[groupIndex % SOLITAIRE_SUITS.length] ??
+                      "♠";
+
+                    return (
+                      <section
+                        key={groupIndex}
+                        ref={(el) => {
+                          groupSectionRefs.current[groupIndex] = el;
+                        }}
+                        aria-label={`Group ${groupIndex + 1}`}
+                        className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
+                      >
+                        <h3
+                          className={`font-title text-on-surface flex items-center justify-between ${
+                            isProjector ? "text-title-lg" : "text-title-md"
+                          }`}
+                        >
+                          <span className="inline-flex items-center gap-gutter-xs">
+                            {isSolitaireLayout && (
+                              <span
+                                aria-hidden="true"
+                                className={`inline-flex items-center justify-center w-6 h-6 rounded-sm text-label-md font-bold ${
+                                  isEmeraldGroup
+                                    ? "bg-primary/12 text-primary"
+                                    : "bg-secondary/12 text-secondary"
+                                }`}
+                              >
+                                {suit}
+                              </span>
+                            )}
+                            <span>Group {groupIndex + 1}</span>
+                          </span>
+                          <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-lowest border border-outline-variant font-mono text-label-sm tabular-nums">
+                            {isAnimating
+                              ? `${dealtInGroup}/${group.length}`
+                              : group.length}
+                          </span>
+                        </h3>
+
+                        {isSolitaireLayout ? (
+                          <ul
+                            className="flex flex-col pt-gutter-xs"
+                            data-solitaire-density={solitaireTier}
+                          >
+                            {group.map((student, studentIndex) => {
+                              const revealed = isGroupCardRevealed(
+                                playback,
+                                groupIndex,
+                                studentIndex,
+                              );
+                              const isSelected =
+                                !isAnimating &&
+                                swapSelection?.groupIndex === groupIndex &&
+                                swapSelection?.studentIndex === studentIndex;
+                              const isLastCard =
+                                studentIndex === group.length - 1;
+
+                              return (
+                                <li
+                                  key={`${student.index}-${studentIndex}`}
+                                  className={`relative ${
+                                    studentIndex > 0
+                                      ? solitaireStyle.overlap
+                                      : ""
+                                  }`}
+                                  style={{
+                                    zIndex: isSelected ? 30 : studentIndex + 1,
+                                  }}
+                                >
+                                  {revealed ? (
+                                    <button
+                                      type="button"
+                                      disabled={isAnimating}
+                                      aria-pressed={isSelected}
+                                      onClick={() =>
+                                        onStudentClick({
+                                          groupIndex,
+                                          studentIndex,
+                                        })
+                                      }
+                                      className={`classroom-solitaire-card w-full text-left rounded-md border overflow-hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+                                        isCardDealAnimating &&
+                                        effectiveMode === "card-deal"
+                                          ? "classroom-card-deal-in"
+                                          : ""
+                                      } ${
+                                        isSelected
+                                          ? "is-selected bg-primary text-on-primary border-primary ring-2 ring-primary/30 shadow-md"
+                                          : isAnimating
+                                            ? isEmeraldGroup
+                                              ? "bg-surface-container-lowest border-primary/40 text-on-surface shadow-xs cursor-default"
+                                              : "bg-surface-container-lowest border-secondary/40 text-on-surface shadow-xs cursor-default"
+                                            : isEmeraldGroup
+                                              ? "bg-surface-container-lowest border-outline-variant text-on-surface shadow-xs hover:border-primary"
+                                              : "bg-surface-container-lowest border-outline-variant text-on-surface shadow-xs hover:border-secondary"
+                                      }`}
+                                    >
+                                      <span
+                                        className={`flex items-start justify-between gap-gutter-xs ${solitaireStyle.headerPad}`}
+                                      >
+                                        <span className="flex items-baseline gap-gutter-xs min-w-0">
+                                          <span
+                                            aria-hidden="true"
+                                            className={`shrink-0 font-mono text-label-sm tabular-nums ${
+                                              isSelected
+                                                ? "text-on-primary/90"
+                                                : isEmeraldGroup
+                                                  ? "text-primary"
+                                                  : "text-secondary"
+                                            }`}
+                                          >
+                                            {studentIndex + 1}
+                                            {suit}
+                                          </span>
+                                          <span
+                                            className={`font-body leading-snug break-words ${solitaireStyle.nameText} ${
+                                              isSelected
+                                                ? "font-semibold text-on-primary"
+                                                : "font-medium text-on-surface"
+                                            }`}
+                                          >
+                                            {student.name}
+                                          </span>
+                                        </span>
+                                        <span
+                                          aria-hidden="true"
+                                          className={`shrink-0 text-label-sm leading-none pt-0.5 ${
+                                            isSelected
+                                              ? "text-on-primary/85"
+                                              : isEmeraldGroup
+                                                ? "text-primary/60"
+                                                : "text-secondary/60"
+                                          }`}
+                                        >
+                                          {suit}
+                                        </span>
+                                      </span>
+                                      <span
+                                        aria-hidden="true"
+                                        className={`flex items-end justify-between px-3 pb-1.5 border-t ${
+                                          isLastCard
+                                            ? solitaireStyle.lastApron
+                                            : solitaireStyle.apron
+                                        } ${
+                                          isSelected
+                                            ? "border-on-primary/20 bg-primary-container/25"
+                                            : "border-outline-variant/35 bg-surface-container-low/45"
+                                        }`}
+                                      >
+                                        {isLastCard && (
+                                          <>
+                                            <span
+                                              className={`font-label text-label-sm ${
+                                                isSelected
+                                                  ? "text-on-primary/80"
+                                                  : "text-on-surface-variant/75"
+                                              }`}
+                                            >
+                                              Group {groupIndex + 1}
+                                            </span>
+                                            <span
+                                              className={`font-mono text-label-sm tabular-nums ${
+                                                isSelected
+                                                  ? "text-on-primary/85"
+                                                  : isEmeraldGroup
+                                                    ? "text-primary/70"
+                                                    : "text-secondary/70"
+                                              }`}
+                                            >
+                                              {studentIndex + 1}
+                                              {suit}
+                                            </span>
+                                          </>
+                                        )}
+                                      </span>
+                                    </button>
+                                  ) : (
+                                    <div
+                                      aria-hidden="true"
+                                      className="w-full rounded-md border border-dashed border-outline-variant/60 bg-surface-container/45 select-none overflow-hidden"
+                                    >
+                                      <div className={solitaireStyle.headerPad}>
+                                        <span
+                                          className={`invisible block leading-snug ${solitaireStyle.nameText}`}
+                                        >
+                                          {student.name}
+                                        </span>
+                                      </div>
+                                      <div
+                                        className={
+                                          isLastCard
+                                            ? solitaireStyle.lastApron
+                                            : solitaireStyle.apron
+                                        }
+                                      />
+                                    </div>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        ) : (
+                          <ul className="flex flex-col gap-gutter-xs">
+                            {group.map((student, studentIndex) => {
+                              const revealed = isGroupCardRevealed(
+                                playback,
+                                groupIndex,
+                                studentIndex,
+                              );
+                              const isSelected =
+                                !isAnimating &&
+                                swapSelection?.groupIndex === groupIndex &&
+                                swapSelection?.studentIndex === studentIndex;
+                              const sizeClass = isProjector
+                                ? "text-body-md"
+                                : "text-body-sm";
+
+                              return (
+                                <li key={`${student.index}-${studentIndex}`}>
+                                  {revealed ? (
+                                    <button
+                                      type="button"
+                                      disabled={isAnimating}
+                                      aria-pressed={isSelected}
+                                      onClick={() =>
+                                        onStudentClick({
+                                          groupIndex,
+                                          studentIndex,
+                                        })
+                                      }
+                                      className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${sizeClass} ${
+                                        isAnimating &&
+                                        effectiveMode === "card-deal"
+                                          ? "classroom-card-deal-in"
+                                          : ""
+                                      } ${
+                                        isSelected
+                                          ? "bg-primary text-on-primary border-primary font-semibold"
+                                          : isAnimating
+                                            ? "bg-surface-container-lowest border-primary/40 text-on-surface cursor-default"
+                                            : "bg-surface-container-lowest border-outline-variant text-on-surface hover:border-primary"
+                                      }`}
+                                    >
+                                      {student.name}
+                                    </button>
+                                  ) : (
+                                    <div
+                                      aria-hidden="true"
+                                      className={`w-full px-gutter-sm py-gutter-xs rounded border border-dashed border-outline-variant/60 bg-surface-container/50 font-body select-none ${sizeClass}`}
+                                    >
+                                      <span className="invisible">
+                                        {student.name}
+                                      </span>
+                                    </div>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         ) : (

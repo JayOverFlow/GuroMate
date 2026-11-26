@@ -6,12 +6,15 @@ import {
 } from "./classroomTools";
 import {
   advanceGroupPlayback,
+  CARD_FLIGHT_DURATION_MS,
   createCardDealPlan,
   createMingleClusterPlan,
   getChipDensityTier,
+  getInFlightCardSteps,
   getMingleClusterBeat,
   getRemainingDeckCount,
   getRevealedCardCount,
+  getSolitaireCascadeTier,
   INITIAL_GROUP_PLAYBACK_STATE,
   isGroupCardRevealed,
   isGroupSwapAllowed,
@@ -71,7 +74,7 @@ describe("groupAnimation", () => {
     expect(emptyPlan.slotDealOrders).toEqual([]);
   });
 
-  it("caps adaptive deal duration within 2500-3500ms across small and large Class Sections", () => {
+  it("caps adaptive deal duration within 3000-4000ms across small and large Class Sections", () => {
     const makeGroups = (count: number, groupCount: number) => {
       const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
       return generateStudentGroups(
@@ -88,8 +91,8 @@ describe("groupAnimation", () => {
     const hugePlan = createCardDealPlan(makeGroups(80, 10));
 
     for (const plan of [smallPlan, mediumPlan, large45Plan, large50Plan, hugePlan]) {
-      expect(plan.totalDurationMs).toBeGreaterThanOrEqual(2500);
-      expect(plan.totalDurationMs).toBeLessThanOrEqual(3500);
+      expect(plan.totalDurationMs).toBeGreaterThanOrEqual(3000);
+      expect(plan.totalDurationMs).toBeLessThanOrEqual(4000);
       expect(plan.steps[0]!.revealAtMs).toBeGreaterThan(0);
       expect(plan.steps[plan.steps.length - 1]!.revealAtMs).toBeLessThan(
         plan.totalDurationMs,
@@ -104,7 +107,7 @@ describe("groupAnimation", () => {
     // Large rosters deal faster per card than small rosters
     expect(large50Plan.stepIntervalMs).toBeLessThan(smallPlan.stepIntervalMs);
 
-    // Single-student edge case uses a brief deal rather than waiting 2.5s
+    // Single-student edge case uses a brief deal rather than waiting 3.0s
     const singlePlan = createCardDealPlan(makeGroups(1, 1));
     expect(singlePlan.totalCards).toBe(1);
     expect(singlePlan.totalDurationMs).toBeGreaterThan(0);
@@ -186,7 +189,93 @@ describe("groupAnimation", () => {
     );
     expect(completed.phase).toBe("settled");
     expect(completed.revealedCount).toBe(7);
+    expect(completed.elapsedMs).toBe(started.plan!.totalDurationMs);
     expect(isGroupSwapAllowed(completed, groups.length)).toBe(true);
+  });
+
+  it("exposes round-robin in-flight cards, playback elapsedMs, and Solitaire cascade density tiers", () => {
+    const makeGroups = (count: number, groupCount: number) => {
+      const roster = Array.from({ length: count }, (_, i) => `Student ${i + 1}`);
+      return generateStudentGroups(
+        filterPresentStudents(roster, new Set()),
+        { mode: "count", value: groupCount },
+        () => 0.3,
+      );
+    };
+
+    const emptyPlan = createCardDealPlan([]);
+    expect(getInFlightCardSteps(emptyPlan, 100)).toEqual([]);
+
+    // Small 7-student class: first card flies before landing, then leaves in-flight on reveal
+    const smallGroups = makeGroups(7, 3);
+    const smallPlan = createCardDealPlan(smallGroups);
+    const firstStep = smallPlan.steps[0]!;
+    const firstLaunchMs = Math.max(0, firstStep.revealAtMs - CARD_FLIGHT_DURATION_MS);
+
+    expect(getInFlightCardSteps(smallPlan, -10)).toEqual([]);
+    const midFirstFlightMs = Math.round((firstLaunchMs + firstStep.revealAtMs) / 2);
+    const firstFlight = getInFlightCardSteps(smallPlan, midFirstFlightMs);
+    expect(firstFlight.length).toBeGreaterThanOrEqual(1);
+    expect(firstFlight[0]?.step.dealOrder).toBe(0);
+    expect(firstFlight[0]?.step.groupIndex).toBe(0);
+    expect(firstFlight[0]?.step.studentIndex).toBe(0);
+    expect(firstFlight[0]?.progress).toBeGreaterThan(0);
+    expect(firstFlight[0]?.progress).toBeLessThan(1);
+
+    // At landing time, card 0 is revealed and no longer in-flight
+    const atFirstReveal = getInFlightCardSteps(smallPlan, firstStep.revealAtMs);
+    expect(atFirstReveal.some((item) => item.step.dealOrder === 0)).toBe(false);
+    expect(getRevealedCardCount(smallPlan, firstStep.revealAtMs)).toBe(1);
+
+    // After totalDurationMs, zero cards remain in flight
+    expect(getInFlightCardSteps(smallPlan, smallPlan.totalDurationMs)).toEqual([]);
+
+    // Large 45-student class has multiple concurrent round-robin cards in flight mid-deal
+    const largePlan = createCardDealPlan(makeGroups(45, 9));
+    const midLargeMs = Math.round(largePlan.totalDurationMs * 0.5);
+    const concurrentFlights = getInFlightCardSteps(largePlan, midLargeMs);
+    expect(concurrentFlights.length).toBeGreaterThan(1);
+    for (let i = 1; i < concurrentFlights.length; i++) {
+      expect(concurrentFlights[i]!.step.dealOrder).toBeGreaterThan(
+        concurrentFlights[i - 1]!.step.dealOrder,
+      );
+      expect(concurrentFlights[i]!.progress).toBeGreaterThanOrEqual(0);
+      expect(concurrentFlights[i]!.progress).toBeLessThan(1);
+    }
+    const revealedMid = getRevealedCardCount(largePlan, midLargeMs);
+    expect(revealedMid + concurrentFlights.length).toBeLessThanOrEqual(
+      largePlan.totalCards,
+    );
+    expect(
+      getRemainingDeckCount(largePlan, revealedMid + concurrentFlights.length),
+    ).toBe(largePlan.totalCards - revealedMid - concurrentFlights.length);
+
+    // Single-student edge case visibly flies before landing
+    const singlePlan = createCardDealPlan(makeGroups(1, 1));
+    const singleMidMs = Math.max(1, singlePlan.steps[0]!.revealAtMs - 100);
+    const singleFlight = getInFlightCardSteps(singlePlan, singleMidMs);
+    expect(singleFlight).toHaveLength(1);
+    expect(singleFlight[0]?.progress).toBeGreaterThan(0);
+    expect(singleFlight[0]?.progress).toBeLessThan(1);
+
+    // GroupPlaybackState tracks elapsedMs cleanly through start, advance, and skip
+    expect(INITIAL_GROUP_PLAYBACK_STATE.elapsedMs).toBe(0);
+    const started = startGroupPlayback(smallGroups, "card-deal", false);
+    expect(started.elapsedMs).toBe(0);
+    const midState = advanceGroupPlayback(started, midFirstFlightMs);
+    expect(midState.phase).toBe("animating");
+    expect(midState.elapsedMs).toBe(midFirstFlightMs);
+    const skipped = skipGroupPlayback(midState);
+    expect(skipped.phase).toBe("settled");
+    expect(skipped.elapsedMs).toBe(started.plan!.totalDurationMs);
+
+    // Solitaire cascade density tightens for mid-size and large (35-50 student) rosters
+    expect(getSolitaireCascadeTier(7, 3)).toBe("comfortable");
+    expect(getSolitaireCascadeTier(24, 5)).toBe("standard");
+    expect(getSolitaireCascadeTier(14, 7)).toBe("standard");
+    expect(getSolitaireCascadeTier(35, 5)).toBe("compact");
+    expect(getSolitaireCascadeTier(50, 5)).toBe("compact");
+    expect(getSolitaireCascadeTier(18, 9)).toBe("compact");
   });
 
   it("resolves Card Deal, Group Yourselves, and Instant modes and falls back to instant under reduced motion", () => {

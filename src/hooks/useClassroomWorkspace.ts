@@ -840,6 +840,7 @@ export function useClassroomWorkspace(
       }
 
       const changed =
+        currentState.mode === "card-deal" ||
         nextState.revealedCount !== lastRevealed ||
         nextState.mingleBeat !== currentState.mingleBeat ||
         nextState.phase !== currentState.phase;
