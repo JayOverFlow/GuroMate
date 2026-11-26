@@ -84,3 +84,25 @@ export function buildDeleteClassSectionPrompt(section: {
     busyLabel: "Deleting...",
   };
 }
+
+export function buildDeleteDllPrompt(lessonTitle: string): ConfirmPrompt {
+  const title = lessonTitle.trim() || "this Daily Lesson Log";
+  return {
+    title: "Delete Daily Lesson Log?",
+    body: `Permanently delete "${title}" from local storage? This cannot be undone.`,
+    confirmLabel: "Delete DLL",
+    busyLabel: "Deleting...",
+  };
+}
+
+export function buildRemoveDllCompetencyPrompt(
+  competencyLabel: string,
+  sessionNumber: number,
+): ConfirmPrompt {
+  const competency = competencyLabel.trim() || "this Learning Competency";
+  return {
+    title: "Remove Learning Competency?",
+    body: `Remove "${competency}" from Session ${sessionNumber}? You can add it back anytime.`,
+    confirmLabel: "Remove",
+  };
+}

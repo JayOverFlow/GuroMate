@@ -1,5 +1,9 @@
 import { AI_PROVIDER_MAP } from "../engine/providers";
-import type { GuroMateSettings } from "../engine/types";
+import type {
+  DllSessionConfig,
+  GuroMateSettings,
+  SessionNumber,
+} from "../engine/types";
 
 export type FieldErrors<K extends string> = Partial<Record<K, string>>;
 
@@ -322,6 +326,77 @@ export function validateCustomTimerForm(
   const errors: FieldErrors<CustomTimerFieldKey> = {};
   for (const field of CUSTOM_TIMER_FIELDS) {
     const message = validateCustomTimerField(field, input);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}
+
+export type DllSessionFieldKey = `session-${SessionNumber}`;
+
+export type DllBuilderFieldKey =
+  | "gradeAndSection"
+  | DllSessionFieldKey
+  | "sessions";
+
+export interface DllBuilderFormInput {
+  gradeAndSection: string;
+  sessions: readonly DllSessionConfig[];
+}
+
+export const DLL_BUILDER_FIELDS: readonly DllBuilderFieldKey[] = [
+  "gradeAndSection",
+  "session-1",
+  "session-2",
+  "session-3",
+  "session-4",
+  "session-5",
+  "sessions",
+];
+
+export function dllSessionFieldKey(
+  sessionNumber: SessionNumber,
+): DllSessionFieldKey {
+  return `session-${sessionNumber}`;
+}
+
+export function validateDllBuilderField(
+  field: DllBuilderFieldKey,
+  input: DllBuilderFormInput,
+): string | undefined {
+  if (field === "gradeAndSection") {
+    return isNonEmptyText(input.gradeAndSection)
+      ? undefined
+      : "Enter a Grade Level and Section.";
+  }
+
+  if (field === "sessions") {
+    const hasInstructional = input.sessions.some(
+      (cfg) => cfg.mode === "instructional",
+    );
+    return hasInstructional
+      ? undefined
+      : "Keep at least one Session as Instructional with a Learning Competency.";
+  }
+
+  const sessionNumber = Number(field.slice("session-".length)) as SessionNumber;
+  const session = input.sessions.find(
+    (cfg) => cfg.sessionNumber === sessionNumber,
+  );
+  if (!session || session.mode === "non-instructional") {
+    return undefined;
+  }
+  const hasCompetency = session.competencyIds.some((id) => isNonEmptyText(id));
+  return hasCompetency
+    ? undefined
+    : `Assign a Learning Competency to Session ${sessionNumber} or mark it Non-Instructional.`;
+}
+
+export function validateDllBuilderForm(
+  input: DllBuilderFormInput,
+): FieldErrors<DllBuilderFieldKey> {
+  const errors: FieldErrors<DllBuilderFieldKey> = {};
+  for (const field of DLL_BUILDER_FIELDS) {
+    const message = validateDllBuilderField(field, input);
     if (message) errors[field] = message;
   }
   return errors;

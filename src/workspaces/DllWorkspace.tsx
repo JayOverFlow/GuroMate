@@ -1,12 +1,23 @@
 import { useId } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { renderDllMarkdown } from "../engine/dll";
 import { type SessionNumber } from "../engine/types";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import {
   INTENTIONS_LIST_FIELDS,
   SESSION_ILAW_FIELDS,
   useDllWorkspace,
   type DllLaunchTarget,
 } from "../hooks/useDllWorkspace";
+import {
+  buildDeleteDllPrompt,
+  buildRemoveDllCompetencyPrompt,
+} from "../utils/confirmAction";
+import {
+  buildDescribedBy,
+  dllSessionFieldKey,
+} from "../utils/formValidation";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
 import { renderMarkdownBlocks } from "./lessonViewHelpers";
 
@@ -19,8 +30,10 @@ interface DllWorkspaceProps {
   onCreateQuiz?: (dllId: string, sessionNumber: SessionNumber) => void;
 }
 
-const INPUT_CLASS =
-  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
+const INPUT_BASE_CLASS =
+  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border text-body-md text-on-surface focus-visible:outline-2 focus-visible:outline-primary";
+
+const INPUT_CLASS = `${INPUT_BASE_CLASS} border-outline-variant focus:border-primary`;
 
 export function DllWorkspace({
   initialLaunchTarget,
@@ -30,6 +43,7 @@ export function DllWorkspace({
 }: DllWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
+  const confirmDialog = useConfirmDialog();
 
   const {
     dlls,
@@ -47,6 +61,11 @@ export function DllWorkspace({
     setLessonTitle,
     gradeAndSection,
     setGradeAndSection,
+    validateGradeAndSectionOnBlur,
+    fieldErrors,
+    gradeSectionRef,
+    sessionCardRefs,
+    sessionsGroupRef,
     references,
     setReferences,
     promptNotes,
@@ -189,6 +208,7 @@ export function DllWorkspace({
       ) : !draftDll ? (
         /* Create New 5-Session DLL Form */
         <form
+          noValidate
           onSubmit={(e) => void handleGenerate(e)}
           className="flex flex-col gap-gutter-lg"
         >
@@ -223,13 +243,25 @@ export function DllWorkspace({
                   Grade Level and Section *
                 </label>
                 <input
+                  ref={gradeSectionRef}
                   id={`${baseId}-grade-section`}
                   type="text"
                   required
+                  aria-invalid={Boolean(fieldErrors.gradeAndSection)}
+                  aria-describedby={buildDescribedBy(
+                    null,
+                    `${baseId}-grade-section-err`,
+                    Boolean(fieldErrors.gradeAndSection),
+                  )}
                   value={gradeAndSection}
                   onChange={(e) => setGradeAndSection(e.target.value)}
+                  onBlur={validateGradeAndSectionOnBlur}
                   placeholder="e.g. Grade 7 - Rizal"
-                  className={INPUT_CLASS}
+                  className={`${INPUT_BASE_CLASS} ${fieldBorderClass(Boolean(fieldErrors.gradeAndSection))}`}
+                />
+                <FieldError
+                  id={`${baseId}-grade-section-err`}
+                  message={fieldErrors.gradeAndSection}
                 />
                 {sections.length > 0 && (
                   <select
@@ -238,7 +270,7 @@ export function DllWorkspace({
                     onChange={(e) => {
                       if (e.target.value) setGradeAndSection(e.target.value);
                     }}
-                    className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface"
+                    className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
                   >
                     <option value="">Quick-fill from Class Sections...</option>
                     {sections.map((sec) => {
@@ -352,121 +384,178 @@ export function DllWorkspace({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-gutter-md items-stretch">
-              {sessionConfigs.map((cfg) => (
-                <article
-                  key={cfg.sessionNumber}
-                  className={`h-full rounded-md border p-gutter-md flex flex-col justify-between gap-gutter-sm ${
-                    cfg.mode === "non-instructional"
-                      ? "bg-surface-container-low border-outline-variant"
-                      : "bg-surface-container-lowest border-outline-variant"
-                  }`}
-                >
-                  <div className="flex flex-col gap-gutter-sm">
-                    <div className="flex items-center justify-between gap-gutter-xs">
-                      <h3 className="font-mono text-mono-md font-semibold text-on-surface">
-                        Session {cfg.sessionNumber}
-                      </h3>
-                    </div>
-
-                    <select
-                      aria-label={`Session ${cfg.sessionNumber} mode`}
-                      value={cfg.mode}
-                      onChange={(e) =>
-                        updateSessionMode(
-                          cfg.sessionNumber,
-                          e.target.value as
-                            | "instructional"
-                            | "non-instructional",
-                        )
-                      }
-                      className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant text-body-sm text-on-surface"
+            <div
+              ref={sessionsGroupRef}
+              tabIndex={-1}
+              role="group"
+              aria-label="Sessions 1 to 5 configuration"
+              aria-describedby={buildDescribedBy(
+                null,
+                `${baseId}-sessions-err`,
+                Boolean(fieldErrors.sessions),
+              )}
+              className={`flex flex-col gap-gutter-sm rounded-md focus-visible:outline-2 focus-visible:outline-primary ${
+                fieldErrors.sessions
+                  ? "p-gutter-sm border border-error bg-error-container/20"
+                  : ""
+              }`}
+            >
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-gutter-md items-stretch">
+                {sessionConfigs.map((cfg) => {
+                  const sessionError =
+                    fieldErrors[dllSessionFieldKey(cfg.sessionNumber)];
+                  const sessionHeadingId = `${baseId}-session-${cfg.sessionNumber}-heading`;
+                  const sessionErrId = `${baseId}-session-${cfg.sessionNumber}-err`;
+                  return (
+                    <article
+                      key={cfg.sessionNumber}
+                      ref={(el) => {
+                        sessionCardRefs.current[cfg.sessionNumber] = el;
+                      }}
+                      tabIndex={-1}
+                      aria-labelledby={sessionHeadingId}
+                      aria-describedby={buildDescribedBy(
+                        null,
+                        sessionErrId,
+                        Boolean(sessionError),
+                      )}
+                      className={`h-full rounded-md border p-gutter-md flex flex-col justify-between gap-gutter-sm focus-visible:outline-2 focus-visible:outline-primary ${
+                        sessionError
+                          ? "bg-error-container/20 border-error"
+                          : cfg.mode === "non-instructional"
+                            ? "bg-surface-container-low border-outline-variant"
+                            : "bg-surface-container-lowest border-outline-variant"
+                      }`}
                     >
-                      <option value="instructional">Instructional</option>
-                      <option value="non-instructional">
-                        Non-Instructional / Holiday
-                      </option>
-                    </select>
+                      <div className="flex flex-col gap-gutter-sm">
+                        <div className="flex items-center justify-between gap-gutter-xs">
+                          <h3
+                            id={sessionHeadingId}
+                            className="font-mono text-mono-md font-semibold text-on-surface"
+                          >
+                            Session {cfg.sessionNumber}
+                          </h3>
+                        </div>
 
-                    {cfg.mode === "non-instructional" ? (
-                      <div className="flex flex-col gap-gutter-xs">
-                        <label
-                          htmlFor={`${baseId}-ni-${cfg.sessionNumber}`}
-                          className="font-label text-label-sm text-on-surface"
-                        >
-                          Reason
-                        </label>
-                        <input
-                          id={`${baseId}-ni-${cfg.sessionNumber}`}
-                          type="text"
-                          value={cfg.nonInstructionalReason ?? ""}
+                        <select
+                          aria-label={`Session ${cfg.sessionNumber} mode`}
+                          value={cfg.mode}
                           onChange={(e) =>
-                            updateNonInstructionalReason(
+                            updateSessionMode(
                               cfg.sessionNumber,
-                              e.target.value,
+                              e.target.value as
+                                | "instructional"
+                                | "non-instructional",
                             )
                           }
-                          placeholder="Holiday / School Event"
-                          className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant text-body-sm text-on-surface"
-                        />
-                      </div>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          disabled={!pickedCompetencyId}
-                          onClick={() =>
-                            assignCompetencyToSessions(
-                              [cfg.sessionNumber],
-                              pickedCompetencyId,
-                            )
-                          }
-                          className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-primary hover:bg-surface-container disabled:opacity-50"
+                          className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant text-body-sm text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
                         >
-                          + Add selected competency
-                        </button>
+                          <option value="instructional">Instructional</option>
+                          <option value="non-instructional">
+                            Non-Instructional / Holiday
+                          </option>
+                        </select>
 
-                        {cfg.competencyIds.length === 0 ? (
-                          <p className="font-body text-body-sm text-on-surface-variant">
-                            No Learning Competency assigned yet.
-                          </p>
+                        {cfg.mode === "non-instructional" ? (
+                          <div className="flex flex-col gap-gutter-xs">
+                            <label
+                              htmlFor={`${baseId}-ni-${cfg.sessionNumber}`}
+                              className="font-label text-label-sm text-on-surface"
+                            >
+                              Reason
+                            </label>
+                            <input
+                              id={`${baseId}-ni-${cfg.sessionNumber}`}
+                              type="text"
+                              value={cfg.nonInstructionalReason ?? ""}
+                              onChange={(e) =>
+                                updateNonInstructionalReason(
+                                  cfg.sessionNumber,
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="Holiday / School Event"
+                              className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant text-body-sm text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+                            />
+                          </div>
                         ) : (
-                          <ul className="flex flex-col gap-gutter-xs">
-                            {cfg.competencyIds.map((cid) => {
-                              const comp = competencyMap.get(cid);
-                              return (
-                                <li
-                                  key={cid}
-                                  className="p-gutter-xs rounded bg-surface-container-low border border-outline-variant flex flex-col gap-1"
-                                >
-                                  <span className="font-body text-body-sm text-on-surface">
-                                    <span className="inline-block px-1.5 py-0.5 mr-1 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
-                                      {comp?.component ?? "TLE"}
-                                    </span>
-                                    {comp?.learningCompetency ?? cid}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      removeCompetencyFromSession(
-                                        cfg.sessionNumber,
-                                        cid,
-                                      )
-                                    }
-                                    className="self-start font-label text-label-sm text-error hover:underline"
-                                  >
-                                    Remove
-                                  </button>
-                                </li>
-                              );
-                            })}
-                          </ul>
+                          <>
+                            <button
+                              type="button"
+                              disabled={!pickedCompetencyId}
+                              onClick={() =>
+                                assignCompetencyToSessions(
+                                  [cfg.sessionNumber],
+                                  pickedCompetencyId,
+                                )
+                              }
+                              className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-primary hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                            >
+                              + Add selected competency
+                            </button>
+
+                            {cfg.competencyIds.length === 0 ? (
+                              <p className="font-body text-body-sm text-on-surface-variant">
+                                No Learning Competency assigned yet.
+                              </p>
+                            ) : (
+                              <ul className="flex flex-col gap-gutter-xs">
+                                {cfg.competencyIds.map((cid) => {
+                                  const comp = competencyMap.get(cid);
+                                  const compLabel =
+                                    comp?.learningCompetency ?? cid;
+                                  return (
+                                    <li
+                                      key={cid}
+                                      className="p-gutter-xs rounded bg-surface-container-low border border-outline-variant flex flex-col gap-1"
+                                    >
+                                      <span className="font-body text-body-sm text-on-surface">
+                                        <span className="inline-block px-1.5 py-0.5 mr-1 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
+                                          {comp?.component ?? "TLE"}
+                                        </span>
+                                        {compLabel}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          confirmDialog.requestConfirm(
+                                            buildRemoveDllCompetencyPrompt(
+                                              compLabel,
+                                              cfg.sessionNumber,
+                                            ),
+                                            () =>
+                                              removeCompetencyFromSession(
+                                                cfg.sessionNumber,
+                                                cid,
+                                              ),
+                                          )
+                                        }
+                                        className="self-start font-label text-label-sm text-error hover:underline focus-visible:outline-2 focus-visible:outline-error rounded-xs"
+                                      >
+                                        Remove
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+
+                            <FieldError
+                              id={sessionErrId}
+                              message={sessionError}
+                            />
+                          </>
                         )}
-                      </>
-                    )}
-                  </div>
-                </article>
-              ))}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <FieldError
+                id={`${baseId}-sessions-err`}
+                message={fieldErrors.sessions}
+              />
             </div>
           </fieldset>
 
@@ -508,7 +597,12 @@ export function DllWorkspace({
 
               <button
                 type="button"
-                onClick={() => void handleDeleteDll()}
+                onClick={() =>
+                  confirmDialog.requestConfirm(
+                    buildDeleteDllPrompt(draftDll.lessonTitle),
+                    () => handleDeleteDll(draftDll),
+                  )
+                }
                 className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-error"
               >
                 <span
@@ -883,6 +977,12 @@ export function DllWorkspace({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        state={confirmDialog.state}
+        onConfirm={confirmDialog.confirm}
+        onCancel={confirmDialog.cancel}
+      />
     </section>
   );
 }

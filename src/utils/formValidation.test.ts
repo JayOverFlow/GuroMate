@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { GuroMateSettings } from "../engine/types";
+import type { DllSessionConfig, GuroMateSettings } from "../engine/types";
 import {
   buildDescribedBy,
+  dllSessionFieldKey,
   isNonEmptyText,
   isValidHttpUrl,
   parseCustomTimerDuration,
@@ -12,10 +13,13 @@ import {
   validateCustomCompetencyForm,
   validateCustomTimerField,
   validateCustomTimerForm,
+  validateDllBuilderField,
+  validateDllBuilderForm,
   validateSettingsField,
   validateSettingsForm,
   type ClassSectionFormInput,
   type CustomCompetencyFormInput,
+  type DllBuilderFormInput,
 } from "./formValidation";
 
 function makeSettings(
@@ -439,6 +443,135 @@ describe("Classroom Timer custom duration validation", () => {
     ).toBe("Enter a duration greater than 00:00.");
     expect(
       validateCustomTimerField("duration", { minutes: "0", seconds: "15" }),
+    ).toBeUndefined();
+  });
+});
+
+function makeDllSessions(
+  overrides?: Partial<Record<1 | 2 | 3 | 4 | 5, Partial<DllSessionConfig>>>,
+): DllSessionConfig[] {
+  return ([1, 2, 3, 4, 5] as const).map((sessionNumber) => ({
+    sessionNumber,
+    mode: "instructional",
+    competencyIds: [`comp-${sessionNumber}`],
+    ...overrides?.[sessionNumber],
+  }));
+}
+
+function makeDllBuilderInput(
+  overrides?: Partial<DllBuilderFormInput>,
+): DllBuilderFormInput {
+  return {
+    gradeAndSection: "Grade 7 - Rizal",
+    sessions: makeDllSessions(),
+    ...overrides,
+  };
+}
+
+describe("validateDllBuilderForm & validateDllBuilderField", () => {
+  it("returns no errors when Grade Level and Section is filled and every instructional Session has a Learning Competency", () => {
+    const input = makeDllBuilderInput({
+      sessions: makeDllSessions({
+        4: {
+          mode: "non-instructional",
+          competencyIds: [],
+          nonInstructionalReason: "Holiday",
+        },
+        5: {
+          mode: "non-instructional",
+          competencyIds: [],
+          nonInstructionalReason: "School Event",
+        },
+      }),
+    });
+
+    expect(validateDllBuilderForm(input)).toEqual({});
+  });
+
+  it("flags blank/whitespace Grade Level and Section and each instructional Session missing a Learning Competency in DOM order", () => {
+    const errors = validateDllBuilderForm(
+      makeDllBuilderInput({
+        gradeAndSection: "   \t ",
+        sessions: makeDllSessions({
+          1: { mode: "instructional", competencyIds: [] },
+          2: { mode: "instructional", competencyIds: ["comp-2"] },
+          3: { mode: "non-instructional", competencyIds: [] },
+          4: { mode: "instructional", competencyIds: ["   "] },
+          5: { mode: "instructional", competencyIds: [] },
+        }),
+      }),
+    );
+
+    expect(Object.keys(errors)).toEqual([
+      "gradeAndSection",
+      "session-1",
+      "session-4",
+      "session-5",
+    ]);
+    for (const msg of Object.values(errors)) {
+      expect(msg).toBeTruthy();
+      expect(msg?.startsWith("Error:")).toBe(false);
+    }
+    expect(errors.gradeAndSection).toBe("Enter a Grade Level and Section.");
+    expect(errors[dllSessionFieldKey(1)]).toBe(
+      "Assign a Learning Competency to Session 1 or mark it Non-Instructional.",
+    );
+    expect(errors[dllSessionFieldKey(4)]).toBe(
+      "Assign a Learning Competency to Session 4 or mark it Non-Instructional.",
+    );
+  });
+
+  it("flags a group-level error when all five Sessions are Non-Instructional", () => {
+    const errors = validateDllBuilderForm(
+      makeDllBuilderInput({
+        sessions: makeDllSessions({
+          1: { mode: "non-instructional", competencyIds: [] },
+          2: { mode: "non-instructional", competencyIds: [] },
+          3: { mode: "non-instructional", competencyIds: [] },
+          4: { mode: "non-instructional", competencyIds: [] },
+          5: { mode: "non-instructional", competencyIds: [] },
+        }),
+      }),
+    );
+
+    expect(errors).toEqual({
+      sessions:
+        "Keep at least one Session as Instructional with a Learning Competency.",
+    });
+  });
+
+  it("validates individual DLL fields for blur and live-clear updates", () => {
+    const blankSection = makeDllBuilderInput({ gradeAndSection: "  " });
+    const fixedSection = makeDllBuilderInput({
+      gradeAndSection: "Grade 8 - Bonifacio",
+    });
+    expect(validateDllBuilderField("gradeAndSection", blankSection)).toBe(
+      "Enter a Grade Level and Section.",
+    );
+    expect(
+      validateDllBuilderField("gradeAndSection", fixedSection),
+    ).toBeUndefined();
+
+    const missingSession2 = makeDllBuilderInput({
+      sessions: makeDllSessions({
+        2: { mode: "instructional", competencyIds: [] },
+      }),
+    });
+    const switchedToNonInstructional = makeDllBuilderInput({
+      sessions: makeDllSessions({
+        2: { mode: "non-instructional", competencyIds: [] },
+      }),
+    });
+    expect(
+      validateDllBuilderField(dllSessionFieldKey(2), missingSession2),
+    ).toBe(
+      "Assign a Learning Competency to Session 2 or mark it Non-Instructional.",
+    );
+    expect(
+      validateDllBuilderField(
+        dllSessionFieldKey(2),
+        switchedToNonInstructional,
+      ),
     ).toBeUndefined();
   });
 });
