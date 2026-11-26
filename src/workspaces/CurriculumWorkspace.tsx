@@ -69,7 +69,17 @@ function CompetencyBadges({
 const INPUT_CLASS =
   "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
 
-export function CurriculumWorkspace() {
+interface CurriculumWorkspaceProps {
+  onUseInDll?: (competencyId: string) => void;
+  onUseInDlp?: (competencyId: string) => void;
+  onUseInQuiz?: (competencyId: string) => void;
+}
+
+export function CurriculumWorkspace({
+  onUseInDll,
+  onUseInDlp,
+  onUseInQuiz,
+}: CurriculumWorkspaceProps = {}) {
   const headingId = useId();
   const baseId = useId();
 
@@ -837,6 +847,53 @@ export function CurriculumWorkspace() {
                     </div>
                   )}
                 </header>
+
+                {/* Direct Generator Shortcuts */}
+                <div
+                  role="group"
+                  aria-label="Create lesson or quiz from this Learning Competency"
+                  className="flex flex-wrap items-center gap-gutter-sm"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onUseInDll?.(selectedItem.id)}
+                    className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-primary text-on-primary font-label text-label-md hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
+                  >
+                    <span
+                      className="material-symbols-outlined text-title-md"
+                      aria-hidden="true"
+                    >
+                      view_week
+                    </span>
+                    <span>Use in DLL</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUseInDlp?.(selectedItem.id)}
+                    className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
+                  >
+                    <span
+                      className="material-symbols-outlined text-title-md text-primary"
+                      aria-hidden="true"
+                    >
+                      splitscreen
+                    </span>
+                    <span>Use in DLP</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUseInQuiz?.(selectedItem.id)}
+                    className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change"
+                  >
+                    <span
+                      className="material-symbols-outlined text-title-md text-primary"
+                      aria-hidden="true"
+                    >
+                      quiz
+                    </span>
+                    <span>Use in Quiz</span>
+                  </button>
+                </div>
 
                 <div className="flex flex-col gap-gutter-sm">
                   <div className="flex flex-col gap-gutter-xs">

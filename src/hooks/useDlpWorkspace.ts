@@ -16,6 +16,12 @@ import type {
   SessionNumber,
 } from "../engine/types";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
+import {
+  applyDlpLaunchTarget,
+  type DlpLaunchTarget,
+} from "./workspaceLaunchHelpers";
+
+export type { DlpLaunchTarget };
 
 export type ViewMode = "edit" | "markdown";
 export type BuilderMode = "scratch" | "derive";
@@ -93,14 +99,9 @@ export const DLP_INTENTIONS_LIST_FIELDS: ReadonlyArray<{
   { key: "performanceStandards", label: "Performance Standards (one per line)" },
 ];
 
-export interface DeriveDlpTarget {
-  dllId: string;
-  sessionNumber: SessionNumber;
-}
-
 export function useDlpWorkspace(
-  initialDeriveTarget?: DeriveDlpTarget | null,
-  onConsumeDeriveTarget?: () => void,
+  initialLaunchTarget?: DlpLaunchTarget | null,
+  onConsumeLaunchTarget?: () => void,
 ) {
   const [dlps, setDlps] = useState<DailyLessonPlan[]>([]);
   const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
@@ -127,7 +128,7 @@ export function useDlpWorkspace(
   );
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
-  const deriveIntentRef = useRef(Boolean(initialDeriveTarget));
+  const launchIntentRef = useRef(Boolean(initialLaunchTarget));
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
@@ -164,7 +165,7 @@ export function useDlpWorkspace(
           prev && loadedDlls.some((d) => d.id === prev) ? prev : loadedDlls[0]!.id,
         );
       }
-      if (loadedDlps.length > 0 && !deriveIntentRef.current) {
+      if (loadedDlps.length > 0 && !launchIntentRef.current) {
         setSelectedDlpId((prev) =>
           prev && loadedDlps.some((d) => d.id === prev) ? prev : loadedDlps[0]!.id,
         );
@@ -184,14 +185,33 @@ export function useDlpWorkspace(
   }, [loadWorkspaceData]);
 
   useEffect(() => {
-    if (!initialDeriveTarget) return;
-    deriveIntentRef.current = true;
+    if (!initialLaunchTarget) return;
+    launchIntentRef.current = true;
     setSelectedDlpId("");
-    setBuilderMode("derive");
-    setDeriveDllId(initialDeriveTarget.dllId);
-    setDeriveSessionNumber(initialDeriveTarget.sessionNumber);
-    onConsumeDeriveTarget?.();
-  }, [initialDeriveTarget, onConsumeDeriveTarget]);
+    if (initialLaunchTarget.mode === "derive") {
+      setBuilderMode("derive");
+      setDeriveDllId(initialLaunchTarget.dllId);
+      setDeriveSessionNumber(initialLaunchTarget.sessionNumber);
+    } else {
+      setBuilderMode("scratch");
+      setSelectedCompetencyIds((prev) =>
+        applyDlpLaunchTarget(
+          {
+            selectedDlpId: "",
+            builderMode: "scratch",
+            deriveDllId: "",
+            deriveSessionNumber: 1,
+            selectedCompetencyIds: prev,
+            pickedCompetencyId: "",
+          },
+          initialLaunchTarget,
+        ).selectedCompetencyIds,
+      );
+      const trimmed = initialLaunchTarget.competencyId.trim();
+      if (trimmed) setPickedCompetencyId(trimmed);
+    }
+    onConsumeLaunchTarget?.();
+  }, [initialLaunchTarget, onConsumeLaunchTarget]);
 
   useEffect(() => {
     const match = dlps.find((d) => d.id === selectedDlpId) ?? null;

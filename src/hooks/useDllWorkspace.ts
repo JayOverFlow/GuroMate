@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
-  SESSION_NUMBERS,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import {
   type ClassSection,
   type CurriculumCompetency,
   type DailyLessonLog,
@@ -10,6 +16,13 @@ import {
   type TleComponent,
 } from "../engine/types";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
+import {
+  applyDllLaunchTarget,
+  createInitialDllSessionConfigs,
+  type DllLaunchTarget,
+} from "./workspaceLaunchHelpers";
+
+export type { DllLaunchTarget };
 
 export type ViewMode = "edit" | "markdown";
 
@@ -93,16 +106,10 @@ export const INTENTIONS_LIST_FIELDS: ReadonlyArray<{
   { key: "performanceStandards", label: "Performance Standards (one per line)" },
 ];
 
-function createInitialSessionConfigs(): DllSessionConfig[] {
-  return SESSION_NUMBERS.map((sessionNumber) => ({
-    sessionNumber,
-    mode: "instructional",
-    competencyIds: [],
-    nonInstructionalReason: "",
-  }));
-}
-
-export function useDllWorkspace() {
+export function useDllWorkspace(
+  initialLaunchTarget?: DllLaunchTarget | null,
+  onConsumeLaunchTarget?: () => void,
+) {
   const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
   const [curriculum, setCurriculum] = useState<CurriculumCompetency[]>([]);
   const [sections, setSections] = useState<ClassSection[]>([]);
@@ -119,10 +126,11 @@ export function useDllWorkspace() {
   const [references, setReferences] = useState("");
   const [promptNotes, setPromptNotes] = useState("");
   const [sessionConfigs, setSessionConfigs] = useState<DllSessionConfig[]>(
-    createInitialSessionConfigs,
+    createInitialDllSessionConfigs,
   );
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
+  const launchIntentRef = useRef(Boolean(initialLaunchTarget));
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
@@ -149,7 +157,7 @@ export function useDllWorkspace() {
           (prev) => prev || `Grade ${first.gradeLevel} - ${first.sectionName}`,
         );
       }
-      if (loadedDlls.length > 0) {
+      if (loadedDlls.length > 0 && !launchIntentRef.current) {
         setSelectedDllId((prev) =>
           prev && loadedDlls.some((d) => d.id === prev) ? prev : loadedDlls[0]!.id,
         );
@@ -167,6 +175,16 @@ export function useDllWorkspace() {
   useEffect(() => {
     void loadWorkspaceData();
   }, [loadWorkspaceData]);
+
+  useEffect(() => {
+    if (!initialLaunchTarget) return;
+    launchIntentRef.current = true;
+    setSelectedDllId("");
+    setSessionConfigs((prev) => applyDllLaunchTarget(prev, initialLaunchTarget));
+    const trimmed = initialLaunchTarget.competencyId.trim();
+    if (trimmed) setPickedCompetencyId(trimmed);
+    onConsumeLaunchTarget?.();
+  }, [initialLaunchTarget, onConsumeLaunchTarget]);
 
   useEffect(() => {
     const match = dlls.find((d) => d.id === selectedDllId) ?? null;

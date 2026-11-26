@@ -8,8 +8,8 @@ import type { GuroMateSettings, SessionNumber } from "./engine/types";
 import { useClassroomTimer } from "./hooks/useClassroomTimer";
 import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
 import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
-import { DllWorkspace } from "./workspaces/DllWorkspace";
-import { DlpWorkspace, type DeriveDlpTarget } from "./workspaces/DlpWorkspace";
+import { DllWorkspace, type DllLaunchTarget } from "./workspaces/DllWorkspace";
+import { DlpWorkspace, type DlpLaunchTarget } from "./workspaces/DlpWorkspace";
 import { QuizWorkspace, type QuizLaunchTarget } from "./workspaces/QuizWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
@@ -22,7 +22,8 @@ export function App() {
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(
     () => parseWorkspaceFromHash() ?? "settings",
   );
-  const [deriveTarget, setDeriveTarget] = useState<DeriveDlpTarget | null>(null);
+  const [dllTarget, setDllTarget] = useState<DllLaunchTarget | null>(null);
+  const [dlpTarget, setDlpTarget] = useState<DlpLaunchTarget | null>(null);
   const [quizTarget, setQuizTarget] = useState<QuizLaunchTarget | null>(null);
   const [teacherName, setTeacherName] = useState<string>("");
   const [openTimerTabSignal, setOpenTimerTabSignal] = useState(0);
@@ -70,10 +71,20 @@ export function App() {
     window.location.hash = "classroom";
   }
 
-  function handleDeriveDlp(dllId: string, sessionNumber: SessionNumber) {
-    setDeriveTarget({ dllId, sessionNumber });
+  function handleLaunchDll(target: DllLaunchTarget) {
+    setDllTarget(target);
+    setActiveWorkspace("dll");
+    window.location.hash = "dll";
+  }
+
+  function handleLaunchDlp(target: DlpLaunchTarget) {
+    setDlpTarget(target);
     setActiveWorkspace("dlp");
     window.location.hash = "dlp";
+  }
+
+  function handleDeriveDlp(dllId: string, sessionNumber: SessionNumber) {
+    handleLaunchDlp({ mode: "derive", dllId, sessionNumber });
   }
 
   function handleLaunchQuiz(target: QuizLaunchTarget) {
@@ -92,6 +103,8 @@ export function App() {
     >
       {activeWorkspace === "dll" ? (
         <DllWorkspace
+          initialLaunchTarget={dllTarget}
+          onConsumeLaunchTarget={() => setDllTarget(null)}
           onDeriveDlp={handleDeriveDlp}
           onCreateQuiz={(dllId, sessionNumber) =>
             handleLaunchQuiz({ sourceKind: "dll", dllId, sessionNumber })
@@ -99,8 +112,8 @@ export function App() {
         />
       ) : activeWorkspace === "dlp" ? (
         <DlpWorkspace
-          initialDeriveTarget={deriveTarget}
-          onConsumeDeriveTarget={() => setDeriveTarget(null)}
+          initialLaunchTarget={dlpTarget}
+          onConsumeLaunchTarget={() => setDlpTarget(null)}
           onCreateQuiz={(dlpId) =>
             handleLaunchQuiz({ sourceKind: "dlp", dlpId })
           }
@@ -117,7 +130,15 @@ export function App() {
           }
         />
       ) : activeWorkspace === "curriculum" ? (
-        <CurriculumWorkspace />
+        <CurriculumWorkspace
+          onUseInDll={(competencyId) => handleLaunchDll({ competencyId })}
+          onUseInDlp={(competencyId) =>
+            handleLaunchDlp({ mode: "scratch", competencyId })
+          }
+          onUseInQuiz={(competencyId) =>
+            handleLaunchQuiz({ sourceKind: "standalone", competencyId })
+          }
+        />
       ) : (
         <ClassroomWorkspace
           timer={timer}
