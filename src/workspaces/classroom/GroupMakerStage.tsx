@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { GroupAnimationMode } from "../../engine/classroomPreferences";
 import type {
   GroupGenerationOptions,
@@ -9,6 +9,7 @@ import {
   getRemainingDeckCount,
   isGroupCardRevealed,
   resolveActiveGroupAnimationMode,
+  type ChipDensityTier,
   type GroupPlaybackState,
 } from "../../engine/groupAnimation";
 
@@ -16,13 +17,50 @@ const OVERLAY_STAGE_CLASS =
   "fixed inset-0 z-50 rounded-none border-0 overflow-auto bg-surface p-gutter-xl";
 
 const GROUP_MODE_OPTIONS: ReadonlyArray<{
-  value: "card-deal" | "instant";
+  value: GroupAnimationMode;
   label: string;
   icon: string;
 }> = [
   { value: "card-deal", label: "Card Deal", icon: "style" },
+  { value: "group-yourselves", label: "Group Yourselves", icon: "groups" },
   { value: "instant", label: "Instant", icon: "bolt" },
 ];
+
+const FLOOR_HEIGHT_CLASS: Record<
+  ChipDensityTier,
+  { inline: string; projector: string }
+> = {
+  comfortable: {
+    inline: "min-h-[340px] sm:min-h-[380px]",
+    projector: "min-h-[58vh]",
+  },
+  standard: {
+    inline: "min-h-[400px] sm:min-h-[440px]",
+    projector: "min-h-[64vh]",
+  },
+  compact: {
+    inline: "min-h-[460px] sm:min-h-[520px]",
+    projector: "min-h-[70vh]",
+  },
+};
+
+const CHIP_SIZE_CLASS: Record<
+  ChipDensityTier,
+  { inline: string; projector: string }
+> = {
+  comfortable: {
+    inline: "px-3 py-1.5 text-body-sm max-w-[164px]",
+    projector: "px-4 py-2 text-body-lg max-w-[228px]",
+  },
+  standard: {
+    inline: "px-2.5 py-1 text-label-md max-w-[138px]",
+    projector: "px-3 py-1.5 text-body-md max-w-[184px]",
+  },
+  compact: {
+    inline: "px-2 py-0.5 text-label-sm max-w-[114px]",
+    projector: "px-2.5 py-1 text-body-sm max-w-[154px]",
+  },
+};
 
 export interface GroupMakerStageProps {
   baseId: string;
@@ -73,8 +111,7 @@ export function GroupMakerStage({
   soundToggle,
   projectorToggle,
 }: GroupMakerStageProps) {
-  // Treat persisted "group-yourselves" as "card-deal" in the UI until #30 lands.
-  const selectedUiMode = animationMode === "instant" ? "instant" : "card-deal";
+  const selectedUiMode = animationMode;
   const effectiveMode = resolveActiveGroupAnimationMode(
     animationMode,
     prefersReducedMotion,
@@ -86,6 +123,14 @@ export function GroupMakerStage({
   const remainingCards = playback.plan
     ? getRemainingDeckCount(playback.plan, playback.revealedCount)
     : 0;
+  const minglePlan =
+    isAnimating && playback.mode === "group-yourselves"
+      ? playback.minglePlan
+      : null;
+  const isMingleAnimating = Boolean(minglePlan);
+  const isClusterBeat = playback.mingleBeat === "cluster";
+  const settledFromMingle =
+    playback.phase === "settled" && playback.mode === "group-yourselves";
 
   const settledAnnouncement =
     playback.phase === "settled" && groups.length > 0
@@ -229,23 +274,62 @@ export function GroupMakerStage({
               {isAnimating ? (
                 <>
                   <div className="flex-1 flex justify-center">
-                    <div className="classroom-deck-badge inline-flex items-center gap-gutter-sm px-gutter-md py-gutter-xs rounded-full bg-secondary-container/25 border border-secondary/40 text-on-secondary-container">
-                      <span
-                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-primary text-on-primary"
-                        aria-hidden="true"
+                    {isMingleAnimating && minglePlan ? (
+                      <div
+                        className={`inline-flex items-center gap-gutter-sm px-gutter-md py-gutter-xs rounded-full border transition-colors duration-surface-enter ${
+                          isClusterBeat
+                            ? "bg-primary/10 border-primary/40 text-primary"
+                            : "bg-secondary-container/25 border-secondary/40 text-on-secondary-container"
+                        }`}
                       >
-                        <span className="material-symbols-outlined text-title-md">
-                          style
+                        <span
+                          className={`inline-flex items-center justify-center w-7 h-7 rounded ${
+                            isClusterBeat
+                              ? "bg-primary text-on-primary"
+                              : "bg-secondary text-on-secondary"
+                          }`}
+                          aria-hidden="true"
+                        >
+                          <span className="material-symbols-outlined text-title-md">
+                            {isClusterBeat ? "groups" : "diversity_3"}
+                          </span>
                         </span>
-                      </span>
-                      <span className="font-label text-label-md text-on-surface">
-                        Shuffled Deck
-                      </span>
-                      <span className="px-gutter-sm py-0.5 rounded-full bg-secondary text-on-secondary font-mono text-label-sm tabular-nums">
-                        {remainingCards}{" "}
-                        {remainingCards === 1 ? "card" : "cards"} left
-                      </span>
-                    </div>
+                        <span className="font-label text-label-md text-on-surface">
+                          {isClusterBeat
+                            ? "Locking into groups…"
+                            : "Find your groupmates…"}
+                        </span>
+                        <span
+                          className={`px-gutter-sm py-0.5 rounded-full font-mono text-label-sm tabular-nums ${
+                            isClusterBeat
+                              ? "bg-primary text-on-primary"
+                              : "bg-secondary text-on-secondary"
+                          }`}
+                        >
+                          {isClusterBeat
+                            ? `${minglePlan.groupCount} ${minglePlan.groupCount === 1 ? "group" : "groups"}`
+                            : `${minglePlan.totalStudents} present`}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="classroom-deck-badge inline-flex items-center gap-gutter-sm px-gutter-md py-gutter-xs rounded-full bg-secondary-container/25 border border-secondary/40 text-on-secondary-container">
+                        <span
+                          className="inline-flex items-center justify-center w-7 h-7 rounded bg-primary text-on-primary"
+                          aria-hidden="true"
+                        >
+                          <span className="material-symbols-outlined text-title-md">
+                            style
+                          </span>
+                        </span>
+                        <span className="font-label text-label-md text-on-surface">
+                          Shuffled Deck
+                        </span>
+                        <span className="px-gutter-sm py-0.5 rounded-full bg-secondary text-on-secondary font-mono text-label-sm tabular-nums">
+                          {remainingCards}{" "}
+                          {remainingCards === 1 ? "card" : "cards"} left
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -266,104 +350,235 @@ export function GroupMakerStage({
                   {swapSelection
                     ? "Select a second student to complete the swap (or click the same student to cancel)."
                     : "Click any two students across groups to swap them manually."}
-                  {prefersReducedMotion && selectedUiMode === "card-deal"
+                  {prefersReducedMotion && selectedUiMode !== "instant"
                     ? " Reduced motion is active, so groups reveal instantly."
                     : ""}
                 </p>
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md">
-              {groups.map((group, groupIndex) => {
-                const dealtInGroup = isAnimating
-                  ? group.reduce(
-                      (count, _student, studentIndex) =>
-                        count +
-                        (isGroupCardRevealed(playback, groupIndex, studentIndex)
-                          ? 1
-                          : 0),
-                      0,
-                    )
-                  : group.length;
-
-                return (
-                  <section
-                    key={groupIndex}
-                    aria-label={`Group ${groupIndex + 1}`}
-                    className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
-                  >
-                    <h3
-                      className={`font-title text-on-surface flex items-center justify-between ${
-                        isProjector ? "text-title-lg" : "text-title-md"
+            {isMingleAnimating && minglePlan ? (
+              <div
+                aria-label="Group Yourselves floor stage"
+                aria-busy="true"
+                className={`relative w-full rounded-md border border-outline-variant bg-surface-container-low overflow-hidden select-none ${
+                  isProjector
+                    ? FLOOR_HEIGHT_CLASS[minglePlan.densityTier].projector
+                    : FLOOR_HEIGHT_CLASS[minglePlan.densityTier].inline
+                }`}
+              >
+                {/* Beat 2 group zone targets */}
+                {minglePlan.zones.map((zone) => {
+                  const isEmeraldZone = zone.groupIndex % 2 === 0;
+                  return (
+                    <div
+                      key={zone.groupIndex}
+                      data-beat={isClusterBeat ? "cluster" : "mingle"}
+                      aria-hidden="true"
+                      style={{
+                        left: `${zone.leftPct}%`,
+                        top: `${zone.topPct}%`,
+                        width: `${zone.widthPct}%`,
+                        height: `${zone.heightPct}%`,
+                      }}
+                      className={`classroom-mingle-zone absolute rounded-md border p-gutter-xs sm:p-gutter-sm flex flex-col justify-between ${
+                        isClusterBeat
+                          ? isEmeraldZone
+                            ? "border-primary/45 bg-primary/[0.06]"
+                            : "border-secondary/45 bg-secondary/[0.06]"
+                          : "border-dashed border-outline-variant/60 bg-surface-container/30"
                       }`}
                     >
-                      <span>Group {groupIndex + 1}</span>
-                      <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-lowest border border-outline-variant font-mono text-label-sm tabular-nums">
-                        {isAnimating
-                          ? `${dealtInGroup}/${group.length}`
-                          : group.length}
-                      </span>
-                    </h3>
-                    <ul className="flex flex-col gap-gutter-xs">
-                      {group.map((student, studentIndex) => {
-                        const revealed = isGroupCardRevealed(
-                          playback,
-                          groupIndex,
-                          studentIndex,
-                        );
-                        const isSelected =
-                          !isAnimating &&
-                          swapSelection?.groupIndex === groupIndex &&
-                          swapSelection?.studentIndex === studentIndex;
-                        const sizeClass = isProjector
-                          ? "text-body-md"
-                          : "text-body-sm";
+                      <div className="flex items-center justify-between gap-gutter-xs">
+                        <span
+                          className={`font-title truncate ${
+                            isProjector ? "text-title-md" : "text-label-md"
+                          } ${
+                            isClusterBeat
+                              ? isEmeraldZone
+                                ? "text-primary"
+                                : "text-secondary"
+                              : "text-on-surface-variant"
+                          }`}
+                        >
+                          {zone.label}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded-full font-mono text-label-sm tabular-nums ${
+                            isClusterBeat
+                              ? isEmeraldZone
+                                ? "bg-primary/15 text-primary"
+                                : "bg-secondary/15 text-secondary"
+                              : "bg-surface-container-lowest/70 text-on-surface-variant"
+                          }`}
+                        >
+                          {zone.studentCount}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
 
-                        return (
-                          <li key={`${student.index}-${studentIndex}`}>
-                            {revealed ? (
-                              <button
-                                type="button"
-                                disabled={isAnimating}
-                                aria-pressed={isSelected}
-                                onClick={() =>
-                                  onStudentClick({
-                                    groupIndex,
-                                    studentIndex,
-                                  })
-                                }
-                                className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${sizeClass} ${
-                                  isAnimating && effectiveMode === "card-deal"
-                                    ? "classroom-card-deal-in"
-                                    : ""
-                                } ${
-                                  isSelected
-                                    ? "bg-primary text-on-primary border-primary font-semibold"
-                                    : isAnimating
-                                      ? "bg-surface-container-lowest border-primary/40 text-on-surface cursor-default"
-                                      : "bg-surface-container-lowest border-outline-variant text-on-surface hover:border-primary"
-                                }`}
-                              >
-                                {student.name}
-                              </button>
-                            ) : (
-                              <div
-                                aria-hidden="true"
-                                className={`w-full px-gutter-sm py-gutter-xs rounded border border-dashed border-outline-variant/60 bg-surface-container/50 font-body select-none ${sizeClass}`}
-                              >
-                                <span className="invisible">
+                {/* Compositor-only student chips gliding from mingle positions to group zones */}
+                {minglePlan.chips.map((chip, idx) => {
+                  const isEmeraldZone = chip.groupIndex % 2 === 0;
+                  const x = isClusterBeat ? chip.targetX : chip.mingleX;
+                  const y = isClusterBeat ? chip.targetY : chip.mingleY;
+                  const glideMs = Math.max(
+                    420,
+                    minglePlan.clusterDurationMs - chip.clusterDelayMs - 140,
+                  );
+                  const slotStyle = {
+                    transform: `translate3d(${x}%, ${y}%, 0)`,
+                    "--cluster-duration": `${glideMs}ms`,
+                    "--cluster-delay": `${chip.clusterDelayMs}ms`,
+                  } as CSSProperties;
+                  const chipStyle = {
+                    "--drift-x": `${chip.driftX}px`,
+                    "--drift-y": `${chip.driftY}px`,
+                    "--drift-duration": `${1100 + (idx % 5) * 140}ms`,
+                  } as CSSProperties;
+                  const chipSizeClass = isProjector
+                    ? CHIP_SIZE_CLASS[minglePlan.densityTier].projector
+                    : CHIP_SIZE_CLASS[minglePlan.densityTier].inline;
+
+                  return (
+                    <div
+                      key={`${chip.student.index}-${chip.groupIndex}-${chip.studentIndex}`}
+                      data-beat={isClusterBeat ? "cluster" : "mingle"}
+                      style={slotStyle}
+                      className="classroom-mingle-slot"
+                    >
+                      <div className="classroom-mingle-anchor">
+                        <span
+                          data-beat={isClusterBeat ? "cluster" : "mingle"}
+                          style={chipStyle}
+                          className={`classroom-mingle-chip inline-flex items-center gap-1.5 rounded-full border font-body font-medium shadow-xs truncate ${chipSizeClass} ${
+                            isClusterBeat
+                              ? isEmeraldZone
+                                ? "bg-surface-container-lowest border-primary/60 text-on-surface"
+                                : "bg-surface-container-lowest border-secondary/60 text-on-surface"
+                              : "bg-surface-container-lowest border-outline-variant text-on-surface"
+                          }`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`shrink-0 w-2 h-2 rounded-full ${
+                              isClusterBeat
+                                ? isEmeraldZone
+                                  ? "bg-primary"
+                                  : "bg-secondary"
+                                : "bg-outline"
+                            }`}
+                          />
+                          <span className="truncate">{chip.student.name}</span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md ${
+                  settledFromMingle ? "classroom-group-settle-in" : ""
+                }`}
+              >
+                {groups.map((group, groupIndex) => {
+                  const dealtInGroup = isAnimating
+                    ? group.reduce(
+                        (count, _student, studentIndex) =>
+                          count +
+                          (isGroupCardRevealed(
+                            playback,
+                            groupIndex,
+                            studentIndex,
+                          )
+                            ? 1
+                            : 0),
+                        0,
+                      )
+                    : group.length;
+
+                  return (
+                    <section
+                      key={groupIndex}
+                      aria-label={`Group ${groupIndex + 1}`}
+                      className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
+                    >
+                      <h3
+                        className={`font-title text-on-surface flex items-center justify-between ${
+                          isProjector ? "text-title-lg" : "text-title-md"
+                        }`}
+                      >
+                        <span>Group {groupIndex + 1}</span>
+                        <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-lowest border border-outline-variant font-mono text-label-sm tabular-nums">
+                          {isAnimating
+                            ? `${dealtInGroup}/${group.length}`
+                            : group.length}
+                        </span>
+                      </h3>
+                      <ul className="flex flex-col gap-gutter-xs">
+                        {group.map((student, studentIndex) => {
+                          const revealed = isGroupCardRevealed(
+                            playback,
+                            groupIndex,
+                            studentIndex,
+                          );
+                          const isSelected =
+                            !isAnimating &&
+                            swapSelection?.groupIndex === groupIndex &&
+                            swapSelection?.studentIndex === studentIndex;
+                          const sizeClass = isProjector
+                            ? "text-body-md"
+                            : "text-body-sm";
+
+                          return (
+                            <li key={`${student.index}-${studentIndex}`}>
+                              {revealed ? (
+                                <button
+                                  type="button"
+                                  disabled={isAnimating}
+                                  aria-pressed={isSelected}
+                                  onClick={() =>
+                                    onStudentClick({
+                                      groupIndex,
+                                      studentIndex,
+                                    })
+                                  }
+                                  className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${sizeClass} ${
+                                    isAnimating && effectiveMode === "card-deal"
+                                      ? "classroom-card-deal-in"
+                                      : ""
+                                  } ${
+                                    isSelected
+                                      ? "bg-primary text-on-primary border-primary font-semibold"
+                                      : isAnimating
+                                        ? "bg-surface-container-lowest border-primary/40 text-on-surface cursor-default"
+                                        : "bg-surface-container-lowest border-outline-variant text-on-surface hover:border-primary"
+                                  }`}
+                                >
                                   {student.name}
-                                </span>
-                              </div>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </section>
-                );
-              })}
-            </div>
+                                </button>
+                              ) : (
+                                <div
+                                  aria-hidden="true"
+                                  className={`w-full px-gutter-sm py-gutter-xs rounded border border-dashed border-outline-variant/60 bg-surface-container/50 font-body select-none ${sizeClass}`}
+                                >
+                                  <span className="invisible">
+                                    {student.name}
+                                  </span>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           <p className="font-body text-body-sm text-on-surface-variant">

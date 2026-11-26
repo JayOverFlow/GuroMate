@@ -291,6 +291,87 @@
   .classroom-deck-badge {
     animation: classroom-deck-float 800ms ease-in-out infinite;
   }
+
+  @keyframes classroom-mingle-drift {
+    0%,
+    100% {
+      translate: 0px 0px;
+    }
+    50% {
+      translate: var(--drift-x, 6px) var(--drift-y, -4px);
+    }
+  }
+
+  .classroom-mingle-slot[data-beat="cluster"] {
+    transition-property: transform;
+    transition-duration: var(--cluster-duration, 900ms);
+    transition-delay: var(--cluster-delay, 0ms);
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    transition-timing-function: linear(
+      0,
+      0.24 10%,
+      0.62 24%,
+      0.9 44%,
+      1.02 66%,
+      1.01 84%,
+      1
+    );
+  }
+
+  .classroom-mingle-chip[data-beat="mingle"] {
+    animation: classroom-mingle-drift var(--drift-duration, 1300ms) ease-in-out
+      infinite;
+  }
+
+  .classroom-mingle-zone {
+    transition:
+      opacity 260ms ease-out,
+      transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes classroom-group-settle-in {
+    0% {
+      opacity: 0.72;
+      transform: scale(0.99);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .classroom-group-settle-in {
+    animation: classroom-group-settle-in 200ms ease-out both;
+  }
+}
+
+/* Group Maker: Group Yourselves layout & compositor base rules */
+.classroom-mingle-slot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.classroom-mingle-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+}
+
+.classroom-mingle-chip {
+  translate: 0px 0px;
+  scale: 1;
+}
+
+.classroom-mingle-zone[data-beat="mingle"] {
+  opacity: 0.32;
+  transform: scale(0.985);
+}
+
+.classroom-mingle-zone[data-beat="cluster"] {
+  opacity: 1;
+  transform: scale(1);
 }
 
 @media (prefers-reduced-motion: reduce) {
