@@ -31,6 +31,16 @@ import {
   type GroupSlot,
   type RosterStudent,
 } from "../engine/classroomTools";
+import {
+  advanceGroupPlayback,
+  INITIAL_GROUP_PLAYBACK_STATE,
+  isGroupSwapAllowed,
+  resolveActiveGroupAnimationMode,
+  shouldPlayCardDealTick,
+  skipGroupPlayback,
+  startGroupPlayback,
+  type GroupPlaybackState,
+} from "../engine/groupAnimation";
 import { type ClassSection, type GradeLevel } from "../engine/types";
 import type { ClassroomTimerState } from "./useClassroomTimer";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
@@ -139,17 +149,40 @@ export function useClassroomWorkspace(
   const [groupValue, setGroupValue] = useState<number>(4);
   const [groups, setGroups] = useState<RosterStudent[][]>([]);
   const [swapSelection, setSwapSelection] = useState<GroupSlot | null>(null);
+  const [groupPlayback, setGroupPlayback] = useState<GroupPlaybackState>(
+    INITIAL_GROUP_PLAYBACK_STATE,
+  );
+  const [groupGenerationCount, setGroupGenerationCount] = useState(0);
+  const groupRafRef = useRef<number | null>(null);
+  const canPlayCueRef = useRef<(isInstant?: boolean) => boolean>(() => false);
 
   const [projectorOverlayTab, setProjectorOverlayTab] =
     useState<ToolTab | null>(null);
   const [nativeFullscreenTab, setNativeFullscreenTab] =
     useState<ToolTab | null>(null);
 
+  const isGroupAnimating = groupPlayback.phase === "animating";
+
+  const cancelGroupAnimation = useCallback(() => {
+    if (groupRafRef.current !== null) {
+      cancelAnimationFrame(groupRafRef.current);
+      groupRafRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
+      cancelGroupAnimation();
       classroomAudio.dispose();
     };
-  }, [classroomAudio]);
+  }, [cancelGroupAnimation, classroomAudio]);
+
+  useEffect(() => {
+    if (prefersReducedMotion && groupPlayback.phase === "animating") {
+      cancelGroupAnimation();
+      setGroupPlayback((prev) => skipGroupPlayback(prev));
+    }
+  }, [prefersReducedMotion, groupPlayback.phase, cancelGroupAnimation]);
 
   useEffect(() => {
     if (openTimerTabSignal > 0) {
@@ -228,13 +261,16 @@ export function useClassroomWorkspace(
   );
 
   const resetRosterState = useCallback(() => {
+    cancelGroupAnimation();
     setAbsentIndices(new Set());
     setUsedIndices(new Set());
     setPickedStudent(null);
     setPoolExhausted(false);
     setGroups([]);
     setSwapSelection(null);
-  }, []);
+    setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
+    setGroupGenerationCount(0);
+  }, [cancelGroupAnimation]);
 
   useEffect(() => {
     resetRosterState();
@@ -374,6 +410,7 @@ export function useClassroomWorkspace(
   }
 
   function toggleAbsent(index: number) {
+    if (isGroupAnimating) return;
     setAbsentIndices((prev) => {
       const next = new Set(prev);
       if (next.has(index)) {
@@ -386,13 +423,16 @@ export function useClassroomWorkspace(
     setPoolExhausted(false);
     setGroups([]);
     setSwapSelection(null);
+    setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
   }
 
   function resetAllAttendance() {
+    if (isGroupAnimating) return;
     setAbsentIndices(new Set());
     setPoolExhausted(false);
     setGroups([]);
     setSwapSelection(null);
+    setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
   }
 
   function handlePickStudent() {
@@ -415,15 +455,99 @@ export function useClassroomWorkspace(
   }
 
   function handleGenerateGroups() {
+    if (isGroupAnimating) return;
+    cancelGroupAnimation();
     const next = generateStudentGroups(presentStudents, {
       mode: groupMode,
       value: groupValue,
     });
     setGroups(next);
     setSwapSelection(null);
+
+    if (next.length === 0) {
+      setGroupPlayback(INITIAL_GROUP_PLAYBACK_STATE);
+      return;
+    }
+
+    setGroupGenerationCount((count) => count + 1);
+
+    const activeMode = resolveActiveGroupAnimationMode(
+      preferences.groupMode,
+      prefersReducedMotion,
+    );
+    const isInstant = activeMode === "instant";
+    if (!isInstant && canPlayCueRef.current(false)) {
+      classroomAudio.unlock();
+    }
+
+    const initial = startGroupPlayback(
+      next,
+      preferences.groupMode,
+      prefersReducedMotion,
+    );
+    setGroupPlayback(initial);
+
+    if (initial.phase !== "animating" || !initial.plan) {
+      return;
+    }
+
+    const plan = initial.plan;
+    let currentState = initial;
+    let lastRevealed = 0;
+    let lastTickAt = -1;
+    const startedAt = performance.now();
+
+    const stepFrame = (now: number) => {
+      const nextState = advanceGroupPlayback(currentState, now - startedAt);
+      if (
+        shouldPlayCardDealTick(
+          lastRevealed,
+          nextState.revealedCount,
+          now,
+          lastTickAt,
+        )
+      ) {
+        if (canPlayCueRef.current(false)) {
+          classroomAudio.playCardDeal(
+            nextState.revealedCount / plan.totalCards,
+          );
+        }
+        lastTickAt = now;
+      }
+
+      const changed =
+        nextState.revealedCount !== lastRevealed ||
+        nextState.phase !== currentState.phase;
+      currentState = nextState;
+      lastRevealed = nextState.revealedCount;
+
+      if (changed) {
+        setGroupPlayback(nextState);
+      }
+
+      if (nextState.phase === "settled") {
+        groupRafRef.current = null;
+        if (canPlayCueRef.current(false)) {
+          classroomAudio.playRevealChime();
+        }
+        return;
+      }
+
+      groupRafRef.current = requestAnimationFrame(stepFrame);
+    };
+
+    groupRafRef.current = requestAnimationFrame(stepFrame);
+  }
+
+  function handleSkipGroupAnimation() {
+    cancelGroupAnimation();
+    setGroupPlayback((prev) => skipGroupPlayback(prev));
   }
 
   function handleGroupStudentClick(slot: GroupSlot) {
+    if (!isGroupSwapAllowed(groupPlayback, groups.length)) {
+      return;
+    }
     if (!swapSelection) {
       setSwapSelection(slot);
       return;
@@ -531,6 +655,7 @@ export function useClassroomWorkspace(
       }),
     [preferences.soundEnabled, prefersReducedMotion],
   );
+  canPlayCueRef.current = canPlayClassroomCue;
 
   return {
     stageRefs,
@@ -574,6 +699,9 @@ export function useClassroomWorkspace(
     setGroupValue,
     groups,
     swapSelection,
+    groupPlayback,
+    isGroupAnimating,
+    groupGenerationCount,
     projectorTab,
     projectorOverlayTab,
     isProjectorActive: projectorTab !== null,
@@ -584,6 +712,7 @@ export function useClassroomWorkspace(
     handlePickStudent,
     handleResetPool,
     handleGenerateGroups,
+    handleSkipGroupAnimation,
     handleGroupStudentClick,
     handleCustomDurationSubmit,
     toggleProjectorView,

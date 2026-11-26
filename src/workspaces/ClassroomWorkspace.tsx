@@ -1,5 +1,4 @@
 import { useId } from "react";
-import type { GroupGenerationOptions } from "../engine/classroomTools";
 import { GRADE_LEVELS, type GradeLevel } from "../engine/types";
 import {
   formatClock,
@@ -12,6 +11,7 @@ import {
   TOOL_TABS,
   useClassroomWorkspace,
 } from "../hooks/useClassroomWorkspace";
+import { GroupMakerStage } from "./classroom/GroupMakerStage";
 
 interface ClassroomWorkspaceProps {
   timer: ClassroomTimerState;
@@ -34,8 +34,10 @@ export function ClassroomWorkspace({
   const {
     stageRefs,
     tabRefs,
+    preferences,
     prefersReducedMotion,
     soundEnabled,
+    setGroupAnimationMode,
     toggleSound,
     classroomAudio,
     sections,
@@ -67,6 +69,9 @@ export function ClassroomWorkspace({
     setGroupValue,
     groups,
     swapSelection,
+    groupPlayback,
+    isGroupAnimating,
+    groupGenerationCount,
     projectorTab,
     projectorOverlayTab,
     handleSaveSection,
@@ -76,6 +81,7 @@ export function ClassroomWorkspace({
     handlePickStudent,
     handleResetPool,
     handleGenerateGroups,
+    handleSkipGroupAnimation,
     handleGroupStudentClick,
     handleCustomDurationSubmit,
     toggleProjectorView,
@@ -135,8 +141,9 @@ export function ClassroomWorkspace({
               id={`${baseId}-active-section`}
               aria-label="Active Class Section"
               value={selectedSectionId}
+              disabled={isGroupAnimating}
               onChange={(e) => setSelectedSectionId(e.target.value)}
-              className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+              className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
             >
               {sections.map((section) => (
                 <option key={section.id} value={section.id}>
@@ -151,11 +158,12 @@ export function ClassroomWorkspace({
             <>
               <button
                 type="button"
+                disabled={isGroupAnimating}
                 onClick={() => {
                   setSectionForm(formFromSection(activeSection));
                   setShowSectionForm(true);
                 }}
-                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary"
+                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-on-surface hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
               >
                 <span
                   className="material-symbols-outlined text-title-md"
@@ -167,8 +175,9 @@ export function ClassroomWorkspace({
               </button>
               <button
                 type="button"
+                disabled={isGroupAnimating}
                 onClick={() => void handleDeleteSection()}
-                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-error"
+                className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-error disabled:opacity-50"
               >
                 <span
                   className="material-symbols-outlined text-title-md"
@@ -183,13 +192,14 @@ export function ClassroomWorkspace({
 
           <button
             type="button"
+            disabled={isGroupAnimating}
             onClick={() => {
               setSectionForm(emptySectionForm());
               setShowSectionForm((prev) =>
                 prev && !sectionForm.id ? false : true,
               );
             }}
-            className="shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+            className="shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
           >
             <span
               className="material-symbols-outlined text-title-md"
@@ -692,188 +702,49 @@ export function ClassroomWorkspace({
             </div>
           ) : (
             <div className="flex flex-col gap-gutter-lg">
-              <div
-                ref={(el) => {
+              <GroupMakerStage
+                baseId={baseId}
+                stageRef={(el) => {
                   stageRefs.current.groups = el;
                 }}
-                role={isGroupsOverlay ? "dialog" : undefined}
-                aria-modal={isGroupsOverlay ? true : undefined}
-                aria-label={
-                  isGroupsOverlay ? "Group Maker Projector View" : undefined
+                isProjector={isGroupsProjector}
+                isProjectorOverlay={isGroupsOverlay}
+                presentCount={presentStudents.length}
+                groupMode={groupMode}
+                onGroupModeChange={setGroupMode}
+                groupValue={groupValue}
+                onGroupValueChange={setGroupValue}
+                groups={groups}
+                swapSelection={swapSelection}
+                animationMode={preferences.groupMode}
+                prefersReducedMotion={prefersReducedMotion}
+                onAnimationModeChange={setGroupAnimationMode}
+                playback={groupPlayback}
+                isAnimating={isGroupAnimating}
+                generationCount={groupGenerationCount}
+                onGenerateGroups={handleGenerateGroups}
+                onSkipAnimation={handleSkipGroupAnimation}
+                onStudentClick={handleGroupStudentClick}
+                soundToggle={
+                  <SoundToggleButton
+                    soundEnabled={soundEnabled}
+                    prefersReducedMotion={prefersReducedMotion}
+                    onToggle={handleSoundToggle}
+                  />
                 }
-                tabIndex={isGroupsOverlay ? -1 : undefined}
-                className={`classroom-projector-stage bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md ${
-                  isGroupsOverlay ? OVERLAY_STAGE_CLASS : ""
-                }`}
-              >
-                <div
-                  className={`w-full flex flex-col gap-gutter-md ${
-                    isGroupsProjector ? "max-w-7xl mx-auto my-auto" : ""
-                  }`}
-                >
-                  <div className="flex flex-wrap items-end justify-between gap-gutter-md pb-gutter-md border-b border-outline-variant">
-                    <div className="flex flex-wrap items-end gap-gutter-md">
-                      <div className="flex flex-col gap-gutter-xs">
-                        <label
-                          htmlFor={`${baseId}-group-mode`}
-                          className="font-label text-label-md text-on-surface"
-                        >
-                          Split By
-                        </label>
-                        <select
-                          id={`${baseId}-group-mode`}
-                          value={groupMode}
-                          onChange={(e) =>
-                            setGroupMode(
-                              e.target.value as GroupGenerationOptions["mode"],
-                            )
-                          }
-                          className="px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
-                        >
-                          <option value="count">Number of Groups</option>
-                          <option value="size">Students per Group</option>
-                        </select>
-                      </div>
-
-                      <div className="flex flex-col gap-gutter-xs">
-                        <label
-                          htmlFor={`${baseId}-group-value`}
-                          className="font-label text-label-md text-on-surface"
-                        >
-                          {groupMode === "count"
-                            ? "Number of Groups"
-                            : "Max Students per Group"}
-                        </label>
-                        <input
-                          id={`${baseId}-group-value`}
-                          type="number"
-                          min={1}
-                          max={Math.max(1, presentStudents.length)}
-                          value={groupValue}
-                          onChange={(e) =>
-                            setGroupValue(
-                              Math.max(
-                                1,
-                                Number.parseInt(e.target.value || "1", 10),
-                              ),
-                            )
-                          }
-                          className="w-28 px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant font-mono text-mono-md text-on-surface tabular-nums focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-gutter-sm">
-                      <button
-                        type="button"
-                        disabled={presentStudents.length === 0}
-                        onClick={handleGenerateGroups}
-                        className="inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
-                      >
-                        <span
-                          className="material-symbols-outlined text-title-md"
-                          aria-hidden="true"
-                        >
-                          shuffle
-                        </span>
-                        <span>
-                          {groups.length > 0
-                            ? "Reshuffle Groups"
-                            : "Generate Groups"}
-                        </span>
-                      </button>
-
-                      {isGroupsProjector && (
-                        <SoundToggleButton
-                          soundEnabled={soundEnabled}
-                          prefersReducedMotion={prefersReducedMotion}
-                          onToggle={handleSoundToggle}
-                        />
-                      )}
-
-                      <ProjectorToggleButton
-                        active={isGroupsProjector}
-                        onToggle={() => void toggleProjectorView("groups")}
-                      />
-                    </div>
-                  </div>
-
-                  {groups.length > 0 ? (
-                    <div className="flex flex-col gap-gutter-sm">
-                      <p className="font-body text-body-sm text-on-surface-variant">
-                        {swapSelection
-                          ? "Select a second student to complete the swap (or click the same student to cancel)."
-                          : "Click any two students across groups to swap them manually."}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-gutter-md">
-                        {groups.map((group, groupIndex) => (
-                          <section
-                            key={groupIndex}
-                            aria-label={`Group ${groupIndex + 1}`}
-                            className="p-gutter-md rounded-md border border-outline-variant bg-surface-container-low flex flex-col gap-gutter-sm"
-                          >
-                            <h3
-                              className={`font-title text-on-surface flex items-center justify-between ${
-                                isGroupsProjector
-                                  ? "text-title-lg"
-                                  : "text-title-md"
-                              }`}
-                            >
-                              <span>Group {groupIndex + 1}</span>
-                              <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container-lowest border border-outline-variant font-mono text-label-sm tabular-nums">
-                                {group.length}
-                              </span>
-                            </h3>
-                            <ul className="flex flex-col gap-gutter-xs">
-                              {group.map((student, studentIndex) => {
-                                const isSelected =
-                                  swapSelection?.groupIndex === groupIndex &&
-                                  swapSelection?.studentIndex === studentIndex;
-                                return (
-                                  <li key={`${student.index}-${studentIndex}`}>
-                                    <button
-                                      type="button"
-                                      aria-pressed={isSelected}
-                                      onClick={() =>
-                                        handleGroupStudentClick({
-                                          groupIndex,
-                                          studentIndex,
-                                        })
-                                      }
-                                      className={`w-full text-left px-gutter-sm py-gutter-xs rounded border font-body transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
-                                        isGroupsProjector
-                                          ? "text-body-md"
-                                          : "text-body-sm"
-                                      } ${
-                                        isSelected
-                                          ? "bg-primary text-on-primary border-primary font-semibold"
-                                          : "bg-surface-container-lowest border-outline-variant text-on-surface hover:border-primary"
-                                      }`}
-                                    >
-                                      {student.name}
-                                    </button>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          </section>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="font-body text-body-sm text-on-surface-variant">
-                      Configure group count or max group size and click{" "}
-                      <strong>Generate Groups</strong> ({presentStudents.length}{" "}
-                      present students).
-                    </p>
-                  )}
-                </div>
-              </div>
+                projectorToggle={
+                  <ProjectorToggleButton
+                    active={isGroupsProjector}
+                    onToggle={() => void toggleProjectorView("groups")}
+                  />
+                }
+              />
 
               <AttendancePoolGrid
                 students={activeSection.students}
                 absentIndices={absentIndices}
                 usedIndices={usedIndices}
+                disabled={isGroupAnimating}
                 onToggle={toggleAbsent}
                 onResetAll={resetAllAttendance}
               />
@@ -1135,12 +1006,14 @@ function AttendancePoolGrid({
   students,
   absentIndices,
   usedIndices,
+  disabled = false,
   onToggle,
   onResetAll,
 }: {
   students: readonly string[];
   absentIndices: ReadonlySet<number>;
   usedIndices: ReadonlySet<number>;
+  disabled?: boolean;
   onToggle: (index: number) => void;
   onResetAll: () => void;
 }) {
@@ -1175,8 +1048,9 @@ function AttendancePoolGrid({
           {absentIndices.size > 0 && (
             <button
               type="button"
+              disabled={disabled}
               onClick={onResetAll}
-              className="px-gutter-sm py-0.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container"
+              className="px-gutter-sm py-0.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container disabled:opacity-50"
             >
               Mark All Present
             </button>
@@ -1192,9 +1066,10 @@ function AttendancePoolGrid({
             <button
               key={`${name}-${index}`}
               type="button"
+              disabled={disabled}
               aria-pressed={!isAbsent}
               onClick={() => onToggle(index)}
-              className={`p-gutter-sm rounded border text-left flex items-center justify-between gap-gutter-xs transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary ${
+              className={`p-gutter-sm rounded border text-left flex items-center justify-between gap-gutter-xs transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 ${
                 isAbsent
                   ? "bg-warning-container border-outline-variant text-on-warning-container"
                   : isCalled
