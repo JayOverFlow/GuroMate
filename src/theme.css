@@ -451,14 +451,18 @@
     100% {
       translate: 0px 0px;
     }
-    50% {
-      translate: var(--drift-x, 6px) var(--drift-y, -4px);
+    33% {
+      translate: var(--drift-x, 10px) var(--drift-y, -8px);
+    }
+    66% {
+      translate: calc(var(--drift-x, 10px) * -0.65)
+        calc(var(--drift-y, -8px) * 0.85);
     }
   }
 
   .classroom-mingle-slot[data-beat="cluster"] {
     transition-property: transform;
-    transition-duration: var(--cluster-duration, 900ms);
+    transition-duration: var(--cluster-duration, 3100ms);
     transition-delay: var(--cluster-delay, 0ms);
     transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
     transition-timing-function: linear(
@@ -472,9 +476,25 @@
     );
   }
 
-  .classroom-mingle-chip[data-beat="mingle"] {
-    animation: classroom-mingle-drift var(--drift-duration, 1300ms) ease-in-out
+  .classroom-mingle-slot[data-beat="settled"] {
+    transition-property: transform;
+    transition-duration: 380ms;
+    transition-delay: 0ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .classroom-mingle-dot {
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .classroom-mingle-dot[data-beat="mingle"] {
+    animation: classroom-mingle-drift var(--drift-duration, 1900ms) ease-in-out
       infinite;
+  }
+
+  .classroom-mingle-dot:hover,
+  .classroom-mingle-dot:focus-visible {
+    transform: scale(1.25);
   }
 
   .classroom-mingle-zone {
@@ -506,6 +526,13 @@
   pointer-events: none;
 }
 
+.classroom-mingle-slot:has(
+    .classroom-mingle-dot:hover,
+    .classroom-mingle-dot:focus-visible
+  ) {
+  z-index: 20;
+}
+
 .classroom-mingle-anchor {
   position: absolute;
   left: 0;
@@ -513,17 +540,13 @@
   transform: translate(-50%, -50%);
 }
 
-.classroom-mingle-chip {
+.classroom-mingle-dot {
   translate: 0px 0px;
-  scale: 1;
 }
 
-.classroom-mingle-zone[data-beat="mingle"] {
-  opacity: 0.32;
-  transform: scale(0.985);
-}
-
-.classroom-mingle-zone[data-beat="cluster"] {
+.classroom-mingle-zone[data-beat="mingle"],
+.classroom-mingle-zone[data-beat="cluster"],
+.classroom-mingle-zone[data-beat="settled"] {
   opacity: 1;
   transform: scale(1);
 }

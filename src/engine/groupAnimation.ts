@@ -53,17 +53,30 @@ export interface MingleZoneLayout {
   heightPct: number;
 }
 
-export interface MingleChipPlan {
+export interface MingleSettledChip {
   groupIndex: number;
   studentIndex: number;
   student: RosterStudent;
+  targetX: number;
+  targetY: number;
+}
+
+export interface SettledMingleLayout {
+  chips: readonly MingleSettledChip[];
+  zones: readonly MingleZoneLayout[];
+  totalStudents: number;
+  groupCount: number;
+  zoneCols: number;
+  zoneRows: number;
+  densityTier: ChipDensityTier;
+}
+
+export interface MingleChipPlan extends MingleSettledChip {
   mingleX: number;
   mingleY: number;
   driftX: number;
   driftY: number;
   clusterDelayMs: number;
-  targetX: number;
-  targetY: number;
 }
 
 export interface MingleClusterPlan {
@@ -81,6 +94,8 @@ export interface MingleClusterPlan {
 
 export const MIN_CARD_DEAL_DURATION_MS = 2500;
 export const MAX_CARD_DEAL_DURATION_MS = 3500;
+export const MIN_MINGLE_DURATION_MS = 5500;
+export const MAX_MINGLE_DURATION_MS = 6500;
 const SINGLE_CARD_DURATION_MS = 600;
 const INITIAL_DEAL_DELAY_MS = 120;
 const CARD_SETTLE_MS = 240;
@@ -117,10 +132,13 @@ function computeMingleTiming(totalStudents: number): {
     };
   }
   const totalDurationMs = Math.max(
-    MIN_CARD_DEAL_DURATION_MS,
-    Math.min(MAX_CARD_DEAL_DURATION_MS - 100, 2550 + totalStudents * 17),
+    MIN_MINGLE_DURATION_MS,
+    Math.min(MAX_MINGLE_DURATION_MS, MIN_MINGLE_DURATION_MS + totalStudents * 18),
   );
-  const mingleDurationMs = Math.round(totalDurationMs * 0.42);
+  const progress =
+    (totalDurationMs - MIN_MINGLE_DURATION_MS) /
+    (MAX_MINGLE_DURATION_MS - MIN_MINGLE_DURATION_MS);
+  const mingleDurationMs = Math.round(2400 + progress * 200);
   return {
     mingleDurationMs,
     clusterDurationMs: totalDurationMs - mingleDurationMs,
@@ -128,11 +146,10 @@ function computeMingleTiming(totalStudents: number): {
   };
 }
 
-/** Builds a two-beat Mingle -> Cluster animation plan from generated groups. */
-export function createMingleClusterPlan(
+/** Deterministically computes Group 1..N zones and clustered student dot slots from live groups. */
+export function createSettledMingleLayout(
   groups: readonly (readonly RosterStudent[])[],
-  random: () => number = Math.random,
-): MingleClusterPlan {
+): SettledMingleLayout {
   const entries: Array<{
     groupIndex: number;
     studentIndex: number;
@@ -158,15 +175,10 @@ export function createMingleClusterPlan(
       zoneCols: 0,
       zoneRows: 0,
       densityTier,
-      mingleDurationMs: 0,
-      clusterDurationMs: 0,
-      totalDurationMs: 0,
     };
   }
 
-  const timing = computeMingleTiming(totalStudents);
-
-  // Beat 2 zone grid sized cleanly for small (1-4) and large (5-12+) group counts.
+  // Group zone grid sized cleanly for small (1-4) and large (5-12+) group counts.
   const zoneCols =
     groupCount <= 1
       ? 1
@@ -200,6 +212,80 @@ export function createMingleClusterPlan(
     };
   });
 
+  const headerReserveRatio = zoneRows >= 3 ? 0.34 : zoneRows === 2 ? 0.28 : 0.2;
+
+  const chips: MingleSettledChip[] = entries.map((entry) => {
+    const zone = zones[entry.groupIndex]!;
+    const groupSize = Math.max(1, zone.studentCount);
+    const zoneAspect = Math.max(
+      0.5,
+      (zone.widthPct * 1.65) / Math.max(1, zone.heightPct),
+    );
+    const subCols = Math.max(
+      1,
+      Math.min(groupSize, Math.ceil(Math.sqrt(groupSize * zoneAspect))),
+    );
+    const subRows = Math.ceil(groupSize / subCols);
+    const subRow = Math.floor(entry.studentIndex / subCols);
+    const colInRow = entry.studentIndex % subCols;
+    const itemsInRow =
+      subRow === subRows - 1 ? groupSize - subRow * subCols : subCols;
+    const rowColOffset = (subCols - itemsInRow) / 2;
+
+    const innerLeft = zone.leftPct + zone.widthPct * 0.12;
+    const innerWidth = zone.widthPct * 0.76;
+    const innerTop = zone.topPct + zone.heightPct * headerReserveRatio;
+    const innerHeight = zone.heightPct * (1 - headerReserveRatio - 0.1);
+
+    const targetX = round2(
+      innerLeft + ((colInRow + rowColOffset + 0.5) / subCols) * innerWidth,
+    );
+    const targetY = round2(innerTop + ((subRow + 0.5) / subRows) * innerHeight);
+
+    return {
+      ...entry,
+      targetX,
+      targetY,
+    };
+  });
+
+  return {
+    chips,
+    zones,
+    totalStudents,
+    groupCount,
+    zoneCols,
+    zoneRows,
+    densityTier,
+  };
+}
+
+/** Builds a two-beat Mingle -> Cluster animation plan from generated groups. */
+export function createMingleClusterPlan(
+  groups: readonly (readonly RosterStudent[])[],
+  random: () => number = Math.random,
+): MingleClusterPlan {
+  const settledLayout = createSettledMingleLayout(groups);
+  const { totalStudents, groupCount, densityTier, zones, zoneCols, zoneRows } =
+    settledLayout;
+
+  if (totalStudents === 0 || groupCount === 0) {
+    return {
+      chips: [],
+      zones: [],
+      totalStudents: 0,
+      groupCount: 0,
+      zoneCols: 0,
+      zoneRows: 0,
+      densityTier,
+      mingleDurationMs: 0,
+      clusterDurationMs: 0,
+      totalDurationMs: 0,
+    };
+  }
+
+  const timing = computeMingleTiming(totalStudents);
+
   // Beat 1 grid-jittered mingle floor: assign shuffled cells so groupmates start mixed and never pile up.
   const mingleCols = Math.max(1, Math.ceil(Math.sqrt(totalStudents * 1.6)));
   const mingleRows = Math.max(1, Math.ceil(totalStudents / mingleCols));
@@ -219,10 +305,10 @@ export function createMingleClusterPlan(
   const cellW = 80 / mingleCols;
   const cellH = 76 / mingleRows;
   const maxDrift =
-    densityTier === "compact" ? 5 : densityTier === "standard" ? 7 : 10;
-  const maxDelay = Math.min(180, Math.floor(timing.clusterDurationMs * 0.15));
+    densityTier === "compact" ? 10 : densityTier === "standard" ? 13 : 16;
+  const maxDelay = Math.min(480, Math.floor(timing.clusterDurationMs * 0.15));
 
-  const chips: MingleChipPlan[] = entries.map((entry, idx) => {
+  const chips: MingleChipPlan[] = settledLayout.chips.map((entry, idx) => {
     const cell = cellIndices[idx]!;
     const mCol = cell % mingleCols;
     const mRow = Math.floor(cell / mingleCols);
@@ -239,22 +325,7 @@ export function createMingleClusterPlan(
     const driftX = round2(Math.cos(angle) * driftMag);
     const driftY = round2(Math.sin(angle) * driftMag);
 
-    const zone = zones[entry.groupIndex]!;
-    const groupSize = Math.max(1, zone.studentCount);
-    const subCols = groupSize <= 4 ? 1 : groupSize <= 10 ? 2 : 3;
-    const subRows = Math.ceil(groupSize / subCols);
-    const subCol = entry.studentIndex % subCols;
-    const subRow = Math.floor(entry.studentIndex / subCols);
-
-    const innerLeft = zone.leftPct + zone.widthPct * 0.14;
-    const innerWidth = zone.widthPct * 0.72;
-    const innerTop = zone.topPct + zone.heightPct * 0.3;
-    const innerHeight = zone.heightPct * 0.62;
-
-    const targetX = round2(innerLeft + ((subCol + 0.5) / subCols) * innerWidth);
-    const targetY = round2(innerTop + ((subRow + 0.5) / subRows) * innerHeight);
-
-    const rawDelay = (entry.studentIndex % 5) * 28 + (entry.groupIndex % 3) * 18;
+    const rawDelay = (entry.studentIndex % 6) * 45 + (entry.groupIndex % 4) * 35;
     const clusterDelayMs = Math.min(maxDelay, rawDelay);
 
     return {
@@ -264,8 +335,6 @@ export function createMingleClusterPlan(
       driftX,
       driftY,
       clusterDelayMs,
-      targetX,
-      targetY,
     };
   });
 
