@@ -1,4 +1,6 @@
 import { useId } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { renderDlpMarkdown } from "../engine/dlp";
 import type { SessionNumber } from "../engine/types";
 import {
@@ -7,6 +9,7 @@ import {
   useDlpWorkspace,
   type DlpLaunchTarget,
 } from "../hooks/useDlpWorkspace";
+import { buildDescribedBy } from "../utils/formValidation";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
 import { renderMarkdownBlocks } from "./lessonViewHelpers";
 
@@ -18,8 +21,10 @@ interface DlpWorkspaceProps {
   onCreateQuiz?: (dlpId: string) => void;
 }
 
-const INPUT_CLASS =
-  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary";
+const INPUT_BASE_CLASS =
+  "w-full px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border text-body-md text-on-surface focus-visible:outline-2 focus-visible:outline-primary";
+
+const INPUT_CLASS = `${INPUT_BASE_CLASS} border-outline-variant focus:border-primary`;
 
 export function DlpWorkspace({
   initialLaunchTarget,
@@ -43,7 +48,7 @@ export function DlpWorkspace({
     setViewMode,
     saving,
     builderMode,
-    setBuilderMode,
+    selectBuilderMode,
     deriveDllId,
     setDeriveDllId,
     deriveSessionNumber,
@@ -51,7 +56,7 @@ export function DlpWorkspace({
     lessonTitle,
     setLessonTitle,
     gradeAndSection,
-    setGradeAndSection,
+    handleGradeAndSectionChange,
     references,
     setReferences,
     promptNotes,
@@ -64,15 +69,24 @@ export function DlpWorkspace({
     selectedSourceDll,
     activeSourceSessions,
     selectedSourceSession,
+    formRef,
+    fieldErrors,
+    validateField,
     addScratchCompetency,
-    removeScratchCompetency,
+    requestRemoveScratchCompetency,
     handleGenerate,
     updateDraftHeader,
     updateDraftIntentions,
     updateDraftActivity,
     handleSaveEdits,
-    handleDeleteDlp,
+    requestDeleteDlp,
+    confirmDialog,
   } = useDlpWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
+
+  const gradeSectionErrId = `${baseId}-grade-section-err`;
+  const gradeSectionInvalid = Boolean(fieldErrors.gradeAndSection);
+  const competenciesErrId = `${baseId}-competencies-err`;
+  const competenciesInvalid = Boolean(fieldErrors.selectedCompetencyIds);
 
   return (
     <section
@@ -193,6 +207,8 @@ export function DlpWorkspace({
       ) : !draftDlp ? (
         /* Create New DLP Form */
         <form
+          ref={formRef}
+          noValidate
           onSubmit={(e) => void handleGenerate(e)}
           className="flex flex-col gap-gutter-lg"
         >
@@ -210,7 +226,7 @@ export function DlpWorkspace({
                 type="button"
                 role="tab"
                 aria-selected={builderMode === "scratch"}
-                onClick={() => setBuilderMode("scratch")}
+                onClick={() => selectBuilderMode("scratch")}
                 className={`px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
                   builderMode === "scratch"
                     ? "bg-surface-container-lowest text-primary border border-outline-variant"
@@ -223,7 +239,7 @@ export function DlpWorkspace({
                 type="button"
                 role="tab"
                 aria-selected={builderMode === "derive"}
-                onClick={() => setBuilderMode("derive")}
+                onClick={() => selectBuilderMode("derive")}
                 className={`px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
                   builderMode === "derive"
                     ? "bg-surface-container-lowest text-primary border border-outline-variant"
@@ -342,19 +358,32 @@ export function DlpWorkspace({
                   </label>
                   <input
                     id={`${baseId}-grade-section`}
+                    data-field="gradeAndSection"
                     type="text"
                     required
+                    aria-invalid={gradeSectionInvalid}
+                    aria-describedby={buildDescribedBy(
+                      null,
+                      gradeSectionErrId,
+                      gradeSectionInvalid,
+                    )}
                     value={gradeAndSection}
-                    onChange={(e) => setGradeAndSection(e.target.value)}
+                    onChange={(e) => handleGradeAndSectionChange(e.target.value)}
+                    onBlur={() => validateField("gradeAndSection")}
                     placeholder="e.g. Grade 7 - Rizal"
-                    className={INPUT_CLASS}
+                    className={`${INPUT_BASE_CLASS} ${fieldBorderClass(gradeSectionInvalid)}`}
+                  />
+                  <FieldError
+                    id={gradeSectionErrId}
+                    message={fieldErrors.gradeAndSection}
                   />
                   {sections.length > 0 && (
                     <select
                       aria-label="Fill from saved Class Section"
                       value=""
                       onChange={(e) => {
-                        if (e.target.value) setGradeAndSection(e.target.value);
+                        if (e.target.value)
+                          handleGradeAndSectionChange(e.target.value);
                       }}
                       className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface"
                     >
@@ -444,37 +473,61 @@ export function DlpWorkspace({
                 </button>
               </div>
 
-              {selectedCompetencyIds.length === 0 ? (
-                <p className="font-body text-body-sm text-on-surface-variant">
-                  No Learning Competency selected yet.
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-gutter-xs">
-                  {selectedCompetencyIds.map((cid) => {
-                    const comp = competencyMap.get(cid);
-                    return (
-                      <li
-                        key={cid}
-                        className="p-gutter-sm rounded bg-surface-container-low border border-outline-variant flex items-center justify-between gap-gutter-sm"
-                      >
-                        <span className="font-body text-body-sm text-on-surface">
-                          <span className="inline-block px-1.5 py-0.5 mr-2 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
-                            {comp?.component ?? "TLE"}
-                          </span>
-                          {comp?.learningCompetency ?? cid}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeScratchCompetency(cid)}
-                          className="shrink-0 font-label text-label-sm text-error hover:underline"
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+              <div className="flex flex-col gap-gutter-xs">
+                <div
+                  data-field="selectedCompetencyIds"
+                  tabIndex={-1}
+                  aria-invalid={competenciesInvalid}
+                  aria-describedby={buildDescribedBy(
+                    null,
+                    competenciesErrId,
+                    competenciesInvalid,
+                  )}
+                  className={
+                    competenciesInvalid
+                      ? "rounded p-gutter-sm border border-error bg-error-container/20 focus-visible:outline-2 focus-visible:outline-primary"
+                      : "focus-visible:outline-2 focus-visible:outline-primary"
+                  }
+                >
+                  {selectedCompetencyIds.length === 0 ? (
+                    <p className="font-body text-body-sm text-on-surface-variant">
+                      No Learning Competency selected yet.
+                    </p>
+                  ) : (
+                    <ul className="flex flex-col gap-gutter-xs">
+                      {selectedCompetencyIds.map((cid) => {
+                        const comp = competencyMap.get(cid);
+                        return (
+                          <li
+                            key={cid}
+                            className="p-gutter-sm rounded bg-surface-container-low border border-outline-variant flex items-center justify-between gap-gutter-sm"
+                          >
+                            <span className="font-body text-body-sm text-on-surface">
+                              <span className="inline-block px-1.5 py-0.5 mr-2 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
+                                {comp?.component ?? "TLE"}
+                              </span>
+                              {comp?.learningCompetency ?? cid}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                requestRemoveScratchCompetency(cid)
+                              }
+                              className="shrink-0 font-label text-label-sm text-error hover:underline focus-visible:outline-2 focus-visible:outline-error rounded-sm"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <FieldError
+                  id={competenciesErrId}
+                  message={fieldErrors.selectedCompetencyIds}
+                />
+              </div>
             </fieldset>
           )}
 
@@ -545,8 +598,8 @@ export function DlpWorkspace({
 
               <button
                 type="button"
-                onClick={() => void handleDeleteDlp()}
-                className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border border-outline-variant bg-surface-container-lowest font-label text-label-md text-error hover:bg-error-container/30"
+                onClick={requestDeleteDlp}
+                className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded border border-outline-variant bg-surface-container-lowest font-label text-label-md text-error hover:bg-error-container/30 focus-visible:outline-2 focus-visible:outline-error"
               >
                 <span
                   className="material-symbols-outlined text-body-md"
@@ -875,6 +928,12 @@ export function DlpWorkspace({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        state={confirmDialog.state}
+        onConfirm={confirmDialog.confirm}
+        onCancel={confirmDialog.cancel}
+      />
     </section>
   );
 }

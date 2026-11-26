@@ -15,7 +15,19 @@ import type {
   DlpIntentions,
   SessionNumber,
 } from "../engine/types";
+import {
+  buildDeleteDlpPrompt,
+  buildRemoveDlpCompetencyPrompt,
+} from "../utils/confirmAction";
+import {
+  DLP_BUILDER_FIELDS,
+  validateDlpBuilderField,
+  validateDlpBuilderForm,
+  type DlpBuilderFieldKey,
+  type FieldErrors,
+} from "../utils/formValidation";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
+import { useConfirmDialog } from "./useConfirmDialog";
 import {
   appendUniqueId,
   type DlpLaunchTarget,
@@ -128,7 +140,12 @@ export function useDlpWorkspace(
   );
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<
+    FieldErrors<DlpBuilderFieldKey>
+  >({});
+  const formRef = useRef<HTMLFormElement>(null);
   const launchIntentRef = useRef(Boolean(initialLaunchTarget));
+  const confirmDialog = useConfirmDialog();
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
@@ -188,6 +205,7 @@ export function useDlpWorkspace(
     if (!initialLaunchTarget) return;
     launchIntentRef.current = true;
     setSelectedDlpId("");
+    setFieldErrors({});
     if (initialLaunchTarget.mode === "derive") {
       setBuilderMode("derive");
       setDeriveDllId(initialLaunchTarget.dllId);
@@ -242,20 +260,88 @@ export function useDlpWorkspace(
     [activeSourceSessions, deriveSessionNumber],
   );
 
+  function selectBuilderMode(mode: BuilderMode) {
+    setBuilderMode(mode);
+    setFieldErrors({});
+  }
+
+  function validateField(
+    field: DlpBuilderFieldKey,
+    overrides?: Partial<{
+      mode: BuilderMode;
+      gradeAndSection: string;
+      selectedCompetencyIds: readonly string[];
+    }>,
+  ) {
+    const message = validateDlpBuilderField(field, {
+      mode: overrides?.mode ?? builderMode,
+      gradeAndSection: overrides?.gradeAndSection ?? gradeAndSection,
+      selectedCompetencyIds:
+        overrides?.selectedCompetencyIds ?? selectedCompetencyIds,
+    });
+    setFieldErrors((prev) => {
+      if (!message) {
+        if (!(field in prev)) return prev;
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      }
+      return prev[field] === message ? prev : { ...prev, [field]: message };
+    });
+  }
+
+  function handleGradeAndSectionChange(value: string) {
+    setGradeAndSection(value);
+    if (fieldErrors.gradeAndSection) {
+      validateField("gradeAndSection", { gradeAndSection: value });
+    }
+  }
+
   function addScratchCompetency() {
     if (!pickedCompetencyId) return;
-    setSelectedCompetencyIds((prev) =>
-      prev.includes(pickedCompetencyId) ? prev : [...prev, pickedCompetencyId],
-    );
+    const nextIds = selectedCompetencyIds.includes(pickedCompetencyId)
+      ? selectedCompetencyIds
+      : [...selectedCompetencyIds, pickedCompetencyId];
+    setSelectedCompetencyIds(nextIds);
+    if (fieldErrors.selectedCompetencyIds) {
+      validateField("selectedCompetencyIds", {
+        selectedCompetencyIds: nextIds,
+      });
+    }
   }
 
   function removeScratchCompetency(id: string) {
     setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
   }
 
+  function requestRemoveScratchCompetency(id: string) {
+    const label = competencyMap.get(id)?.learningCompetency ?? id;
+    confirmDialog.requestConfirm(buildRemoveDlpCompetencyPrompt(label), () => {
+      removeScratchCompetency(id);
+    });
+  }
+
   async function handleGenerate(event: FormEvent) {
     event.preventDefault();
     setStatus(null);
+    const errors = validateDlpBuilderForm({
+      mode: builderMode,
+      gradeAndSection,
+      selectedCompetencyIds,
+    });
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      const firstInvalid = DLP_BUILDER_FIELDS.find((field) =>
+        Boolean(errors[field]),
+      );
+      if (firstInvalid) {
+        formRef.current
+          ?.querySelector<HTMLElement>(`[data-field="${firstInvalid}"]`)
+          ?.focus();
+      }
+      return;
+    }
+    setFieldErrors({});
     setGenerating(true);
     try {
       const payload =
@@ -352,27 +438,26 @@ export function useDlpWorkspace(
     }
   }
 
-  async function handleDeleteDlp() {
+  function requestDeleteDlp() {
     if (!draftDlp) return;
-    setStatus(null);
-    try {
-      const res = await fetch(`/api/dlps/${encodeURIComponent(draftDlp.id)}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const remaining = dlps.filter((d) => d.id !== draftDlp.id);
-      setDlps(remaining);
-      setSelectedDlpId(remaining[0]?.id ?? "");
-      setStatus({
-        tone: "success",
-        text: `Deleted "${draftDlp.lessonTitle}".`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    }
+    const target = draftDlp;
+    confirmDialog.requestConfirm(
+      buildDeleteDlpPrompt(target.lessonTitle),
+      async () => {
+        setStatus(null);
+        const res = await fetch(`/api/dlps/${encodeURIComponent(target.id)}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(await readErrorMessage(res));
+        const remaining = dlps.filter((d) => d.id !== target.id);
+        setDlps(remaining);
+        setSelectedDlpId(remaining[0]?.id ?? "");
+        setStatus({
+          tone: "success",
+          text: `Deleted "${target.lessonTitle}".`,
+        });
+      },
+    );
   }
 
   return {
@@ -389,7 +474,7 @@ export function useDlpWorkspace(
     setViewMode,
     saving,
     builderMode,
-    setBuilderMode,
+    selectBuilderMode,
     deriveDllId,
     setDeriveDllId,
     deriveSessionNumber,
@@ -397,7 +482,7 @@ export function useDlpWorkspace(
     lessonTitle,
     setLessonTitle,
     gradeAndSection,
-    setGradeAndSection,
+    handleGradeAndSectionChange,
     references,
     setReferences,
     promptNotes,
@@ -410,13 +495,17 @@ export function useDlpWorkspace(
     selectedSourceDll,
     activeSourceSessions,
     selectedSourceSession,
+    formRef,
+    fieldErrors,
+    validateField,
     addScratchCompetency,
-    removeScratchCompetency,
+    requestRemoveScratchCompetency,
     handleGenerate,
     updateDraftHeader,
     updateDraftIntentions,
     updateDraftActivity,
     handleSaveEdits,
-    handleDeleteDlp,
+    requestDeleteDlp,
+    confirmDialog,
   };
 }

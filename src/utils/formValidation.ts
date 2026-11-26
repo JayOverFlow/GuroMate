@@ -1,8 +1,11 @@
 import { AI_PROVIDER_MAP } from "../engine/providers";
-import type {
-  DllSessionConfig,
-  GuroMateSettings,
-  SessionNumber,
+import {
+  QUIZ_QUESTION_TYPES,
+  type DllSessionConfig,
+  type GuroMateSettings,
+  type QuizItemCounts,
+  type QuizQuestionType,
+  type SessionNumber,
 } from "../engine/types";
 
 export type FieldErrors<K extends string> = Partial<Record<K, string>>;
@@ -397,6 +400,152 @@ export function validateDllBuilderForm(
   const errors: FieldErrors<DllBuilderFieldKey> = {};
   for (const field of DLL_BUILDER_FIELDS) {
     const message = validateDllBuilderField(field, input);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}
+
+export type DlpBuilderFieldKey = "gradeAndSection" | "selectedCompetencyIds";
+
+export interface DlpBuilderFormInput {
+  mode: "scratch" | "derive";
+  gradeAndSection: string;
+  selectedCompetencyIds: readonly string[];
+}
+
+export const DLP_BUILDER_FIELDS: readonly DlpBuilderFieldKey[] = [
+  "gradeAndSection",
+  "selectedCompetencyIds",
+];
+
+export function validateDlpBuilderField(
+  field: DlpBuilderFieldKey,
+  input: DlpBuilderFormInput,
+): string | undefined {
+  if (input.mode !== "scratch") return undefined;
+  switch (field) {
+    case "gradeAndSection":
+      return isNonEmptyText(input.gradeAndSection)
+        ? undefined
+        : "Enter a Grade Level and Section.";
+    case "selectedCompetencyIds":
+      return input.selectedCompetencyIds.length > 0
+        ? undefined
+        : "Select at least one Learning Competency.";
+  }
+}
+
+export function validateDlpBuilderForm(
+  input: DlpBuilderFormInput,
+): FieldErrors<DlpBuilderFieldKey> {
+  const errors: FieldErrors<DlpBuilderFieldKey> = {};
+  for (const field of DLP_BUILDER_FIELDS) {
+    const message = validateDlpBuilderField(field, input);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}
+
+export type QuizBuilderFieldKey =
+  | "gradeAndSection"
+  | "selectedCompetencyIds"
+  | "itemCounts";
+
+export type QuizItemCountDrafts = Record<QuizQuestionType, string | number>;
+
+export interface QuizBuilderFormInput {
+  sourceKind: "standalone" | "dll" | "dlp";
+  gradeAndSection: string;
+  selectedCompetencyIds: readonly string[];
+  itemCounts: QuizItemCountDrafts;
+}
+
+export const QUIZ_BUILDER_FIELDS: readonly QuizBuilderFieldKey[] = [
+  "gradeAndSection",
+  "selectedCompetencyIds",
+  "itemCounts",
+];
+
+export function parseQuizItemCount(value: string | number): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 && value <= 50 ? value : null;
+  }
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 50
+    ? parsed
+    : null;
+}
+
+export function parseQuizItemCounts(
+  drafts: QuizItemCountDrafts,
+): QuizItemCounts | null {
+  const counts = {} as QuizItemCounts;
+  let total = 0;
+  for (const type of QUIZ_QUESTION_TYPES) {
+    const parsed = parseQuizItemCount(drafts[type]);
+    if (parsed === null) return null;
+    counts[type] = parsed;
+    total += parsed;
+  }
+  return total >= 1 ? counts : null;
+}
+
+export function getInvalidQuizCountTypes(
+  drafts: QuizItemCountDrafts,
+): QuizQuestionType[] {
+  const invalid: QuizQuestionType[] = [];
+  let total = 0;
+  for (const type of QUIZ_QUESTION_TYPES) {
+    const parsed = parseQuizItemCount(drafts[type]);
+    if (parsed === null) {
+      invalid.push(type);
+    } else {
+      total += parsed;
+    }
+  }
+  if (invalid.length > 0) return invalid;
+  return total >= 1 ? [] : [...QUIZ_QUESTION_TYPES];
+}
+
+export function validateQuizBuilderField(
+  field: QuizBuilderFieldKey,
+  input: QuizBuilderFormInput,
+): string | undefined {
+  switch (field) {
+    case "gradeAndSection":
+      if (input.sourceKind !== "standalone") return undefined;
+      return isNonEmptyText(input.gradeAndSection)
+        ? undefined
+        : "Enter a Grade Level and Section.";
+    case "selectedCompetencyIds":
+      if (input.sourceKind !== "standalone") return undefined;
+      return input.selectedCompetencyIds.length > 0
+        ? undefined
+        : "Select at least one Learning Competency.";
+    case "itemCounts": {
+      let total = 0;
+      for (const type of QUIZ_QUESTION_TYPES) {
+        const parsed = parseQuizItemCount(input.itemCounts[type]);
+        if (parsed === null) {
+          return "Enter whole numbers from 0 to 50 for each question type.";
+        }
+        total += parsed;
+      }
+      return total >= 1
+        ? undefined
+        : "Set at least 1 item across question types.";
+    }
+  }
+}
+
+export function validateQuizBuilderForm(
+  input: QuizBuilderFormInput,
+): FieldErrors<QuizBuilderFieldKey> {
+  const errors: FieldErrors<QuizBuilderFieldKey> = {};
+  for (const field of QUIZ_BUILDER_FIELDS) {
+    const message = validateQuizBuilderField(field, input);
     if (message) errors[field] = message;
   }
   return errors;

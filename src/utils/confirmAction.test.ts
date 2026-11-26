@@ -4,7 +4,11 @@ import {
   buildDeleteClassSectionPrompt,
   buildDeleteCustomCompetencyPrompt,
   buildDeleteDllPrompt,
+  buildDeleteDlpPrompt,
+  buildDeleteQuizPrompt,
   buildRemoveDllCompetencyPrompt,
+  buildRemoveDlpCompetencyPrompt,
+  buildRemoveQuizCompetencyPrompt,
   confirmDialogReducer,
   formatConfirmError,
   type ConfirmPrompt,
@@ -193,6 +197,54 @@ describe("buildDeleteCustomCompetencyPrompt & formatConfirmError", () => {
     expect(buildRemoveDllCompetencyPrompt("   ", 1)).toEqual({
       title: "Remove Learning Competency?",
       body: 'Remove "this Learning Competency" from Session 1? You can add it back anytime.',
+      confirmLabel: "Remove",
+    });
+  });
+
+  it("builds the canonical Delete Daily Lesson Plan prompt", () => {
+    expect(buildDeleteDlpPrompt("  Safe Hand Tool Handling  ")).toEqual({
+      title: "Delete Daily Lesson Plan?",
+      body: 'Permanently delete "Safe Hand Tool Handling" from local storage? This cannot be undone.',
+      confirmLabel: "Delete DLP",
+      busyLabel: "Deleting...",
+    });
+    expect(buildDeleteDlpPrompt("   ")).toEqual({
+      title: "Delete Daily Lesson Plan?",
+      body: 'Permanently delete "this Daily Lesson Plan" from local storage? This cannot be undone.',
+      confirmLabel: "Delete DLP",
+      busyLabel: "Deleting...",
+    });
+  });
+
+  it("builds the canonical Delete Quiz prompt", () => {
+    expect(buildDeleteQuizPrompt("  Formative Check: HTML Forms  ")).toEqual({
+      title: "Delete Quiz?",
+      body: 'Permanently delete "Formative Check: HTML Forms" from local storage? This cannot be undone.',
+      confirmLabel: "Delete Quiz",
+      busyLabel: "Deleting...",
+    });
+    expect(buildDeleteQuizPrompt("")).toEqual({
+      title: "Delete Quiz?",
+      body: 'Permanently delete "this Quiz" from local storage? This cannot be undone.',
+      confirmLabel: "Delete Quiz",
+      busyLabel: "Deleting...",
+    });
+  });
+
+  it("builds the canonical Remove Learning Competency prompts for DLP and Quiz drafts", () => {
+    expect(
+      buildRemoveDlpCompetencyPrompt("  Classify hand tools by function  "),
+    ).toEqual({
+      title: "Remove Learning Competency?",
+      body: 'Remove "Classify hand tools by function" from this Daily Lesson Plan? You can add it back anytime.',
+      confirmLabel: "Remove",
+    });
+
+    expect(
+      buildRemoveQuizCompetencyPrompt("  Apply basic HTML tags  "),
+    ).toEqual({
+      title: "Remove Learning Competency?",
+      body: 'Remove "Apply basic HTML tags" from this Quiz? You can add it back anytime.',
       confirmLabel: "Remove",
     });
   });
