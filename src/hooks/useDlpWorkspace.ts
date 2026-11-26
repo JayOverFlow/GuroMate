@@ -17,7 +17,7 @@ import type {
 } from "../engine/types";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import {
-  applyDlpLaunchTarget,
+  appendUniqueId,
   type DlpLaunchTarget,
 } from "./workspaceLaunchHelpers";
 
@@ -195,17 +195,7 @@ export function useDlpWorkspace(
     } else {
       setBuilderMode("scratch");
       setSelectedCompetencyIds((prev) =>
-        applyDlpLaunchTarget(
-          {
-            selectedDlpId: "",
-            builderMode: "scratch",
-            deriveDllId: "",
-            deriveSessionNumber: 1,
-            selectedCompetencyIds: prev,
-            pickedCompetencyId: "",
-          },
-          initialLaunchTarget,
-        ).selectedCompetencyIds,
+        appendUniqueId(prev, initialLaunchTarget.competencyId),
       );
       const trimmed = initialLaunchTarget.competencyId.trim();
       if (trimmed) setPickedCompetencyId(trimmed);

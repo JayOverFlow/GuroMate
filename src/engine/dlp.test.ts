@@ -508,5 +508,16 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
       references: "Teacher Custom Handout p. 8",
     });
     expect(customRefDlp.references).toBe("Teacher Custom Handout p. 8");
+
+    const shsComp = (
+      await engine.listCurriculum({ gradeLevel: 11, component: "SHS_CORE" })
+    )[0]!;
+    const shsScratchDlp = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 11 - Mabini",
+      competencyIds: [shsComp.id],
+    });
+    expect(shsScratchDlp.learningAreas).toBe("SHS Core");
+    expect(shsScratchDlp.learningAreas).not.toContain("SHS_CORE");
   });
 });

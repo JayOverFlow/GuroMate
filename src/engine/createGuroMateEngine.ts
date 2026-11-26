@@ -41,7 +41,7 @@ import {
 } from "./quiz";
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
-import { resolveLessonReferences } from "./lessonHelpers";
+import { formatLearningAreas, resolveLessonReferences } from "./lessonHelpers";
 import { createLiveAiAdapter } from "./liveAiAdapter";
 import {
   AI_PROVIDER_MAP,
@@ -799,7 +799,7 @@ export function createGuroMateEngine(
     const catalog = await listCurriculum();
     const competencyMap = new Map(catalog.map((c) => [c.id, c]));
     const resolved = resolveDllSessions(input, competencyMap);
-    const learningAreas = resolved.components.join(", ");
+    const learningAreas = formatLearningAreas(resolved.components);
 
     const prompt = buildDllPrompt({
       lessonTitle: input.lessonTitle,

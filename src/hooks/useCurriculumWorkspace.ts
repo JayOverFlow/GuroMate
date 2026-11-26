@@ -23,6 +23,8 @@ export const COMPONENT_SHORT_LABELS: Record<TleComponent, string> = {
   SHS_CORE: "SHS Core",
 };
 
+export type BowFilterMode = "all" | "with_bow" | "without_bow";
+
 export interface CurriculumStatusState {
   tone: "success" | "error";
   text: string;
@@ -120,7 +122,7 @@ export function useCurriculumWorkspace() {
   const [quarterOrTerm, setQuarterOrTerm] = useState<string>("");
   const [component, setComponent] = useState<TleComponent | "">("");
   const [sector, setSector] = useState<string>("");
-  const [hasBow, setHasBow] = useState<"" | "true" | "false">("");
+  const [hasBow, setHasBow] = useState<BowFilterMode>("all");
   const [query, setQuery] = useState<string>("");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -172,7 +174,8 @@ export function useCurriculumWorkspace() {
     }
     if (component !== "") params.set("component", component);
     if (sector) params.set("sector", sector);
-    if (hasBow !== "") params.set("hasBow", hasBow);
+    if (hasBow === "with_bow") params.set("hasBow", "true");
+    else if (hasBow === "without_bow") params.set("hasBow", "false");
     if (query.trim()) params.set("query", query.trim());
     const qs = params.toString();
     return qs ? `/api/curriculum?${qs}` : "/api/curriculum";

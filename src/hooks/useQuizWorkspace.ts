@@ -19,7 +19,7 @@ import {
 } from "../engine/types";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import {
-  applyQuizLaunchTarget,
+  appendUniqueId,
   type QuizLaunchTarget,
 } from "./workspaceLaunchHelpers";
 
@@ -154,18 +154,7 @@ export function useQuizWorkspace(
     } else {
       setSourceKind("standalone");
       setSelectedCompetencyIds((prev) =>
-        applyQuizLaunchTarget(
-          {
-            selectedQuizId: "",
-            sourceKind: "standalone",
-            selectedDllId: "",
-            selectedSessionNumber: 1,
-            selectedDlpId: "",
-            selectedCompetencyIds: prev,
-            pickedCompetencyId: "",
-          },
-          initialLaunchTarget,
-        ).selectedCompetencyIds,
+        appendUniqueId(prev, initialLaunchTarget.competencyId),
       );
       const trimmed = initialLaunchTarget.competencyId.trim();
       if (trimmed) setPickedCompetencyId(trimmed);
