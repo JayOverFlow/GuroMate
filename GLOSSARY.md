@@ -1,6 +1,6 @@
 # GuroMate
 
-GuroMate is a personal instructional planning and classroom management system for Philippine pre-service TLE teachers (Grades 7–10) built around the DepEd MATATAG curriculum and the ILAW lesson design framework.
+GuroMate is a personal instructional planning and classroom management system for Philippine pre-service TLE teachers (Grades 7–12) built around the DepEd MATATAG curriculum and the ILAW lesson design framework.
 
 ## Language
 
@@ -61,15 +61,19 @@ The official DepEd MATATAG TLE curriculum specification for Grades 7–10 defini
 _Avoid_: Syllabus, course outline
 
 **Budget of Work (BoW)**:
-A DepEd pacing document that maps **Learning Competencies** across terms and weeks alongside **Suggested Activities** and **Suggested Performance Tasks**.
+A DepEd pacing document for Grades 7–12 that maps **Learning Competencies** across terms (three-term or one-term) and weeks alongside **Suggested Activities** and **Suggested Performance Tasks**.
 _Avoid_: Pacing guide, schedule
 
 **TLE Component**:
-One of the four major branches of Technology and Livelihood Education: **Information and Communications Technology (ICT)**, **Agriculture and Fishery Arts (AFA)**, **Family and Consumer Science (FCS)**, and **Industrial Arts (IA)**.
+One of the four major branches of Technology and Livelihood Education (and Grade 12 Technical-Professional electives): **Information and Communications Technology (ICT)**, **Agriculture and Fishery Arts (AFA)**, **Family and Consumer Science (FCS)**, and **Industrial Arts (IA)**.
 _Avoid_: Subject, strand, track
 
+**SHS Core**:
+The Senior High School (Grade 11) general education core curriculum classification alongside the four **TLE Components**, covering core subjects such as Effective Communication, General Mathematics, General Science, Life and Career Skills, Mabisang Komunikasyon, and Pag-aaral ng Kasaysayan at Lipunang Pilipino.
+_Avoid_: General education, non-TLE, academic track
+
 **Sector**:
-A specialized industry cluster within a **TLE Component** taken in Grades 9 and 10 (e.g., Computer Programming, Computer Systems Servicing, Visual Arts, Telecommunications under ICT; Animal Production, Aquaculture, Crop Production, Fish Capture, Food Processing under AFA; etc.).
+A specialized industry cluster, Grade 12 Technical-Professional elective, or **SHS Core** subject within a component (e.g., Computer Programming, Computer Systems Servicing, Animation under ICT; Animal Production, Aquaculture under AFA; Hospitality and Tourism electives under FCS; Construction, Industrial, or Maritime electives under IA; General Mathematics under SHS Core).
 _Avoid_: Major, elective
 
 **Learning Competency**:
