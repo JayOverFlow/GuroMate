@@ -1,0 +1,557 @@
+import { AI_PROVIDER_MAP } from "../engine/providers";
+import {
+  QUIZ_QUESTION_TYPES,
+  type DllSessionConfig,
+  type GuroMateSettings,
+  type QuizItemCounts,
+  type QuizQuestionType,
+  type SessionNumber,
+} from "../engine/types";
+
+export type FieldErrors<K extends string> = Partial<Record<K, string>>;
+
+export function updateFieldError<K extends string>(
+  prev: FieldErrors<K>,
+  field: K,
+  nextError: string | undefined,
+): FieldErrors<K> {
+  if (!nextError) {
+    if (!(field in prev)) return prev;
+    const next = { ...prev };
+    delete next[field];
+    return next;
+  }
+  return prev[field] === nextError ? prev : { ...prev, [field]: nextError };
+}
+
+export function validateFields<K extends string>(
+  fields: readonly K[],
+  validate: (field: K) => string | undefined,
+): FieldErrors<K> {
+  const errors: FieldErrors<K> = {};
+  for (const field of fields) {
+    const message = validate(field);
+    if (message) errors[field] = message;
+  }
+  return errors;
+}
+
+export type SettingsFieldKey =
+  | "studentTeacherName"
+  | "cooperatingTeacherName"
+  | "tleCoordinatorName"
+  | "academicHeadName"
+  | "aiDeclaration"
+  | "modelId"
+  | "baseUrl"
+  | "apiKey";
+
+export type SettingsValidationScope = "save" | "test" | "refresh";
+
+export interface SettingsValidationOptions {
+  isCustomModel?: boolean;
+}
+
+export const SETTINGS_SCOPE_FIELDS: Record<
+  SettingsValidationScope,
+  readonly SettingsFieldKey[]
+> = {
+  save: [
+    "studentTeacherName",
+    "cooperatingTeacherName",
+    "tleCoordinatorName",
+    "academicHeadName",
+    "aiDeclaration",
+    "modelId",
+    "baseUrl",
+    "apiKey",
+  ],
+  test: ["modelId", "baseUrl", "apiKey"],
+  refresh: ["baseUrl", "apiKey"],
+};
+
+export function buildDescribedBy(
+  hintId: string | null | undefined,
+  errorId: string | null | undefined,
+  hasError: boolean,
+): string | undefined {
+  const ids = [hintId?.trim(), hasError ? errorId?.trim() : undefined].filter(
+    (id): id is string => Boolean(id),
+  );
+  return ids.length > 0 ? ids.join(" ") : undefined;
+}
+
+export function isNonEmptyText(value: string): boolean {
+  return value.trim().length > 0;
+}
+
+export function isValidHttpUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function validateSettingsField(
+  field: SettingsFieldKey,
+  settings: GuroMateSettings,
+  options?: SettingsValidationOptions,
+): string | undefined {
+  switch (field) {
+    case "studentTeacherName":
+      return isNonEmptyText(settings.profile.studentTeacherName)
+        ? undefined
+        : "Enter the pre-service teacher name.";
+    case "cooperatingTeacherName":
+      return isNonEmptyText(settings.profile.cooperatingTeacherName)
+        ? undefined
+        : "Enter the cooperating teacher name.";
+    case "tleCoordinatorName":
+      return isNonEmptyText(settings.profile.tleCoordinatorName)
+        ? undefined
+        : "Enter the TLE coordinator name.";
+    case "academicHeadName":
+      return isNonEmptyText(settings.profile.academicHeadName)
+        ? undefined
+        : "Enter the Academic Head coordinator name.";
+    case "aiDeclaration":
+      return isNonEmptyText(settings.profile.aiDeclaration)
+        ? undefined
+        : "Enter a Declaration of AI Use statement.";
+    case "modelId":
+      return isNonEmptyText(settings.ai.modelId)
+        ? undefined
+        : options?.isCustomModel
+          ? "Enter a custom model ID."
+          : "Select a model ID.";
+    case "baseUrl":
+      return isValidHttpUrl(settings.ai.baseUrl)
+        ? undefined
+        : "Enter a valid http:// or https:// base URL.";
+    case "apiKey": {
+      const provider = AI_PROVIDER_MAP.get(settings.ai.aiProvider);
+      if (!provider?.requiresKey) return undefined;
+      return isNonEmptyText(settings.ai.apiKey)
+        ? undefined
+        : `Enter an API key for ${provider.label}.`;
+    }
+  }
+}
+
+export function validateSettingsForm(
+  settings: GuroMateSettings,
+  scope: SettingsValidationScope = "save",
+  options?: SettingsValidationOptions,
+): FieldErrors<SettingsFieldKey> {
+  return validateFields(SETTINGS_SCOPE_FIELDS[scope], (field) =>
+    validateSettingsField(field, settings, options),
+  );
+}
+
+export type CustomCompetencyFieldKey =
+  | "gradeLevels"
+  | "quarters"
+  | "contentTopic"
+  | "contentStandard"
+  | "performanceStandard"
+  | "learningCompetency";
+
+export interface CustomCompetencyFormInput {
+  gradeLevels: readonly number[];
+  quarters: readonly number[];
+  contentTopic: string;
+  contentStandard: string;
+  performanceStandard: string;
+  learningCompetency: string;
+}
+
+export const CUSTOM_COMPETENCY_FIELDS: readonly CustomCompetencyFieldKey[] = [
+  "gradeLevels",
+  "quarters",
+  "contentTopic",
+  "contentStandard",
+  "performanceStandard",
+  "learningCompetency",
+];
+
+export function validateCustomCompetencyField(
+  field: CustomCompetencyFieldKey,
+  input: CustomCompetencyFormInput,
+): string | undefined {
+  switch (field) {
+    case "gradeLevels":
+      return input.gradeLevels.length > 0
+        ? undefined
+        : "Select at least one grade level.";
+    case "quarters":
+      return input.quarters.length > 0
+        ? undefined
+        : "Select at least one quarter.";
+    case "contentTopic":
+      return isNonEmptyText(input.contentTopic)
+        ? undefined
+        : "Enter a content topic.";
+    case "contentStandard":
+      return isNonEmptyText(input.contentStandard)
+        ? undefined
+        : "Enter a Content Standard.";
+    case "performanceStandard":
+      return isNonEmptyText(input.performanceStandard)
+        ? undefined
+        : "Enter a Performance Standard.";
+    case "learningCompetency":
+      return isNonEmptyText(input.learningCompetency)
+        ? undefined
+        : "Enter a Learning Competency.";
+  }
+}
+
+export function validateCustomCompetencyForm(
+  input: CustomCompetencyFormInput,
+): FieldErrors<CustomCompetencyFieldKey> {
+  return validateFields(CUSTOM_COMPETENCY_FIELDS, (field) =>
+    validateCustomCompetencyField(field, input),
+  );
+}
+
+export function parseRosterText(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export type ClassSectionFieldKey = "sectionName" | "rosterText";
+
+export interface ClassSectionFormInput {
+  sectionName: string;
+  rosterText: string;
+}
+
+export const CLASS_SECTION_FIELDS: readonly ClassSectionFieldKey[] = [
+  "sectionName",
+  "rosterText",
+];
+
+export function validateClassSectionField(
+  field: ClassSectionFieldKey,
+  input: ClassSectionFormInput,
+): string | undefined {
+  switch (field) {
+    case "sectionName":
+      return isNonEmptyText(input.sectionName)
+        ? undefined
+        : "Enter a section name.";
+    case "rosterText":
+      return parseRosterText(input.rosterText).length > 0
+        ? undefined
+        : "Enter at least one student name (one per line).";
+  }
+}
+
+export function validateClassSectionForm(
+  input: ClassSectionFormInput,
+): FieldErrors<ClassSectionFieldKey> {
+  return validateFields(CLASS_SECTION_FIELDS, (field) =>
+    validateClassSectionField(field, input),
+  );
+}
+
+export type CustomTimerFieldKey = "minutes" | "seconds" | "duration";
+
+export interface CustomTimerFormInput {
+  minutes: string | number;
+  seconds: string | number;
+}
+
+export const CUSTOM_TIMER_FIELDS: readonly CustomTimerFieldKey[] = [
+  "minutes",
+  "seconds",
+  "duration",
+];
+
+const TIMER_MAX_MINUTES = 180;
+const TIMER_MAX_SECONDS = 59;
+
+function parseIntegerInRange(
+  value: string | number,
+  min: number,
+  max: number,
+): number | null {
+  let parsed: number;
+  if (typeof value === "number") {
+    parsed = value;
+  } else {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    parsed = Number(trimmed);
+  }
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max
+    ? parsed
+    : null;
+}
+
+function parseTimerParts(input: CustomTimerFormInput): {
+  minutes: number | null;
+  seconds: number | null;
+} {
+  return {
+    minutes: parseIntegerInRange(input.minutes, 0, TIMER_MAX_MINUTES),
+    seconds: parseIntegerInRange(input.seconds, 0, TIMER_MAX_SECONDS),
+  };
+}
+
+export function parseCustomTimerDuration(
+  input: CustomTimerFormInput,
+): { minutes: number; seconds: number } | null {
+  const { minutes, seconds } = parseTimerParts(input);
+  if (minutes === null || seconds === null || minutes * 60 + seconds <= 0) {
+    return null;
+  }
+  return { minutes, seconds };
+}
+
+export function validateCustomTimerField(
+  field: CustomTimerFieldKey,
+  input: CustomTimerFormInput,
+): string | undefined {
+  const { minutes, seconds } = parseTimerParts(input);
+  switch (field) {
+    case "minutes":
+      return minutes !== null
+        ? undefined
+        : `Enter a whole number from 0 to ${TIMER_MAX_MINUTES}.`;
+    case "seconds":
+      return seconds !== null
+        ? undefined
+        : `Enter a whole number from 0 to ${TIMER_MAX_SECONDS}.`;
+    case "duration":
+      if (minutes === null || seconds === null) return undefined;
+      return minutes * 60 + seconds > 0
+        ? undefined
+        : "Enter a duration greater than 00:00.";
+  }
+}
+
+export function validateCustomTimerForm(
+  input: CustomTimerFormInput,
+): FieldErrors<CustomTimerFieldKey> {
+  return validateFields(CUSTOM_TIMER_FIELDS, (field) =>
+    validateCustomTimerField(field, input),
+  );
+}
+
+export type DllSessionFieldKey = `session-${SessionNumber}`;
+
+export type DllBuilderFieldKey =
+  | "gradeAndSection"
+  | DllSessionFieldKey
+  | "sessions";
+
+export interface DllBuilderFormInput {
+  gradeAndSection: string;
+  sessions: readonly DllSessionConfig[];
+}
+
+export const DLL_BUILDER_FIELDS: readonly DllBuilderFieldKey[] = [
+  "gradeAndSection",
+  "session-1",
+  "session-2",
+  "session-3",
+  "session-4",
+  "session-5",
+  "sessions",
+];
+
+export function dllSessionFieldKey(
+  sessionNumber: SessionNumber,
+): DllSessionFieldKey {
+  return `session-${sessionNumber}`;
+}
+
+export function parseDllSessionFieldKey(
+  field: DllBuilderFieldKey,
+): SessionNumber | null {
+  if (!field.startsWith("session-")) return null;
+  const parsed = parseIntegerInRange(field.slice("session-".length), 1, 5);
+  return parsed as SessionNumber | null;
+}
+
+export function validateDllBuilderField(
+  field: DllBuilderFieldKey,
+  input: DllBuilderFormInput,
+): string | undefined {
+  if (field === "gradeAndSection") {
+    return isNonEmptyText(input.gradeAndSection)
+      ? undefined
+      : "Enter a Grade Level and Section.";
+  }
+
+  if (field === "sessions") {
+    const hasInstructional = input.sessions.some(
+      (cfg) => cfg.mode === "instructional",
+    );
+    return hasInstructional
+      ? undefined
+      : "Keep at least one Session as Instructional with a Learning Competency.";
+  }
+
+  const sessionNumber = parseDllSessionFieldKey(field);
+  if (sessionNumber === null) return undefined;
+  const session = input.sessions.find(
+    (cfg) => cfg.sessionNumber === sessionNumber,
+  );
+  if (!session || session.mode === "non-instructional") {
+    return undefined;
+  }
+  const hasCompetency = session.competencyIds.some((id) => isNonEmptyText(id));
+  return hasCompetency
+    ? undefined
+    : `Assign a Learning Competency to Session ${sessionNumber} or mark it Non-Instructional.`;
+}
+
+export function validateDllBuilderForm(
+  input: DllBuilderFormInput,
+): FieldErrors<DllBuilderFieldKey> {
+  return validateFields(DLL_BUILDER_FIELDS, (field) =>
+    validateDllBuilderField(field, input),
+  );
+}
+
+export type DlpBuilderFieldKey = "gradeAndSection" | "selectedCompetencyIds";
+
+export interface DlpBuilderFormInput {
+  mode: "scratch" | "derive";
+  gradeAndSection: string;
+  selectedCompetencyIds: readonly string[];
+}
+
+export const DLP_BUILDER_FIELDS: readonly DlpBuilderFieldKey[] = [
+  "gradeAndSection",
+  "selectedCompetencyIds",
+];
+
+export function validateDlpBuilderField(
+  field: DlpBuilderFieldKey,
+  input: DlpBuilderFormInput,
+): string | undefined {
+  if (input.mode !== "scratch") return undefined;
+  switch (field) {
+    case "gradeAndSection":
+      return isNonEmptyText(input.gradeAndSection)
+        ? undefined
+        : "Enter a Grade Level and Section.";
+    case "selectedCompetencyIds":
+      return input.selectedCompetencyIds.length > 0
+        ? undefined
+        : "Select at least one Learning Competency.";
+  }
+}
+
+export function validateDlpBuilderForm(
+  input: DlpBuilderFormInput,
+): FieldErrors<DlpBuilderFieldKey> {
+  return validateFields(DLP_BUILDER_FIELDS, (field) =>
+    validateDlpBuilderField(field, input),
+  );
+}
+
+export type QuizBuilderFieldKey =
+  | "gradeAndSection"
+  | "selectedCompetencyIds"
+  | "itemCounts";
+
+export type QuizItemCountDrafts = Record<QuizQuestionType, string | number>;
+
+export interface QuizBuilderFormInput {
+  sourceKind: "standalone" | "dll" | "dlp";
+  gradeAndSection: string;
+  selectedCompetencyIds: readonly string[];
+  itemCounts: QuizItemCountDrafts;
+}
+
+export const QUIZ_BUILDER_FIELDS: readonly QuizBuilderFieldKey[] = [
+  "gradeAndSection",
+  "selectedCompetencyIds",
+  "itemCounts",
+];
+
+const QUIZ_MAX_ITEMS_PER_TYPE = 50;
+
+export function parseQuizItemCount(value: string | number): number | null {
+  return parseIntegerInRange(value, 0, QUIZ_MAX_ITEMS_PER_TYPE);
+}
+
+function analyzeQuizItemCounts(drafts: QuizItemCountDrafts): {
+  counts: QuizItemCounts;
+  invalidTypes: QuizQuestionType[];
+  total: number;
+} {
+  const counts = {} as QuizItemCounts;
+  const invalidTypes: QuizQuestionType[] = [];
+  let total = 0;
+  for (const type of QUIZ_QUESTION_TYPES) {
+    const parsed = parseQuizItemCount(drafts[type]);
+    if (parsed === null) {
+      invalidTypes.push(type);
+    } else {
+      counts[type] = parsed;
+      total += parsed;
+    }
+  }
+  return { counts, invalidTypes, total };
+}
+
+export function parseQuizItemCounts(
+  drafts: QuizItemCountDrafts,
+): QuizItemCounts | null {
+  const { counts, invalidTypes, total } = analyzeQuizItemCounts(drafts);
+  return invalidTypes.length === 0 && total >= 1 ? counts : null;
+}
+
+export function getInvalidQuizCountTypes(
+  drafts: QuizItemCountDrafts,
+): QuizQuestionType[] {
+  const { invalidTypes, total } = analyzeQuizItemCounts(drafts);
+  if (invalidTypes.length > 0) return invalidTypes;
+  return total >= 1 ? [] : [...QUIZ_QUESTION_TYPES];
+}
+
+export function validateQuizBuilderField(
+  field: QuizBuilderFieldKey,
+  input: QuizBuilderFormInput,
+): string | undefined {
+  switch (field) {
+    case "gradeAndSection":
+      if (input.sourceKind !== "standalone") return undefined;
+      return isNonEmptyText(input.gradeAndSection)
+        ? undefined
+        : "Enter a Grade Level and Section.";
+    case "selectedCompetencyIds":
+      if (input.sourceKind !== "standalone") return undefined;
+      return input.selectedCompetencyIds.length > 0
+        ? undefined
+        : "Select at least one Learning Competency.";
+    case "itemCounts": {
+      const { invalidTypes, total } = analyzeQuizItemCounts(input.itemCounts);
+      if (invalidTypes.length > 0) {
+        return `Enter whole numbers from 0 to ${QUIZ_MAX_ITEMS_PER_TYPE} for each question type.`;
+      }
+      return total >= 1
+        ? undefined
+        : "Set at least 1 item across question types.";
+    }
+  }
+}
+
+export function validateQuizBuilderForm(
+  input: QuizBuilderFormInput,
+): FieldErrors<QuizBuilderFieldKey> {
+  return validateFields(QUIZ_BUILDER_FIELDS, (field) =>
+    validateQuizBuilderField(field, input),
+  );
+}

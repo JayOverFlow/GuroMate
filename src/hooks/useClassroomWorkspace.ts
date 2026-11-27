@@ -52,8 +52,24 @@ import {
   type SlotReelWindow,
 } from "../engine/pickerAnimation";
 import { type ClassSection, type GradeLevel } from "../engine/types";
+import {
+  CLASS_SECTION_FIELDS,
+  CUSTOM_TIMER_FIELDS,
+  parseCustomTimerDuration,
+  parseRosterText,
+  updateFieldError,
+  validateClassSectionField,
+  validateClassSectionForm,
+  validateCustomTimerField,
+  validateCustomTimerForm,
+  type ClassSectionFieldKey,
+  type CustomTimerFieldKey,
+  type FieldErrors,
+} from "../utils/formValidation";
 import type { ClassroomTimerState } from "./useClassroomTimer";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
+
+export { parseRosterText } from "../utils/formValidation";
 
 export type ToolTab = "picker" | "groups" | "timer";
 
@@ -99,13 +115,6 @@ export function formFromSection(section: ClassSection): SectionFormState {
   };
 }
 
-export function parseRosterText(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
 async function readErrorMessage(res: Response): Promise<string> {
   try {
     const data = (await res.json()) as { error?: string; message?: string };
@@ -147,7 +156,28 @@ export function useClassroomWorkspace(
   const [sectionForm, setSectionForm] = useState<SectionFormState>(
     emptySectionForm,
   );
+  const [sectionFieldErrors, setSectionFieldErrors] = useState<
+    FieldErrors<ClassSectionFieldKey>
+  >({});
+  const sectionFormRef = useRef<HTMLFormElement>(null);
+  const interactedSectionFieldsRef = useRef<Set<ClassSectionFieldKey>>(
+    new Set(),
+  );
   const [savingSection, setSavingSection] = useState(false);
+
+  const [customMinutesInput, setCustomMinutesInput] = useState(() =>
+    String(timer.customMinutes),
+  );
+  const [customSecondsInput, setCustomSecondsInput] = useState(() =>
+    String(timer.customSeconds),
+  );
+  const [customTimerErrors, setCustomTimerErrors] = useState<
+    FieldErrors<CustomTimerFieldKey>
+  >({});
+  const customTimerFormRef = useRef<HTMLFormElement>(null);
+  const interactedTimerFieldsRef = useRef<Set<"minutes" | "seconds">>(
+    new Set(),
+  );
 
   const [activeTab, setActiveTab] = useState<ToolTab>("picker");
   const [absentIndices, setAbsentIndices] = useState<Set<number>>(
@@ -430,11 +460,97 @@ export function useClassroomWorkspace(
     }
   }, [activeSection, projectorOverlayTab]);
 
+  function resetSectionValidation(): void {
+    interactedSectionFieldsRef.current.clear();
+    setSectionFieldErrors({});
+  }
+
+  function closeSectionForm(): void {
+    setShowSectionForm(false);
+    setSectionForm(emptySectionForm());
+    resetSectionValidation();
+  }
+
+  function toggleNewSectionForm(): void {
+    if (showSectionForm && !sectionForm.id) {
+      closeSectionForm();
+      return;
+    }
+    setSectionForm(emptySectionForm());
+    resetSectionValidation();
+    setShowSectionForm(true);
+  }
+
+  function openEditSectionForm(section: ClassSection): void {
+    setSectionForm(formFromSection(section));
+    resetSectionValidation();
+    setShowSectionForm(true);
+  }
+
+  function setSingleSectionFieldError(
+    field: ClassSectionFieldKey,
+    nextError: string | undefined,
+  ): void {
+    setSectionFieldErrors((prev) => updateFieldError(prev, field, nextError));
+  }
+
+  function updateSectionField(
+    field: ClassSectionFieldKey,
+    value: string,
+  ): void {
+    interactedSectionFieldsRef.current.add(field);
+    const nextForm: SectionFormState = { ...sectionForm, [field]: value };
+    setSectionForm(nextForm);
+    if (sectionFieldErrors[field]) {
+      setSingleSectionFieldError(
+        field,
+        validateClassSectionField(field, nextForm),
+      );
+    }
+  }
+
+  function validateSectionField(field: ClassSectionFieldKey): void {
+    if (
+      !interactedSectionFieldsRef.current.has(field) &&
+      !sectionFieldErrors[field]
+    ) {
+      return;
+    }
+    setSingleSectionFieldError(
+      field,
+      validateClassSectionField(field, sectionForm),
+    );
+  }
+
+  function focusSectionField(field: ClassSectionFieldKey): void {
+    const control = sectionFormRef.current?.elements.namedItem(field);
+    if (control instanceof HTMLElement) {
+      control.focus();
+    }
+  }
+
   async function handleSaveSection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isPickerLocked(pickerStateRef.current) || isGroupAnimatingRef.current) {
       return;
     }
+    for (const field of CLASS_SECTION_FIELDS) {
+      interactedSectionFieldsRef.current.add(field);
+    }
+    const errors = validateClassSectionForm(sectionForm);
+    setSectionFieldErrors(errors);
+    const firstInvalid = CLASS_SECTION_FIELDS.find((field) =>
+      Boolean(errors[field]),
+    );
+    if (firstInvalid) {
+      focusSectionField(firstInvalid);
+      setStatus({
+        tone: "error",
+        text: "Fix the highlighted fields before saving.",
+      });
+      return;
+    }
+
     setSavingSection(true);
     setStatus(null);
     try {
@@ -454,8 +570,7 @@ export function useClassroomWorkspace(
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const saved = (await res.json()) as ClassSection;
-      setShowSectionForm(false);
-      setSectionForm(emptySectionForm());
+      closeSectionForm();
       if (isEdit && saved.id === selectedSectionId) {
         resetRosterState();
       }
@@ -473,31 +588,26 @@ export function useClassroomWorkspace(
     }
   }
 
-  async function handleDeleteSection() {
-    if (
-      !activeSection ||
-      isPickerLocked(pickerStateRef.current) ||
-      isGroupAnimatingRef.current
-    ) {
+  async function handleDeleteSection(section: ClassSection) {
+    if (isPickerLocked(pickerStateRef.current) || isGroupAnimatingRef.current) {
       return;
     }
     setStatus(null);
-    try {
-      const res = await fetch(
-        `/api/class-sections/${encodeURIComponent(activeSection.id)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const deletedName = activeSection.sectionName;
-      await loadSections();
+    const res = await fetch(
+      `/api/class-sections/${encodeURIComponent(section.id)}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw new Error(await readErrorMessage(res));
+    if (sectionForm.id === section.id) {
+      closeSectionForm();
+    } else {
       setShowSectionForm(false);
-      setStatus({
-        tone: "success",
-        text: `Class Section "${deletedName}" deleted.`,
-      });
-    } catch (err) {
-      reportError(err);
     }
+    await loadSections();
+    setStatus({
+      tone: "success",
+      text: `Class Section "${section.sectionName}" deleted.`,
+    });
   }
 
   function clearAfterAttendanceChange() {
@@ -889,18 +999,105 @@ export function useClassroomWorkspace(
     setSwapSelection(null);
   }
 
-  function handleCustomDurationSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const total = timer.customMinutes * 60 + timer.customSeconds;
-    if (total <= 0) {
-      setStatus({
-        tone: "error",
-        text: "Error: Enter a custom timer duration greater than 0 seconds.",
+  function updateCustomTimerInput(
+    field: "minutes" | "seconds",
+    value: string,
+  ): void {
+    interactedTimerFieldsRef.current.add(field);
+    const nextInput = {
+      minutes: field === "minutes" ? value : customMinutesInput,
+      seconds: field === "seconds" ? value : customSecondsInput,
+    };
+    if (field === "minutes") {
+      setCustomMinutesInput(value);
+    } else {
+      setCustomSecondsInput(value);
+    }
+    if (customTimerErrors[field] || customTimerErrors.duration) {
+      setCustomTimerErrors((prev) => {
+        let next = prev;
+        if (next[field]) {
+          next = updateFieldError(
+            next,
+            field,
+            validateCustomTimerField(field, nextInput),
+          );
+        }
+        if (next.duration) {
+          next = updateFieldError(
+            next,
+            "duration",
+            validateCustomTimerField("duration", nextInput),
+          );
+        }
+        return next;
       });
+    }
+  }
+
+  function validateCustomTimerFieldOnBlur(field: "minutes" | "seconds"): void {
+    if (
+      !interactedTimerFieldsRef.current.has(field) &&
+      !customTimerErrors[field] &&
+      !customTimerErrors.duration
+    ) {
       return;
     }
+    const input = {
+      minutes: customMinutesInput,
+      seconds: customSecondsInput,
+    };
+    setCustomTimerErrors((prev) => {
+      const next = updateFieldError<CustomTimerFieldKey>(
+        prev,
+        field,
+        validateCustomTimerField(field, input),
+      );
+      return updateFieldError(
+        next,
+        "duration",
+        validateCustomTimerField("duration", input),
+      );
+    });
+  }
+
+  function clearCustomTimerValidation(): void {
+    interactedTimerFieldsRef.current.clear();
+    setCustomTimerErrors({});
+  }
+
+  function handleSelectTimerPreset(minutes: number): void {
+    clearCustomTimerValidation();
+    timer.selectPreset(minutes);
+  }
+
+  function handleCustomDurationSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    interactedTimerFieldsRef.current.add("minutes");
+    interactedTimerFieldsRef.current.add("seconds");
+    const input = {
+      minutes: customMinutesInput,
+      seconds: customSecondsInput,
+    };
+    const errors = validateCustomTimerForm(input);
+    setCustomTimerErrors(errors);
+    const firstInvalid = CUSTOM_TIMER_FIELDS.find((field) =>
+      Boolean(errors[field]),
+    );
+    if (firstInvalid) {
+      const targetName = firstInvalid === "seconds" ? "seconds" : "minutes";
+      const control = customTimerFormRef.current?.elements.namedItem(targetName);
+      if (control instanceof HTMLElement) {
+        control.focus();
+      }
+      return;
+    }
+    const parsed = parseCustomTimerDuration(input);
+    if (!parsed) return;
+    setCustomMinutesInput(String(parsed.minutes));
+    setCustomSecondsInput(String(parsed.seconds));
     setStatus(null);
-    timer.applyCustomTime();
+    timer.applyCustomTime(parsed.minutes, parsed.seconds);
   }
 
   const projectorTab: ToolTab | null =
@@ -987,11 +1184,24 @@ export function useClassroomWorkspace(
     loading,
     status,
     showSectionForm,
-    setShowSectionForm,
+    sectionFormRef,
     sectionForm,
     setSectionForm,
+    sectionFieldErrors,
+    toggleNewSectionForm,
+    openEditSectionForm,
+    closeSectionForm,
+    updateSectionField,
+    validateSectionField,
     savingSection,
     parsedFormCount,
+    customTimerFormRef,
+    customMinutesInput,
+    customSecondsInput,
+    customTimerErrors,
+    updateCustomTimerInput,
+    validateCustomTimerFieldOnBlur,
+    handleSelectTimerPreset,
     activeTab,
     setActiveTab,
     absentIndices,

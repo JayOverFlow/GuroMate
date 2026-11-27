@@ -7,17 +7,32 @@ import {
   type FormEvent,
 } from "react";
 import {
+  QUIZ_QUESTION_TYPES,
   type ClassSection,
   type CurriculumCompetency,
   type DailyLessonLog,
   type DailyLessonPlan,
   type Quiz,
-  type QuizItemCounts,
   type QuizQuestionType,
   type QuizSyncResult,
   type SessionNumber,
 } from "../engine/types";
+import {
+  buildDeleteQuizPrompt,
+  buildRemoveQuizCompetencyPrompt,
+} from "../utils/confirmAction";
+import {
+  QUIZ_BUILDER_FIELDS,
+  getInvalidQuizCountTypes,
+  parseQuizItemCounts,
+  updateFieldError,
+  validateQuizBuilderField,
+  validateQuizBuilderForm,
+  type FieldErrors,
+  type QuizBuilderFieldKey,
+} from "../utils/formValidation";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
+import { useConfirmDialog } from "./useConfirmDialog";
 import {
   appendUniqueId,
   type QuizLaunchTarget,
@@ -33,11 +48,11 @@ export interface QuizStatusState {
   text: string;
 }
 
-const DEFAULT_COUNTS: QuizItemCounts = {
-  multipleChoice: 5,
-  trueFalse: 0,
-  identification: 0,
-  essayRubric: 0,
+const DEFAULT_COUNT_DRAFTS: Record<QuizQuestionType, string> = {
+  multipleChoice: "5",
+  trueFalse: "0",
+  identification: "0",
+  essayRubric: "0",
 };
 
 export function useQuizWorkspace(
@@ -67,13 +82,20 @@ export function useQuizWorkspace(
   const [title, setTitle] = useState("");
   const [gradeAndSection, setGradeAndSection] = useState("");
   const [promptNotes, setPromptNotes] = useState("");
-  const [itemCounts, setItemCounts] = useState<QuizItemCounts>(DEFAULT_COUNTS);
+  const [itemCountDrafts, setItemCountDrafts] =
+    useState<Record<QuizQuestionType, string>>(DEFAULT_COUNT_DRAFTS);
   const [selectedCompetencyIds, setSelectedCompetencyIds] = useState<string[]>(
     [],
   );
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<
+    FieldErrors<QuizBuilderFieldKey>
+  >({});
+  const formRef = useRef<HTMLFormElement>(null);
+  const interactedFieldsRef = useRef<Set<QuizBuilderFieldKey>>(new Set());
   const launchIntentRef = useRef(Boolean(initialLaunchTarget));
+  const confirmDialog = useConfirmDialog();
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
@@ -144,6 +166,8 @@ export function useQuizWorkspace(
     if (!initialLaunchTarget) return;
     launchIntentRef.current = true;
     setSelectedQuizId("");
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
     if (initialLaunchTarget.sourceKind === "dll") {
       setSourceKind("dll");
       setSelectedDllId(initialLaunchTarget.dllId);
@@ -165,6 +189,8 @@ export function useQuizWorkspace(
   useEffect(() => {
     const match = quizzes.find((q) => q.id === selectedQuizId) ?? null;
     setDraftQuiz(match ? structuredClone(match) : null);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
   }, [quizzes, selectedQuizId]);
 
   const competencyMap = useMemo(
@@ -204,28 +230,122 @@ export function useQuizWorkspace(
     [activeSourceSessions, selectedSessionNumber],
   );
 
+  const invalidCountTypes = useMemo(
+    () =>
+      fieldErrors.itemCounts
+        ? new Set(getInvalidQuizCountTypes(itemCountDrafts))
+        : new Set<QuizQuestionType>(),
+    [fieldErrors.itemCounts, itemCountDrafts],
+  );
+
+  function selectSourceKind(next: SourceKind) {
+    setSourceKind(next);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
+  }
+
+  function validateField(
+    field: QuizBuilderFieldKey,
+    overrides?: Partial<{
+      sourceKind: SourceKind;
+      gradeAndSection: string;
+      selectedCompetencyIds: readonly string[];
+      itemCounts: Record<QuizQuestionType, string>;
+    }>,
+  ) {
+    if (!interactedFieldsRef.current.has(field) && !fieldErrors[field]) {
+      return;
+    }
+    const message = validateQuizBuilderField(field, {
+      sourceKind: overrides?.sourceKind ?? sourceKind,
+      gradeAndSection: overrides?.gradeAndSection ?? gradeAndSection,
+      selectedCompetencyIds:
+        overrides?.selectedCompetencyIds ?? selectedCompetencyIds,
+      itemCounts: overrides?.itemCounts ?? itemCountDrafts,
+    });
+    setFieldErrors((prev) => updateFieldError(prev, field, message));
+  }
+
+  function handleGradeAndSectionChange(value: string) {
+    interactedFieldsRef.current.add("gradeAndSection");
+    setGradeAndSection(value);
+    if (fieldErrors.gradeAndSection) {
+      validateField("gradeAndSection", { gradeAndSection: value });
+    }
+  }
+
   function addCompetency() {
     if (!pickedCompetencyId) return;
-    setSelectedCompetencyIds((prev) =>
-      prev.includes(pickedCompetencyId) ? prev : [...prev, pickedCompetencyId],
-    );
+    interactedFieldsRef.current.add("selectedCompetencyIds");
+    const nextIds = selectedCompetencyIds.includes(pickedCompetencyId)
+      ? selectedCompetencyIds
+      : [...selectedCompetencyIds, pickedCompetencyId];
+    setSelectedCompetencyIds(nextIds);
+    if (fieldErrors.selectedCompetencyIds) {
+      validateField("selectedCompetencyIds", {
+        selectedCompetencyIds: nextIds,
+      });
+    }
   }
 
   function removeCompetency(id: string) {
+    interactedFieldsRef.current.add("selectedCompetencyIds");
     setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
   }
 
+  function requestRemoveCompetency(id: string) {
+    const label = competencyMap.get(id)?.learningCompetency ?? id;
+    confirmDialog.requestConfirm(buildRemoveQuizCompetencyPrompt(label), () => {
+      removeCompetency(id);
+    });
+  }
+
   function updateCount(type: QuizQuestionType, value: string) {
-    const num = Math.max(0, Math.min(50, Math.floor(Number(value) || 0)));
-    setItemCounts((prev) => ({ ...prev, [type]: num }));
+    interactedFieldsRef.current.add("itemCounts");
+    const nextDrafts = { ...itemCountDrafts, [type]: value };
+    setItemCountDrafts(nextDrafts);
+    if (fieldErrors.itemCounts) {
+      validateField("itemCounts", { itemCounts: nextDrafts });
+    }
   }
 
   async function handleGenerate(event: FormEvent) {
     event.preventDefault();
     setStatus(null);
+    for (const field of QUIZ_BUILDER_FIELDS) {
+      interactedFieldsRef.current.add(field);
+    }
+    const errors = validateQuizBuilderForm({
+      sourceKind,
+      gradeAndSection,
+      selectedCompetencyIds,
+      itemCounts: itemCountDrafts,
+    });
+    const parsedCounts = parseQuizItemCounts(itemCountDrafts);
+    if (Object.keys(errors).length > 0 || !parsedCounts) {
+      setFieldErrors(errors);
+      const firstInvalid = QUIZ_BUILDER_FIELDS.find((field) =>
+        Boolean(errors[field]),
+      );
+      if (firstInvalid === "itemCounts") {
+        const firstType =
+          getInvalidQuizCountTypes(itemCountDrafts)[0] ??
+          QUIZ_QUESTION_TYPES[0];
+        formRef.current
+          ?.querySelector<HTMLElement>(`[data-field="count-${firstType}"]`)
+          ?.focus();
+      } else if (firstInvalid) {
+        formRef.current
+          ?.querySelector<HTMLElement>(`[data-field="${firstInvalid}"]`)
+          ?.focus();
+      }
+      return;
+    }
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
     setGenerating(true);
     try {
-      const shared = { title, promptNotes, itemCounts };
+      const shared = { title, promptNotes, itemCounts: parsedCounts };
       const payload =
         sourceKind === "dll"
           ? {
@@ -423,28 +543,27 @@ export function useQuizWorkspace(
     }
   }
 
-  async function handleDeleteQuiz() {
+  function requestDeleteQuiz() {
     if (!draftQuiz) return;
-    setStatus(null);
-    try {
-      const res = await fetch(
-        `/api/quizzes/${encodeURIComponent(draftQuiz.id)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const remaining = quizzes.filter((q) => q.id !== draftQuiz.id);
-      setQuizzes(remaining);
-      setSelectedQuizId(remaining[0]?.id ?? "");
-      setStatus({
-        tone: "success",
-        text: `Deleted "${draftQuiz.title}".`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    }
+    const target = draftQuiz;
+    confirmDialog.requestConfirm(
+      buildDeleteQuizPrompt(target.title),
+      async () => {
+        setStatus(null);
+        const res = await fetch(
+          `/api/quizzes/${encodeURIComponent(target.id)}`,
+          { method: "DELETE" },
+        );
+        if (!res.ok) throw new Error(await readErrorMessage(res));
+        const remaining = quizzes.filter((q) => q.id !== target.id);
+        setQuizzes(remaining);
+        setSelectedQuizId(remaining[0]?.id ?? "");
+        setStatus({
+          tone: "success",
+          text: `Deleted "${target.title}".`,
+        });
+      },
+    );
   }
 
   return {
@@ -465,7 +584,7 @@ export function useQuizWorkspace(
     syncing,
     downloading,
     sourceKind,
-    setSourceKind,
+    selectSourceKind,
     selectedDllId,
     setSelectedDllId,
     selectedSessionNumber,
@@ -475,10 +594,11 @@ export function useQuizWorkspace(
     title,
     setTitle,
     gradeAndSection,
-    setGradeAndSection,
+    handleGradeAndSectionChange,
     promptNotes,
     setPromptNotes,
-    itemCounts,
+    itemCountDrafts,
+    invalidCountTypes,
     selectedCompetencyIds,
     pickedCompetencyId,
     setPickedCompetencyId,
@@ -486,8 +606,11 @@ export function useQuizWorkspace(
     competencyMap,
     activeSourceSessions,
     selectedSourceSession,
+    formRef,
+    fieldErrors,
+    validateField,
     addCompetency,
-    removeCompetency,
+    requestRemoveCompetency,
     updateCount,
     handleGenerate,
     updateSectionDirections,
@@ -496,6 +619,7 @@ export function useQuizWorkspace(
     handleSaveEdits,
     handleSyncToLesson,
     handleDownloadDocx,
-    handleDeleteQuiz,
+    requestDeleteQuiz,
+    confirmDialog,
   };
 }

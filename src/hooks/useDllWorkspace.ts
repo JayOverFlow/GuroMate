@@ -15,6 +15,15 @@ import {
   type SessionNumber,
   type TleComponent,
 } from "../engine/types";
+import {
+  DLL_BUILDER_FIELDS,
+  parseDllSessionFieldKey,
+  updateFieldError,
+  validateDllBuilderField,
+  validateDllBuilderForm,
+  type DllBuilderFieldKey,
+  type FieldErrors,
+} from "../utils/formValidation";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import {
   applyDllLaunchTarget,
@@ -130,6 +139,19 @@ export function useDllWorkspace(
   );
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<
+    FieldErrors<DllBuilderFieldKey>
+  >({});
+  const [focusRequest, setFocusRequest] = useState<{
+    field: DllBuilderFieldKey;
+    seq: number;
+  } | null>(null);
+  const gradeSectionRef = useRef<HTMLInputElement>(null);
+  const sessionCardRefs = useRef<
+    Partial<Record<SessionNumber, HTMLElement | null>>
+  >({});
+  const sessionsGroupRef = useRef<HTMLDivElement>(null);
+  const interactedFieldsRef = useRef<Set<DllBuilderFieldKey>>(new Set());
   const launchIntentRef = useRef(Boolean(initialLaunchTarget));
 
   const loadWorkspaceData = useCallback(async () => {
@@ -181,6 +203,8 @@ export function useDllWorkspace(
     launchIntentRef.current = true;
     setSelectedDllId("");
     setSessionConfigs((prev) => applyDllLaunchTarget(prev, initialLaunchTarget));
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
     const trimmed = initialLaunchTarget.competencyId.trim();
     if (trimmed) setPickedCompetencyId(trimmed);
     onConsumeLaunchTarget?.();
@@ -189,7 +213,24 @@ export function useDllWorkspace(
   useEffect(() => {
     const match = dlls.find((d) => d.id === selectedDllId) ?? null;
     setDraftDll(match ? structuredClone(match) : null);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
   }, [dlls, selectedDllId]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const { field } = focusRequest;
+    if (field === "gradeAndSection") {
+      gradeSectionRef.current?.focus();
+    } else if (field === "sessions") {
+      sessionsGroupRef.current?.focus();
+    } else {
+      const sessionNumber = parseDllSessionFieldKey(field);
+      if (sessionNumber !== null) {
+        sessionCardRefs.current[sessionNumber]?.focus();
+      }
+    }
+  }, [focusRequest]);
 
   const competencyMap = useMemo(
     () => new Map(curriculum.map((c) => [c.id, c])),
@@ -208,21 +249,69 @@ export function useDllWorkspace(
     return [...seen].join(", ") || "None selected yet";
   }, [sessionConfigs, competencyMap]);
 
+  function updateGradeAndSection(value: string) {
+    interactedFieldsRef.current.add("gradeAndSection");
+    setGradeAndSection(value);
+    setFieldErrors((prev) => {
+      if (!prev.gradeAndSection) return prev;
+      const nextMsg = validateDllBuilderField("gradeAndSection", {
+        gradeAndSection: value,
+        sessions: sessionConfigs,
+      });
+      return updateFieldError(prev, "gradeAndSection", nextMsg);
+    });
+  }
+
+  function validateGradeAndSectionOnBlur() {
+    if (
+      !interactedFieldsRef.current.has("gradeAndSection") &&
+      !fieldErrors.gradeAndSection
+    ) {
+      return;
+    }
+    const nextMsg = validateDllBuilderField("gradeAndSection", {
+      gradeAndSection,
+      sessions: sessionConfigs,
+    });
+    setFieldErrors((prev) =>
+      updateFieldError(prev, "gradeAndSection", nextMsg),
+    );
+  }
+
+  function syncActiveSessionErrors(nextSessions: DllSessionConfig[]) {
+    setFieldErrors((prev) => {
+      let next = prev;
+      for (const field of DLL_BUILDER_FIELDS) {
+        if (field === "gradeAndSection" || !next[field]) continue;
+        const nextMsg = validateDllBuilderField(field, {
+          gradeAndSection,
+          sessions: nextSessions,
+        });
+        next = updateFieldError(next, field, nextMsg);
+      }
+      return next;
+    });
+  }
+
   function assignCompetencyToSessions(
     targetSessions: SessionNumber[],
     competencyId: string,
   ) {
     if (!competencyId) return;
     const targetSet = new Set(targetSessions);
-    setSessionConfigs((prev) =>
-      prev.map((cfg) => {
-        if (!targetSet.has(cfg.sessionNumber)) return cfg;
-        const nextIds = cfg.competencyIds.includes(competencyId)
-          ? cfg.competencyIds
-          : [...cfg.competencyIds, competencyId];
-        return { ...cfg, mode: "instructional", competencyIds: nextIds };
-      }),
-    );
+    const nextSessions = sessionConfigs.map((cfg) => {
+      if (!targetSet.has(cfg.sessionNumber)) return cfg;
+      const nextIds = cfg.competencyIds.includes(competencyId)
+        ? cfg.competencyIds
+        : [...cfg.competencyIds, competencyId];
+      return {
+        ...cfg,
+        mode: "instructional" as const,
+        competencyIds: nextIds,
+      };
+    });
+    setSessionConfigs(nextSessions);
+    syncActiveSessionErrors(nextSessions);
   }
 
   function removeCompetencyFromSession(
@@ -245,20 +334,20 @@ export function useDllWorkspace(
     sessionNumber: SessionNumber,
     mode: "instructional" | "non-instructional",
   ) {
-    setSessionConfigs((prev) =>
-      prev.map((cfg) =>
-        cfg.sessionNumber === sessionNumber
-          ? {
-              ...cfg,
-              mode,
-              nonInstructionalReason:
-                mode === "non-instructional"
-                  ? cfg.nonInstructionalReason || "Holiday / School Event"
-                  : cfg.nonInstructionalReason,
-            }
-          : cfg,
-      ),
+    const nextSessions = sessionConfigs.map((cfg) =>
+      cfg.sessionNumber === sessionNumber
+        ? {
+            ...cfg,
+            mode,
+            nonInstructionalReason:
+              mode === "non-instructional"
+                ? cfg.nonInstructionalReason || "Holiday / School Event"
+                : cfg.nonInstructionalReason,
+          }
+        : cfg,
     );
+    setSessionConfigs(nextSessions);
+    syncActiveSessionErrors(nextSessions);
   }
 
   function updateNonInstructionalReason(
@@ -276,6 +365,30 @@ export function useDllWorkspace(
 
   async function handleGenerate(event: FormEvent) {
     event.preventDefault();
+    for (const field of DLL_BUILDER_FIELDS) {
+      interactedFieldsRef.current.add(field);
+    }
+    const errors = validateDllBuilderForm({
+      gradeAndSection,
+      sessions: sessionConfigs,
+    });
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      setStatus(null);
+      const firstInvalid = DLL_BUILDER_FIELDS.find((field) =>
+        Boolean(errors[field]),
+      );
+      if (firstInvalid) {
+        setFocusRequest((prev) => ({
+          field: firstInvalid,
+          seq: (prev?.seq ?? 0) + 1,
+        }));
+      }
+      return;
+    }
+
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
     setStatus(null);
     setGenerating(true);
     try {
@@ -359,27 +472,21 @@ export function useDllWorkspace(
     }
   }
 
-  async function handleDeleteDll() {
-    if (!draftDll) return;
+  async function handleDeleteDll(targetDll?: DailyLessonLog) {
+    const target = targetDll ?? draftDll;
+    if (!target) return;
     setStatus(null);
-    try {
-      const res = await fetch(`/api/dlls/${encodeURIComponent(draftDll.id)}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      const remaining = dlls.filter((d) => d.id !== draftDll.id);
-      setDlls(remaining);
-      setSelectedDllId(remaining[0]?.id ?? "");
-      setStatus({
-        tone: "success",
-        text: `Deleted "${draftDll.lessonTitle}".`,
-      });
-    } catch (err) {
-      setStatus({
-        tone: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    }
+    const res = await fetch(`/api/dlls/${encodeURIComponent(target.id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(await readErrorMessage(res));
+    const remaining = dlls.filter((d) => d.id !== target.id);
+    setDlls(remaining);
+    setSelectedDllId(remaining[0]?.id ?? "");
+    setStatus({
+      tone: "success",
+      text: `Deleted "${target.lessonTitle}".`,
+    });
   }
 
   return {
@@ -397,7 +504,12 @@ export function useDllWorkspace(
     lessonTitle,
     setLessonTitle,
     gradeAndSection,
-    setGradeAndSection,
+    setGradeAndSection: updateGradeAndSection,
+    validateGradeAndSectionOnBlur,
+    fieldErrors,
+    gradeSectionRef,
+    sessionCardRefs,
+    sessionsGroupRef,
     references,
     setReferences,
     promptNotes,

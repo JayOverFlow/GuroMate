@@ -75,7 +75,7 @@ export interface ClassroomTimerState {
   pauseTimer: () => void;
   resetTimer: () => void;
   selectPreset: (minutes: number) => void;
-  applyCustomTime: () => void;
+  applyCustomTime: (minutesOverride?: number, secondsOverride?: number) => void;
   setSoundEnabled: (enabled: boolean) => void;
 }
 
@@ -186,17 +186,24 @@ export function useClassroomTimer(): ClassroomTimerState {
     setRemainingSeconds(total);
   }, []);
 
-  const applyCustomTime = useCallback(() => {
-    const mins = Math.max(0, Math.min(180, Math.floor(customMinutes) || 0));
-    const secs = Math.max(0, Math.min(59, Math.floor(customSeconds) || 0));
-    const total = mins * 60 + secs;
-    if (total <= 0) return;
-    endTimeRef.current = null;
-    setTimerRunning(false);
-    setTimerExpired(false);
-    setDurationSeconds(total);
-    setRemainingSeconds(total);
-  }, [customMinutes, customSeconds]);
+  const applyCustomTime = useCallback(
+    (minutesOverride?: number, secondsOverride?: number) => {
+      const rawMins = minutesOverride ?? customMinutes;
+      const rawSecs = secondsOverride ?? customSeconds;
+      const mins = Math.max(0, Math.min(180, Math.floor(rawMins) || 0));
+      const secs = Math.max(0, Math.min(59, Math.floor(rawSecs) || 0));
+      const total = mins * 60 + secs;
+      if (total <= 0) return;
+      if (minutesOverride !== undefined) setCustomMinutes(mins);
+      if (secondsOverride !== undefined) setCustomSeconds(secs);
+      endTimeRef.current = null;
+      setTimerRunning(false);
+      setTimerExpired(false);
+      setDurationSeconds(total);
+      setRemainingSeconds(total);
+    },
+    [customMinutes, customSeconds],
+  );
 
   return {
     durationSeconds,

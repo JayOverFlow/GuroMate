@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   type BudgetOfWorkInfo,
   type CurriculumCompetency,
@@ -6,6 +13,14 @@ import {
   type QuarterNumber,
   type TleComponent,
 } from "../engine/types";
+import {
+  CUSTOM_COMPETENCY_FIELDS,
+  updateFieldError,
+  validateCustomCompetencyField,
+  validateCustomCompetencyForm,
+  type CustomCompetencyFieldKey,
+  type FieldErrors,
+} from "../utils/formValidation";
 
 export const COMPONENT_LABELS: Record<TleComponent, string> = {
   ICT: "ICT — Information & Communications Technology",
@@ -129,8 +144,15 @@ export function useCurriculumWorkspace() {
   const [notesDraft, setNotesDraft] = useState<string>("");
   const [savingNotes, setSavingNotes] = useState(false);
 
+  const customFormRef = useRef<HTMLFormElement>(null);
+  const interactedCustomFieldsRef = useRef<Set<CustomCompetencyFieldKey>>(
+    new Set(),
+  );
   const [showForm, setShowForm] = useState(false);
   const [formState, setFormState] = useState<CustomFormState>(emptyCustomForm);
+  const [customFieldErrors, setCustomFieldErrors] = useState<
+    FieldErrors<CustomCompetencyFieldKey>
+  >({});
   const [savingCustom, setSavingCustom] = useState(false);
 
   const reportError = useCallback((err: unknown) => {
@@ -281,8 +303,141 @@ export function useCurriculumWorkspace() {
     }
   }
 
+  function resetCustomValidation(): void {
+    interactedCustomFieldsRef.current.clear();
+    setCustomFieldErrors({});
+  }
+
+  function closeCustomForm(): void {
+    setShowForm(false);
+    setFormState(emptyCustomForm());
+    resetCustomValidation();
+  }
+
+  function toggleNewCustomForm(): void {
+    if (showForm) {
+      closeCustomForm();
+      return;
+    }
+    setFormState(emptyCustomForm());
+    resetCustomValidation();
+    setShowForm(true);
+  }
+
+  function openEditCustomForm(item: CurriculumCompetency): void {
+    setFormState(formFromItem(item));
+    resetCustomValidation();
+    setShowForm(true);
+  }
+
+  function setSingleCustomFieldError(
+    field: CustomCompetencyFieldKey,
+    nextError: string | undefined,
+  ): void {
+    setCustomFieldErrors((prev) => updateFieldError(prev, field, nextError));
+  }
+
+  function validateCustomField(field: CustomCompetencyFieldKey): void {
+    if (
+      !interactedCustomFieldsRef.current.has(field) &&
+      !customFieldErrors[field]
+    ) {
+      return;
+    }
+    setSingleCustomFieldError(
+      field,
+      validateCustomCompetencyField(field, formState),
+    );
+  }
+
+  function updateCustomTextField(
+    field:
+      | "contentTopic"
+      | "contentStandard"
+      | "performanceStandard"
+      | "learningCompetency",
+    value: string,
+  ): void {
+    interactedCustomFieldsRef.current.add(field);
+    const nextForm: CustomFormState = { ...formState, [field]: value };
+    setFormState(nextForm);
+    if (customFieldErrors[field]) {
+      setSingleCustomFieldError(
+        field,
+        validateCustomCompetencyField(field, nextForm),
+      );
+    }
+  }
+
+  function toggleCustomGradeLevel(grade: GradeLevel): void {
+    interactedCustomFieldsRef.current.add("gradeLevels");
+    const nextForm: CustomFormState = {
+      ...formState,
+      gradeLevels: toggleArrayValue(formState.gradeLevels, grade),
+    };
+    setFormState(nextForm);
+    if (customFieldErrors.gradeLevels) {
+      setSingleCustomFieldError(
+        "gradeLevels",
+        validateCustomCompetencyField("gradeLevels", nextForm),
+      );
+    }
+  }
+
+  function toggleCustomQuarter(quarter: QuarterNumber): void {
+    interactedCustomFieldsRef.current.add("quarters");
+    const nextForm: CustomFormState = {
+      ...formState,
+      quarters: toggleArrayValue(formState.quarters, quarter),
+    };
+    setFormState(nextForm);
+    if (customFieldErrors.quarters) {
+      setSingleCustomFieldError(
+        "quarters",
+        validateCustomCompetencyField("quarters", nextForm),
+      );
+    }
+  }
+
+  function focusCustomField(field: CustomCompetencyFieldKey): void {
+    const form = customFormRef.current;
+    if (!form) return;
+    if (field === "gradeLevels" || field === "quarters") {
+      const firstCheckbox = form.querySelector<HTMLElement>(
+        `[data-field-group="${field}"] input[type="checkbox"]`,
+      );
+      if (firstCheckbox) {
+        firstCheckbox.focus();
+        return;
+      }
+      form.querySelector<HTMLElement>(`[data-field-group="${field}"]`)?.focus();
+      return;
+    }
+    const control = form.elements.namedItem(field);
+    if (control instanceof HTMLElement) {
+      control.focus();
+    }
+  }
+
   async function handleSaveCustom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    for (const field of CUSTOM_COMPETENCY_FIELDS) {
+      interactedCustomFieldsRef.current.add(field);
+    }
+    const errors = validateCustomCompetencyForm(formState);
+    setCustomFieldErrors(errors);
+    const firstInvalid = CUSTOM_COMPETENCY_FIELDS.find((field) =>
+      Boolean(errors[field]),
+    );
+    if (firstInvalid) {
+      focusCustomField(firstInvalid);
+      setStatus({
+        tone: "error",
+        text: "Fix the highlighted fields before saving.",
+      });
+      return;
+    }
+
     setSavingCustom(true);
     setStatus(null);
     try {
@@ -314,8 +469,7 @@ export function useCurriculumWorkspace() {
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const saved = (await res.json()) as CurriculumCompetency;
-      setShowForm(false);
-      setFormState(emptyCustomForm());
+      closeCustomForm();
       await refreshAfterMutation(saved.id);
       setStatus({
         tone: "success",
@@ -332,20 +486,19 @@ export function useCurriculumWorkspace() {
 
   async function handleDeleteCustom(item: CurriculumCompetency) {
     setStatus(null);
-    try {
-      const res = await fetch(
-        `/api/curriculum/custom/${encodeURIComponent(item.id)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error(await readErrorMessage(res));
-      await refreshAfterMutation();
-      setStatus({
-        tone: "success",
-        text: "Custom Learning Competency deleted.",
-      });
-    } catch (err) {
-      reportError(err);
+    const res = await fetch(
+      `/api/curriculum/custom/${encodeURIComponent(item.id)}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw new Error(await readErrorMessage(res));
+    if (formState.id === item.id) {
+      closeCustomForm();
     }
+    await refreshAfterMutation();
+    setStatus({
+      tone: "success",
+      text: "Custom Learning Competency deleted.",
+    });
   }
 
   return {
@@ -371,11 +524,19 @@ export function useCurriculumWorkspace() {
     notesDraft,
     setNotesDraft,
     savingNotes,
+    customFormRef,
     showForm,
-    setShowForm,
     formState,
     setFormState,
+    customFieldErrors,
     savingCustom,
+    toggleNewCustomForm,
+    openEditCustomForm,
+    closeCustomForm,
+    validateCustomField,
+    updateCustomTextField,
+    toggleCustomGradeLevel,
+    toggleCustomQuarter,
     handleGradeChange,
     handleComponentChange,
     handleSaveNotes,
