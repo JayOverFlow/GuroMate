@@ -1,39 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DailyLessonPlan } from "../engine/types";
-import {
-  buildDlpReadingSections,
-  formatDlpSourceLabel,
-} from "./dlpReadingHelpers";
-
-describe("formatDlpSourceLabel", () => {
-  it("returns null for standalone DLPs without a sourceDllId", () => {
-    expect(formatDlpSourceLabel({})).toBeNull();
-    expect(formatDlpSourceLabel({ sourceDllId: "   " })).toBeNull();
-  });
-
-  it("formats parent DLL title and Session number when both are available", () => {
-    expect(
-      formatDlpSourceLabel(
-        { sourceDllId: "dll-1", sourceSessionNumber: 3 },
-        "  ICT & FCS Combined Week  ",
-      ),
-    ).toBe("Derived from ICT & FCS Combined Week · Session 3");
-  });
-
-  it("falls back cleanly when parent DLL title or Session number is missing", () => {
-    expect(
-      formatDlpSourceLabel({ sourceDllId: "dll-1", sourceSessionNumber: 2 }),
-    ).toBe("Derived from Session 2");
-
-    expect(
-      formatDlpSourceLabel({ sourceDllId: "dll-1" }, "Number Systems Week"),
-    ).toBe("Derived from Number Systems Week");
-
-    expect(formatDlpSourceLabel({ sourceDllId: "dll-1" })).toBe(
-      "Derived from DLL",
-    );
-  });
-});
+import { buildDlpReadingSections } from "./dlpReadingHelpers";
 
 describe("buildDlpReadingSections", () => {
   it("groups DLP paired activity rows into Learning Experience, Assessing Learning, and Ways Forward with Reflections placeholder", () => {

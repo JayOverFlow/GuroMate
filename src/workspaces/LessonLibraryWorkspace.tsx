@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DlpLineageBadge } from "../components/DlpLineageBadge";
 import { formatComponentLabel } from "../engine/lessonHelpers";
 import type {
   DailyLessonLog,
@@ -17,7 +18,6 @@ import {
 import {
   clearLessonLibraryFilters,
   DEFAULT_LESSON_LIBRARY_FILTERS,
-  formatOrphanedDlpLabel,
   queryLessonLibrary,
   type LessonLibraryEntry,
   type LessonLibraryFilters,
@@ -26,7 +26,7 @@ import {
 } from "../utils/lessonLibraryQuery";
 import {
   buildDeletedLessonNotice,
-  serializeHashRoute,
+  isPlainLeftClick,
   type LessonViewMode,
 } from "../utils/workspaceRouting";
 import { readErrorMessage } from "./lessonViewHelpers";
@@ -404,6 +404,7 @@ export function LessonLibraryWorkspace({
               <a
                 href="#settings"
                 onClick={(event) => {
+                  if (!isPlainLeftClick(event)) return;
                   event.preventDefault();
                   onOpenSettings();
                 }}
@@ -711,65 +712,14 @@ export function LessonLibraryWorkspace({
                             </span>
                           )}
 
-                          {entry.kind === "dlp" &&
-                            entry.lineage?.status === "linked" && (
-                              <a
-                                href={serializeHashRoute({
-                                  workspace: "dll",
-                                  lessonId: entry.lineage.parentDllId,
-                                  viewMode: "edit",
-                                })}
-                                onClick={(event) => {
-                                  if (
-                                    event.metaKey ||
-                                    event.ctrlKey ||
-                                    event.shiftKey ||
-                                    event.altKey ||
-                                    event.button !== 0
-                                  ) {
-                                    return;
-                                  }
-                                  event.preventDefault();
-                                  if (entry.lineage?.status === "linked") {
-                                    onOpenDll(
-                                      entry.lineage.parentDllId,
-                                      "edit",
-                                    );
-                                  }
-                                }}
-                                className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm hover:underline focus-visible:outline-2 focus-visible:outline-primary"
-                              >
-                                <span
-                                  className="material-symbols-outlined text-body-sm"
-                                  aria-hidden="true"
-                                >
-                                  link
-                                </span>
-                                <span>
-                                  Derived from {entry.lineage.parentDllTitle}
-                                  {entry.lineage.sessionNumber !== undefined
-                                    ? ` (Session ${entry.lineage.sessionNumber})`
-                                    : ""}
-                                </span>
-                              </a>
-                            )}
-
-                          {entry.kind === "dlp" &&
-                            entry.lineage?.status === "orphaned" && (
-                              <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
-                                <span
-                                  className="material-symbols-outlined text-body-sm"
-                                  aria-hidden="true"
-                                >
-                                  link_off
-                                </span>
-                                <span>
-                                  {formatOrphanedDlpLabel(
-                                    entry.lineage.sessionNumber,
-                                  )}
-                                </span>
-                              </span>
-                            )}
+                          {entry.kind === "dlp" && (
+                            <DlpLineageBadge
+                              lineage={entry.lineage}
+                              onOpenParentDll={(dllId) =>
+                                onOpenDll(dllId, "edit")
+                              }
+                            />
+                          )}
                         </div>
 
                         <h2 className="font-title text-title-lg text-on-surface text-balance">

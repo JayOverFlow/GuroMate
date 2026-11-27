@@ -103,3 +103,21 @@ export function buildDeletedLessonNotice(
   const trimmed = lessonTitle.trim();
   return trimmed ? `Deleted ${label} "${trimmed}".` : `Deleted ${label}.`;
 }
+
+export interface ClickEventLike {
+  button: number;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
+
+export function isPlainLeftClick(event: ClickEventLike): boolean {
+  return (
+    event.button === 0 &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}

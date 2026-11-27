@@ -47,6 +47,17 @@ describe("parseInlineRichText", () => {
         text: "Export SHS_CORE to DLL_ILAW_template.docx with Name: ________ and 2 * 3 * 4.",
       },
     ]);
+
+    expect(
+      parseInlineRichText(
+        "Compute 2*3*4 and a*b*c without italicizing middle terms.",
+      ),
+    ).toEqual([
+      {
+        type: "text",
+        text: "Compute 2*3*4 and a*b*c without italicizing middle terms.",
+      },
+    ]);
   });
 
   it("handles mixed **bold**, *italic*, _italic_, and unclosed delimiters cleanly", () => {
@@ -59,6 +70,33 @@ describe("parseInlineRichText", () => {
       { type: "text", text: " demo and " },
       { type: "italic", text: "peer" },
       { type: "text", text: " review (5* rating)." },
+    ]);
+  });
+
+  it("parses nested bold and italic spans without leaving stray delimiters", () => {
+    expect(parseInlineRichText("**bold *italic***")).toEqual([
+      { type: "bold", text: "bold " },
+      { type: "bold-italic", text: "italic" },
+    ]);
+
+    expect(parseInlineRichText("**bold _italic_** and more")).toEqual([
+      { type: "bold", text: "bold " },
+      { type: "bold-italic", text: "italic" },
+      { type: "text", text: " and more" },
+    ]);
+
+    expect(parseInlineRichText("***bold italic***")).toEqual([
+      { type: "bold-italic", text: "bold italic" },
+    ]);
+
+    expect(parseInlineRichText("*italic **bold** end*")).toEqual([
+      { type: "italic", text: "italic " },
+      { type: "bold-italic", text: "bold" },
+      { type: "italic", text: " end" },
+    ]);
+
+    expect(parseInlineRichText("**keep 2*3*4 math**")).toEqual([
+      { type: "bold", text: "keep 2*3*4 math" },
     ]);
   });
 });

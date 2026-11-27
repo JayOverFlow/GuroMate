@@ -29,9 +29,11 @@ import { countDerivedDlps } from "../utils/lessonLibraryQuery";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import {
   applyDllLaunchTarget,
+  createFreshDllCreationFormState,
   createInitialDllSessionConfigs,
   isDllDraftDirty,
   resolveLessonRouteSelection,
+  shouldResetCreationFormOnRouteChange,
   type DllLaunchTarget,
 } from "./workspaceLaunchHelpers";
 
@@ -178,6 +180,24 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
   const interactedFieldsRef = useRef<Set<DllBuilderFieldKey>>(new Set());
   const recentlyDeletedIdRef = useRef<string | null>(null);
   const reportedMissingIdRef = useRef<string | null>(null);
+  const prevRouteLessonIdRef = useRef<string | undefined>(routeLessonId);
+  const sectionsRef = useRef<ClassSection[]>(sections);
+  sectionsRef.current = sections;
+
+  const resetCreationForm = useCallback((launchTarget?: DllLaunchTarget | null) => {
+    const fresh = createFreshDllCreationFormState(
+      sectionsRef.current,
+      launchTarget,
+    );
+    setLessonTitle(fresh.lessonTitle);
+    setGradeAndSection(fresh.gradeAndSection);
+    setReferences(fresh.references);
+    setPromptNotes(fresh.promptNotes);
+    setSessionConfigs(fresh.sessionConfigs);
+    setPickedCompetencyId(fresh.pickedCompetencyId);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
+  }, []);
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
@@ -249,10 +269,22 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
 
   useEffect(() => {
     if (routeResolution.kind === "loading") return;
+    const prevRouteLessonId = prevRouteLessonIdRef.current;
+    prevRouteLessonIdRef.current = routeLessonId;
+
     if (routeResolution.kind === "create") {
       reportedMissingIdRef.current = null;
       setSelectedDllId("");
       setViewMode("edit");
+      if (
+        shouldResetCreationFormOnRouteChange(
+          prevRouteLessonId,
+          routeResolution.kind,
+        )
+      ) {
+        resetCreationForm(initialLaunchTarget);
+        setStatus(null);
+      }
       return;
     }
     if (routeResolution.kind === "open") {
@@ -269,7 +301,14 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
       reportedMissingIdRef.current = routeResolution.lessonId;
       onMissingLesson?.(routeResolution.lessonId);
     }
-  }, [routeResolution, loadFailed, onMissingLesson]);
+  }, [
+    routeResolution,
+    routeLessonId,
+    initialLaunchTarget,
+    resetCreationForm,
+    loadFailed,
+    onMissingLesson,
+  ]);
 
   const savedDll = useMemo(
     () => dlls.find((d) => d.id === selectedDllId) ?? null,
@@ -566,13 +605,15 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
   }
 
   function startNewDll() {
-    if (onRouteChange) {
+    if (onRouteChange && routeLessonId?.trim()) {
       onRouteChange(undefined, undefined);
       return;
     }
     setSelectedDllId("");
     setViewMode("edit");
+    resetCreationForm();
     setStatus(null);
+    onRouteChange?.(undefined, undefined);
   }
 
   async function handleDeleteDll(targetDll?: DailyLessonLog) {

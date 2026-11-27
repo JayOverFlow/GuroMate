@@ -13,25 +13,6 @@ export interface DlpReadingSection {
   rows: readonly DlpReadingRow[];
 }
 
-export function formatDlpSourceLabel(
-  dlp: Pick<DailyLessonPlan, "sourceDllId" | "sourceSessionNumber">,
-  sourceDllTitle?: string,
-): string | null {
-  if (!dlp.sourceDllId?.trim()) return null;
-
-  const trimmedTitle = sourceDllTitle?.trim();
-  if (trimmedTitle && dlp.sourceSessionNumber !== undefined) {
-    return `Derived from ${trimmedTitle} · Session ${dlp.sourceSessionNumber}`;
-  }
-  if (trimmedTitle) {
-    return `Derived from ${trimmedTitle}`;
-  }
-  if (dlp.sourceSessionNumber !== undefined) {
-    return `Derived from Session ${dlp.sourceSessionNumber}`;
-  }
-  return "Derived from DLL";
-}
-
 export function buildDlpReadingSections(
   dlp: DailyLessonPlan,
 ): readonly DlpReadingSection[] {

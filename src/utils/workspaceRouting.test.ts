@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDeletedLessonNotice,
   buildMissingLessonNotice,
+  isPlainLeftClick,
   parseHashRoute,
   serializeHashRoute,
 } from "./workspaceRouting";
@@ -114,5 +115,64 @@ describe("lesson navigation notices", () => {
     expect(buildDeletedLessonNotice("dlp", "   ")).toBe(
       "Deleted Daily Lesson Plan.",
     );
+  });
+});
+
+describe("isPlainLeftClick", () => {
+  it("returns true only for unmodified primary-button clicks", () => {
+    expect(
+      isPlainLeftClick({
+        button: 0,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      }),
+    ).toBe(true);
+    expect(
+      isPlainLeftClick({
+        button: 1,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      }),
+    ).toBe(false);
+    expect(
+      isPlainLeftClick({
+        button: 0,
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      }),
+    ).toBe(false);
+    expect(
+      isPlainLeftClick({
+        button: 0,
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: false,
+      }),
+    ).toBe(false);
+    expect(
+      isPlainLeftClick({
+        button: 0,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: true,
+        altKey: false,
+      }),
+    ).toBe(false);
+    expect(
+      isPlainLeftClick({
+        button: 0,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: true,
+      }),
+    ).toBe(false);
   });
 });
