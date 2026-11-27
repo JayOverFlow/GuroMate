@@ -10,6 +10,7 @@ import {
   type ClassSection,
   type CurriculumCompetency,
   type DailyLessonLog,
+  type DailyLessonPlan,
   type DllIntentions,
   type DllSessionConfig,
   type SessionNumber,
@@ -24,10 +25,12 @@ import {
   type DllBuilderFieldKey,
   type FieldErrors,
 } from "../utils/formValidation";
+import { countDerivedDlps } from "../utils/lessonLibraryQuery";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import {
   applyDllLaunchTarget,
   createInitialDllSessionConfigs,
+  isDllDraftDirty,
   resolveLessonRouteSelection,
   type DllLaunchTarget,
 } from "./workspaceLaunchHelpers";
@@ -44,6 +47,7 @@ export interface UseDllWorkspaceOptions {
   onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
   onMissingLesson?: (lessonId: string) => void;
   onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
 }
 
 export interface DllStatusState {
@@ -135,8 +139,10 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     onRouteChange,
     onMissingLesson,
     onDeletedLesson,
+    onDirtyChange,
   } = options;
   const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
+  const [dlps, setDlps] = useState<DailyLessonPlan[]>([]);
   const [curriculum, setCurriculum] = useState<CurriculumCompetency[]>([]);
   const [sections, setSections] = useState<ClassSection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,20 +183,24 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setLoading(true);
     setLoadFailed(false);
     try {
-      const [dllRes, currRes, secRes] = await Promise.all([
+      const [dllRes, dlpRes, currRes, secRes] = await Promise.all([
         fetch("/api/dlls"),
+        fetch("/api/dlps"),
         fetch("/api/curriculum"),
         fetch("/api/class-sections"),
       ]);
       if (!dllRes.ok) throw new Error(await readErrorMessage(dllRes));
+      if (!dlpRes.ok) throw new Error(await readErrorMessage(dlpRes));
       if (!currRes.ok) throw new Error(await readErrorMessage(currRes));
       if (!secRes.ok) throw new Error(await readErrorMessage(secRes));
 
       const loadedDlls = (await dllRes.json()) as DailyLessonLog[];
+      const loadedDlps = (await dlpRes.json()) as DailyLessonPlan[];
       const loadedCurr = (await currRes.json()) as CurriculumCompetency[];
       const loadedSec = (await secRes.json()) as ClassSection[];
 
       setDlls(loadedDlls);
+      setDlps(loadedDlps);
       setCurriculum(loadedCurr);
       setSections(loadedSec);
       if (loadedSec.length > 0) {
@@ -261,12 +271,36 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     }
   }, [routeResolution, loadFailed, onMissingLesson]);
 
+  const savedDll = useMemo(
+    () => dlls.find((d) => d.id === selectedDllId) ?? null,
+    [dlls, selectedDllId],
+  );
+
   useEffect(() => {
-    const match = dlls.find((d) => d.id === selectedDllId) ?? null;
-    setDraftDll(match ? structuredClone(match) : null);
+    setDraftDll(savedDll ? structuredClone(savedDll) : null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
-  }, [dlls, selectedDllId]);
+  }, [savedDll]);
+
+  const isDirty = useMemo(
+    () => isDllDraftDirty(savedDll, draftDll),
+    [savedDll, draftDll],
+  );
+
+  const derivedDlpCount = useMemo(
+    () => (draftDll ? countDerivedDlps(draftDll.id, dlps) : 0),
+    [draftDll, dlps],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty, draftDll?.lessonTitle);
+  }, [isDirty, draftDll?.lessonTitle, onDirtyChange]);
+
+  useEffect(() => {
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [onDirtyChange]);
 
   useEffect(() => {
     if (!focusRequest) return;
@@ -532,10 +566,13 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
   }
 
   function startNewDll() {
+    if (onRouteChange) {
+      onRouteChange(undefined, undefined);
+      return;
+    }
     setSelectedDllId("");
     setViewMode("edit");
     setStatus(null);
-    onRouteChange?.(undefined, undefined);
   }
 
   async function handleDeleteDll(targetDll?: DailyLessonLog) {
@@ -576,6 +613,8 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setSelectedDllId,
     startNewDll,
     draftDll,
+    isDirty,
+    derivedDlpCount,
     viewMode,
     setViewMode: selectViewMode,
     saving,

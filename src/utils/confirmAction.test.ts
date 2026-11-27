@@ -9,6 +9,7 @@ import {
   buildRemoveDllCompetencyPrompt,
   buildRemoveDlpCompetencyPrompt,
   buildRemoveQuizCompetencyPrompt,
+  buildUnsavedChangesPrompt,
   confirmDialogReducer,
   formatConfirmError,
   type ConfirmPrompt,
@@ -180,6 +181,29 @@ describe("buildDeleteCustomCompetencyPrompt & formatConfirmError", () => {
       confirmLabel: "Delete DLL",
       busyLabel: "Deleting...",
     });
+
+    expect(buildDeleteDllPrompt("Week 3 ICT & FCS Plan", 0)).toEqual({
+      title: "Delete Daily Lesson Log?",
+      body: 'Permanently delete "Week 3 ICT & FCS Plan" from local storage? This cannot be undone.',
+      confirmLabel: "Delete DLL",
+      busyLabel: "Deleting...",
+    });
+  });
+
+  it("warns with the exact count of referencing derived DLPs and confirms they remain intact when deleting a parent DLL", () => {
+    expect(buildDeleteDllPrompt("Week 3 ICT & FCS Plan", 1)).toEqual({
+      title: "Delete Daily Lesson Log?",
+      body: 'Permanently delete "Week 3 ICT & FCS Plan" from local storage? 1 derived Daily Lesson Plan references this DLL and will remain intact. This cannot be undone.',
+      confirmLabel: "Delete DLL",
+      busyLabel: "Deleting...",
+    });
+
+    expect(buildDeleteDllPrompt("Week 3 ICT & FCS Plan", 3)).toEqual({
+      title: "Delete Daily Lesson Log?",
+      body: 'Permanently delete "Week 3 ICT & FCS Plan" from local storage? 3 derived Daily Lesson Plans reference this DLL and will remain intact. This cannot be undone.',
+      confirmLabel: "Delete DLL",
+      busyLabel: "Deleting...",
+    });
   });
 
   it("builds the canonical Remove Learning Competency from DLL Session confirmation prompt", () => {
@@ -246,6 +270,26 @@ describe("buildDeleteCustomCompetencyPrompt & formatConfirmError", () => {
       title: "Remove Learning Competency?",
       body: 'Remove "Apply basic HTML tags" from this Quiz? You can add it back anytime.',
       confirmLabel: "Remove",
+    });
+  });
+
+  it("builds the canonical unsaved-edits leave confirmation prompt with or without a lesson title", () => {
+    expect(buildUnsavedChangesPrompt("  Number Systems Week 1  ")).toEqual({
+      title: "Discard Unsaved Changes?",
+      body: 'You have unsaved inline edits to "Number Systems Week 1". Leaving now will discard your unsaved changes.',
+      confirmLabel: "Leave Without Saving",
+    });
+
+    expect(buildUnsavedChangesPrompt("   ")).toEqual({
+      title: "Discard Unsaved Changes?",
+      body: "You have unsaved inline edits. Leaving now will discard your unsaved changes.",
+      confirmLabel: "Leave Without Saving",
+    });
+
+    expect(buildUnsavedChangesPrompt()).toEqual({
+      title: "Discard Unsaved Changes?",
+      body: "You have unsaved inline edits. Leaving now will discard your unsaved changes.",
+      confirmLabel: "Leave Without Saving",
     });
   });
 });

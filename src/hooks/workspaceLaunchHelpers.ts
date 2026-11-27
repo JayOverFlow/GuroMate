@@ -1,9 +1,11 @@
 import {
   SESSION_NUMBERS,
+  type DailyLessonLog,
+  type DailyLessonPlan,
   type DllSessionConfig,
   type SessionNumber,
 } from "../engine/types";
-import type { LessonViewMode } from "../utils/workspaceRouting";
+import type { AppRoute, LessonViewMode } from "../utils/workspaceRouting";
 
 export type LessonRouteResolution =
   | { kind: "create" }
@@ -165,4 +167,91 @@ export function resolveLessonRouteSelection(
     return { kind: "loading" };
   }
   return { kind: "missing", lessonId: id };
+}
+
+function serializeDllEditableState(dll: DailyLessonLog): string {
+  return JSON.stringify({
+    lessonTitle: dll.lessonTitle,
+    learningAreas: dll.learningAreas,
+    gradeAndSection: dll.gradeAndSection,
+    references: dll.references,
+    promptNotes: dll.promptNotes,
+    intentions: {
+      learningCompetencies: dll.intentions.learningCompetencies,
+      contentStandards: dll.intentions.contentStandards,
+      performanceStandards: dll.intentions.performanceStandards,
+      learnerContext: dll.intentions.learnerContext,
+    },
+    sessions: dll.sessions.map((session) => ({
+      sessionNumber: session.sessionNumber,
+      mode: session.mode,
+      competencyIds: session.competencyIds,
+      components: session.components,
+      nonInstructionalReason: session.nonInstructionalReason ?? "",
+      learningObjectives: session.learningObjectives,
+      preLesson: session.preLesson,
+      lessonFlow: session.lessonFlow,
+      learningResources: session.learningResources,
+      integrationAndContextualization: session.integrationAndContextualization,
+      formativeAssessment: session.formativeAssessment,
+      extendedLearningOpportunities: session.extendedLearningOpportunities,
+      reflections: session.reflections,
+    })),
+  });
+}
+
+export function isDllDraftDirty(
+  saved: DailyLessonLog | null,
+  draft: DailyLessonLog | null,
+): boolean {
+  if (!saved || !draft || saved.id !== draft.id) return false;
+  return serializeDllEditableState(saved) !== serializeDllEditableState(draft);
+}
+
+function serializeDlpEditableState(dlp: DailyLessonPlan): string {
+  return JSON.stringify({
+    lessonTitle: dlp.lessonTitle,
+    learningAreas: dlp.learningAreas,
+    gradeAndSection: dlp.gradeAndSection,
+    references: dlp.references,
+    promptNotes: dlp.promptNotes,
+    intentions: {
+      learningCompetencies: dlp.intentions.learningCompetencies,
+      contentStandards: dlp.intentions.contentStandards,
+      performanceStandards: dlp.intentions.performanceStandards,
+      learningObjectives: dlp.intentions.learningObjectives,
+      learnerContext: dlp.intentions.learnerContext,
+    },
+    preLesson: dlp.preLesson,
+    lessonFlow: dlp.lessonFlow,
+    learningResources: dlp.learningResources,
+    integrationAndContextualization: dlp.integrationAndContextualization,
+    formativeAssessment: dlp.formativeAssessment,
+    extendedLearningOpportunities: dlp.extendedLearningOpportunities,
+    reflections: dlp.reflections,
+  });
+}
+
+export function isDlpDraftDirty(
+  saved: DailyLessonPlan | null,
+  draft: DailyLessonPlan | null,
+): boolean {
+  if (!saved || !draft || saved.id !== draft.id) return false;
+  return serializeDlpEditableState(saved) !== serializeDlpEditableState(draft);
+}
+
+export function isLeavingActiveLesson(
+  current: AppRoute,
+  next: AppRoute,
+): boolean {
+  if (current.workspace !== "dll" && current.workspace !== "dlp") {
+    return false;
+  }
+  const currentId = current.lessonId?.trim();
+  if (!currentId) return false;
+
+  if (next.workspace === current.workspace && next.lessonId?.trim() === currentId) {
+    return false;
+  }
+  return true;
 }

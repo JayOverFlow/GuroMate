@@ -7,6 +7,11 @@ import {
 import { renderDlpMarkdown } from "../engine/dlp";
 import type { DailyLessonPlan } from "../engine/types";
 import {
+  formatOrphanedDlpLabel,
+  type DlpDerivationLineage,
+} from "../utils/lessonLibraryQuery";
+import { serializeHashRoute } from "../utils/workspaceRouting";
+import {
   buildDlpReadingSections,
   formatDlpSourceLabel,
   type DlpReadingSection,
@@ -15,6 +20,8 @@ import {
 export interface DlpMarkdownViewProps {
   dlp: DailyLessonPlan;
   sourceDllTitle?: string;
+  lineage?: DlpDerivationLineage | null;
+  onOpenParentDll?: (dllId: string) => void;
   toolbarActions?: ReactNode;
 }
 
@@ -123,11 +130,14 @@ function PairedActivitySectionCard({
 export function DlpMarkdownView({
   dlp,
   sourceDllTitle,
+  lineage,
+  onOpenParentDll,
   toolbarActions,
 }: DlpMarkdownViewProps) {
   const canonicalMarkdown = useMemo(() => renderDlpMarkdown(dlp), [dlp]);
   const sections = useMemo(() => buildDlpReadingSections(dlp), [dlp]);
-  const sourceLabel = formatDlpSourceLabel(dlp, sourceDllTitle);
+  const fallbackSourceLabel =
+    lineage === undefined ? formatDlpSourceLabel(dlp, sourceDllTitle) : null;
 
   return (
     <div className="w-full flex flex-col gap-gutter-lg">
@@ -155,11 +165,57 @@ export function DlpMarkdownView({
               <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                 1 Session
               </span>
-              {sourceLabel && (
-                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
-                  {sourceLabel}
+              {lineage?.status === "linked" ? (
+                <a
+                  href={serializeHashRoute({
+                    workspace: "dll",
+                    lessonId: lineage.parentDllId,
+                    viewMode: "edit",
+                  })}
+                  onClick={(event) => {
+                    if (
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey ||
+                      event.button !== 0 ||
+                      !onOpenParentDll
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    onOpenParentDll(lineage.parentDllId);
+                  }}
+                  className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  <span
+                    className="material-symbols-outlined text-body-sm"
+                    aria-hidden="true"
+                  >
+                    link
+                  </span>
+                  <span>
+                    Derived from {lineage.parentDllTitle}
+                    {lineage.sessionNumber !== undefined
+                      ? ` · Session ${lineage.sessionNumber}`
+                      : ""}
+                  </span>
+                </a>
+              ) : lineage?.status === "orphaned" ? (
+                <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                  <span
+                    className="material-symbols-outlined text-body-sm"
+                    aria-hidden="true"
+                  >
+                    link_off
+                  </span>
+                  <span>{formatOrphanedDlpLabel(lineage.sessionNumber)}</span>
                 </span>
-              )}
+              ) : fallbackSourceLabel ? (
+                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
+                  {fallbackSourceLabel}
+                </span>
+              ) : null}
             </div>
             <p className="font-body text-body-sm text-on-surface-variant">
               <strong className="font-semibold text-on-surface">

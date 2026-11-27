@@ -57,9 +57,25 @@ export interface LessonLibraryEntryBase {
   updatedAt: string;
 }
 
+export type DlpDerivationLineage =
+  | {
+      status: "linked";
+      parentDllId: string;
+      parentDllTitle: string;
+      sessionNumber?: SessionNumber;
+    }
+  | {
+      status: "orphaned";
+      sourceDllId: string;
+      sessionNumber?: SessionNumber;
+    };
+
 export interface LessonLibraryDllEntry extends LessonLibraryEntryBase {
   kind: "dll";
   dll: DailyLessonLog;
+  derivedDlpCount: number;
+  firstInstructionalSessionNumber: SessionNumber;
+  hasInstructionalSession: boolean;
 }
 
 export interface LessonLibraryDlpEntry extends LessonLibraryEntryBase {
@@ -67,6 +83,7 @@ export interface LessonLibraryDlpEntry extends LessonLibraryEntryBase {
   dlp: DailyLessonPlan;
   sourceDllId?: string;
   sourceSessionNumber?: SessionNumber;
+  lineage: DlpDerivationLineage | null;
 }
 
 export type LessonLibraryEntry =
@@ -97,6 +114,60 @@ export function extractDllComponents(dll: DailyLessonLog): TleComponent[] {
 
 export function extractDlpComponents(dlp: DailyLessonPlan): TleComponent[] {
   return parseLearningAreaComponents(dlp.learningAreas);
+}
+
+export function findFirstInstructionalSessionNumber(
+  dll: Pick<DailyLessonLog, "sessions">,
+): SessionNumber {
+  const first = dll.sessions.find((session) => session.mode === "instructional");
+  return first ? first.sessionNumber : 1;
+}
+
+export function countDerivedDlps(
+  dllId: string,
+  dlps: readonly Pick<DailyLessonPlan, "sourceDllId">[],
+): number {
+  const targetId = dllId.trim();
+  if (!targetId) return 0;
+  let count = 0;
+  for (const dlp of dlps) {
+    if (dlp.sourceDllId?.trim() === targetId) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+export function resolveDlpLineage(
+  dlp: Pick<DailyLessonPlan, "sourceDllId" | "sourceSessionNumber">,
+  dlls: readonly Pick<DailyLessonLog, "id" | "lessonTitle">[],
+): DlpDerivationLineage | null {
+  const sourceDllId = dlp.sourceDllId?.trim();
+  if (!sourceDllId) return null;
+
+  const parent = dlls.find((dll) => dll.id === sourceDllId);
+  if (parent) {
+    return {
+      status: "linked",
+      parentDllId: parent.id,
+      parentDllTitle: parent.lessonTitle,
+      sessionNumber: dlp.sourceSessionNumber,
+    };
+  }
+
+  return {
+    status: "orphaned",
+    sourceDllId,
+    sessionNumber: dlp.sourceSessionNumber,
+  };
+}
+
+export function formatOrphanedDlpLabel(
+  sessionNumber?: SessionNumber,
+): string {
+  return sessionNumber !== undefined
+    ? `Derived from deleted DLL (Session ${sessionNumber})`
+    : "Derived from deleted DLL";
 }
 
 function toTimestamp(iso: string): number {
@@ -186,6 +257,17 @@ export function queryLessonLibrary(
     ...input.filters,
   };
 
+  const derivedCountByDllId = new Map<string, number>();
+  for (const dlp of input.dlps) {
+    const sourceId = dlp.sourceDllId?.trim();
+    if (sourceId) {
+      derivedCountByDllId.set(
+        sourceId,
+        (derivedCountByDllId.get(sourceId) ?? 0) + 1,
+      );
+    }
+  }
+
   const allEntries: LessonLibraryEntry[] = [
     ...input.dlls.map(
       (dll): LessonLibraryDllEntry => ({
@@ -200,6 +282,12 @@ export function queryLessonLibrary(
         createdAt: dll.createdAt,
         updatedAt: dll.updatedAt,
         dll,
+        derivedDlpCount: derivedCountByDllId.get(dll.id) ?? 0,
+        firstInstructionalSessionNumber:
+          findFirstInstructionalSessionNumber(dll),
+        hasInstructionalSession: dll.sessions.some(
+          (session) => session.mode === "instructional",
+        ),
       }),
     ),
     ...input.dlps.map(
@@ -217,6 +305,7 @@ export function queryLessonLibrary(
         dlp,
         sourceDllId: dlp.sourceDllId,
         sourceSessionNumber: dlp.sourceSessionNumber,
+        lineage: resolveDlpLineage(dlp, input.dlls),
       }),
     ),
   ];

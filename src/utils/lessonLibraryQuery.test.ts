@@ -10,9 +10,13 @@ import type {
 } from "../engine/types";
 import {
   clearLessonLibraryFilters,
+  countDerivedDlps,
   DEFAULT_LESSON_LIBRARY_FILTERS,
+  findFirstInstructionalSessionNumber,
+  formatOrphanedDlpLabel,
   isSettingsSetupIncomplete,
   queryLessonLibrary,
+  resolveDlpLineage,
 } from "./lessonLibraryQuery";
 
 const EMPTY_PAIR: DlpActivityPair = {
@@ -481,6 +485,157 @@ describe("queryLessonLibrary", () => {
     expect(cleared).toEqual({
       ...DEFAULT_LESSON_LIBRARY_FILTERS,
       sort: "title",
+    });
+  });
+});
+
+describe("findFirstInstructionalSessionNumber", () => {
+  it("returns the first instructional Session, skipping leading non-instructional Sessions, and falls back to Session 1 when none are instructional", () => {
+    const standardDll = makeDll();
+    expect(findFirstInstructionalSessionNumber(standardDll)).toBe(1);
+
+    const skippedLeadingDll = makeDll({
+      sessions: [
+        { ...makeSession(1), mode: "non-instructional", nonInstructionalReason: "Holiday" },
+        { ...makeSession(2), mode: "non-instructional", nonInstructionalReason: "Intramurals" },
+        makeSession(3),
+        makeSession(4),
+        makeSession(5),
+      ],
+    });
+    expect(findFirstInstructionalSessionNumber(skippedLeadingDll)).toBe(3);
+
+    const allNonInstructionalDll = makeDll({
+      sessions: [
+        { ...makeSession(1), mode: "non-instructional" },
+        { ...makeSession(2), mode: "non-instructional" },
+        { ...makeSession(3), mode: "non-instructional" },
+        { ...makeSession(4), mode: "non-instructional" },
+        { ...makeSession(5), mode: "non-instructional" },
+      ],
+    });
+    expect(findFirstInstructionalSessionNumber(allNonInstructionalDll)).toBe(1);
+  });
+});
+
+describe("derivation lineage and orphan detection", () => {
+  it("counts derived DLPs per parent DLL and resolves linked, orphaned, and standalone DLP lineage", () => {
+    const parentDll = makeDll({
+      id: "dll-parent",
+      lessonTitle: "Week 2 ICT Fundamentals",
+      sessions: [
+        { ...makeSession(1), mode: "non-instructional", nonInstructionalReason: "Holiday" },
+        makeSession(2),
+        makeSession(3),
+        makeSession(4),
+        makeSession(5),
+      ],
+    });
+    const standaloneDll = makeDll({
+      id: "dll-alone",
+      lessonTitle: "Week 3 Standalone",
+      sessions: [
+        { ...makeSession(1), mode: "non-instructional" },
+        { ...makeSession(2), mode: "non-instructional" },
+        { ...makeSession(3), mode: "non-instructional" },
+        { ...makeSession(4), mode: "non-instructional" },
+        { ...makeSession(5), mode: "non-instructional" },
+      ],
+    });
+    const linkedDlp1 = makeDlp({
+      id: "dlp-linked-1",
+      sourceDllId: "dll-parent",
+      sourceSessionNumber: 2,
+    });
+    const linkedDlp2 = makeDlp({
+      id: "dlp-linked-2",
+      sourceDllId: "dll-parent",
+      sourceSessionNumber: 4,
+    });
+    const orphanedDlp = makeDlp({
+      id: "dlp-orphan",
+      sourceDllId: "dll-deleted",
+      sourceSessionNumber: 3,
+    });
+    const standaloneDlp = makeDlp({
+      id: "dlp-standalone",
+    });
+
+    expect(
+      countDerivedDlps("dll-parent", [
+        linkedDlp1,
+        linkedDlp2,
+        orphanedDlp,
+        standaloneDlp,
+      ]),
+    ).toBe(2);
+    expect(
+      countDerivedDlps("dll-alone", [linkedDlp1, orphanedDlp]),
+    ).toBe(0);
+
+    expect(resolveDlpLineage(linkedDlp1, [parentDll, standaloneDll])).toEqual({
+      status: "linked",
+      parentDllId: "dll-parent",
+      parentDllTitle: "Week 2 ICT Fundamentals",
+      sessionNumber: 2,
+    });
+    expect(resolveDlpLineage(orphanedDlp, [parentDll, standaloneDll])).toEqual({
+      status: "orphaned",
+      sourceDllId: "dll-deleted",
+      sessionNumber: 3,
+    });
+    expect(resolveDlpLineage(standaloneDlp, [parentDll])).toBeNull();
+
+    expect(formatOrphanedDlpLabel(3)).toBe("Derived from deleted DLL (Session 3)");
+    expect(formatOrphanedDlpLabel(undefined)).toBe("Derived from deleted DLL");
+
+    // Even when filtering to DLLs only, derivedDlpCount reflects full saved DLP inventory
+    const dllOnly = queryLessonLibrary({
+      dlls: [parentDll, standaloneDll],
+      dlps: [linkedDlp1, linkedDlp2, orphanedDlp, standaloneDlp],
+      filters: { type: "dll" },
+    });
+    const parentEntry = dllOnly.entries.find((e) => e.id === "dll-parent");
+    const aloneEntry = dllOnly.entries.find((e) => e.id === "dll-alone");
+    expect(parentEntry).toMatchObject({
+      kind: "dll",
+      derivedDlpCount: 2,
+      firstInstructionalSessionNumber: 2,
+      hasInstructionalSession: true,
+    });
+    expect(aloneEntry).toMatchObject({
+      kind: "dll",
+      derivedDlpCount: 0,
+      firstInstructionalSessionNumber: 1,
+      hasInstructionalSession: false,
+    });
+
+    // DLP entries carry resolved lineage even when filtered to DLPs only
+    const dlpOnly = queryLessonLibrary({
+      dlls: [parentDll],
+      dlps: [linkedDlp1, orphanedDlp, standaloneDlp],
+      filters: { type: "dlp" },
+    });
+    expect(dlpOnly.entries.find((e) => e.id === "dlp-linked-1")).toMatchObject({
+      kind: "dlp",
+      lineage: {
+        status: "linked",
+        parentDllId: "dll-parent",
+        parentDllTitle: "Week 2 ICT Fundamentals",
+        sessionNumber: 2,
+      },
+    });
+    expect(dlpOnly.entries.find((e) => e.id === "dlp-orphan")).toMatchObject({
+      kind: "dlp",
+      lineage: {
+        status: "orphaned",
+        sourceDllId: "dll-deleted",
+        sessionNumber: 3,
+      },
+    });
+    expect(dlpOnly.entries.find((e) => e.id === "dlp-standalone")).toMatchObject({
+      kind: "dlp",
+      lineage: null,
     });
   });
 });

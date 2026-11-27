@@ -5,9 +5,11 @@ import type {
   DailyLessonLog,
   DailyLessonPlan,
   GuroMateSettings,
+  SessionNumber,
   TleComponent,
 } from "../engine/types";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import type { QuizLaunchTarget } from "../hooks/workspaceLaunchHelpers";
 import {
   buildDeleteDllPrompt,
   buildDeleteDlpPrompt,
@@ -15,6 +17,7 @@ import {
 import {
   clearLessonLibraryFilters,
   DEFAULT_LESSON_LIBRARY_FILTERS,
+  formatOrphanedDlpLabel,
   queryLessonLibrary,
   type LessonLibraryEntry,
   type LessonLibraryFilters,
@@ -23,6 +26,7 @@ import {
 } from "../utils/lessonLibraryQuery";
 import {
   buildDeletedLessonNotice,
+  serializeHashRoute,
   type LessonViewMode,
 } from "../utils/workspaceRouting";
 import { readErrorMessage } from "./lessonViewHelpers";
@@ -39,6 +43,8 @@ export interface LessonLibraryWorkspaceProps {
   onNewDlp: () => void;
   onOpenDll: (dllId: string, viewMode?: LessonViewMode) => void;
   onOpenDlp: (dlpId: string, viewMode?: LessonViewMode) => void;
+  onDeriveDlp: (dllId: string, sessionNumber: SessionNumber) => void;
+  onCreateQuiz: (target: QuizLaunchTarget) => void;
   onOpenSettings: () => void;
 }
 
@@ -77,6 +83,8 @@ export function LessonLibraryWorkspace({
   onNewDlp,
   onOpenDll,
   onOpenDlp,
+  onDeriveDlp,
+  onCreateQuiz,
   onOpenSettings,
 }: LessonLibraryWorkspaceProps) {
   const headingId = useId();
@@ -169,7 +177,7 @@ export function LessonLibraryWorkspace({
   function requestDeleteEntry(entry: LessonLibraryEntry) {
     const prompt =
       entry.kind === "dll"
-        ? buildDeleteDllPrompt(entry.lessonTitle)
+        ? buildDeleteDllPrompt(entry.lessonTitle, entry.derivedDlpCount)
         : buildDeleteDlpPrompt(entry.lessonTitle);
 
     confirmDialog.requestConfirm(prompt, async () => {
@@ -686,6 +694,82 @@ export function LessonLibraryWorkspace({
                               {entry.learningAreas}
                             </span>
                           ) : null}
+
+                          {entry.kind === "dll" && entry.derivedDlpCount > 0 && (
+                            <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm tabular-nums">
+                              <span
+                                className="material-symbols-outlined text-body-sm"
+                                aria-hidden="true"
+                              >
+                                splitscreen
+                              </span>
+                              <span>
+                                {entry.derivedDlpCount === 1
+                                  ? "1 derived DLP"
+                                  : `${entry.derivedDlpCount} derived DLPs`}
+                              </span>
+                            </span>
+                          )}
+
+                          {entry.kind === "dlp" &&
+                            entry.lineage?.status === "linked" && (
+                              <a
+                                href={serializeHashRoute({
+                                  workspace: "dll",
+                                  lessonId: entry.lineage.parentDllId,
+                                  viewMode: "edit",
+                                })}
+                                onClick={(event) => {
+                                  if (
+                                    event.metaKey ||
+                                    event.ctrlKey ||
+                                    event.shiftKey ||
+                                    event.altKey ||
+                                    event.button !== 0
+                                  ) {
+                                    return;
+                                  }
+                                  event.preventDefault();
+                                  if (entry.lineage?.status === "linked") {
+                                    onOpenDll(
+                                      entry.lineage.parentDllId,
+                                      "edit",
+                                    );
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                              >
+                                <span
+                                  className="material-symbols-outlined text-body-sm"
+                                  aria-hidden="true"
+                                >
+                                  link
+                                </span>
+                                <span>
+                                  Derived from {entry.lineage.parentDllTitle}
+                                  {entry.lineage.sessionNumber !== undefined
+                                    ? ` (Session ${entry.lineage.sessionNumber})`
+                                    : ""}
+                                </span>
+                              </a>
+                            )}
+
+                          {entry.kind === "dlp" &&
+                            entry.lineage?.status === "orphaned" && (
+                              <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                                <span
+                                  className="material-symbols-outlined text-body-sm"
+                                  aria-hidden="true"
+                                >
+                                  link_off
+                                </span>
+                                <span>
+                                  {formatOrphanedDlpLabel(
+                                    entry.lineage.sessionNumber,
+                                  )}
+                                </span>
+                              </span>
+                            )}
                         </div>
 
                         <h2 className="font-title text-title-lg text-on-surface text-balance">
@@ -766,6 +850,72 @@ export function LessonLibraryWorkspace({
                           </span>
                           <span>Export ILAW .docx</span>
                         </a>
+
+                        {entry.kind === "dll" && (
+                          <button
+                            type="button"
+                            disabled={!entry.hasInstructionalSession}
+                            title={
+                              entry.hasInstructionalSession
+                                ? `Derive DLP from Session ${entry.firstInstructionalSessionNumber}`
+                                : "No instructional Session available to derive a DLP"
+                            }
+                            onClick={() =>
+                              onDeriveDlp(
+                                entry.id,
+                                entry.firstInstructionalSessionNumber,
+                              )
+                            }
+                            className="inline-flex items-center justify-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-md hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
+                          >
+                            <span
+                              className="material-symbols-outlined text-body-md text-primary"
+                              aria-hidden="true"
+                            >
+                              splitscreen
+                            </span>
+                            <span>Derive DLP</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled={
+                            entry.kind === "dll" &&
+                            !entry.hasInstructionalSession
+                          }
+                          title={
+                            entry.kind === "dll"
+                              ? entry.hasInstructionalSession
+                                ? `Create Quiz from Session ${entry.firstInstructionalSessionNumber}`
+                                : "No instructional Session available to create a Quiz"
+                              : "Create Quiz from this Daily Lesson Plan"
+                          }
+                          onClick={() => {
+                            if (entry.kind === "dll") {
+                              onCreateQuiz({
+                                sourceKind: "dll",
+                                dllId: entry.id,
+                                sessionNumber:
+                                  entry.firstInstructionalSessionNumber,
+                              });
+                            } else {
+                              onCreateQuiz({
+                                sourceKind: "dlp",
+                                dlpId: entry.id,
+                              });
+                            }
+                          }}
+                          className="inline-flex items-center justify-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-md hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-50"
+                        >
+                          <span
+                            className="material-symbols-outlined text-body-md text-primary"
+                            aria-hidden="true"
+                          >
+                            quiz
+                          </span>
+                          <span>Create Quiz</span>
+                        </button>
 
                         <button
                           type="button"
