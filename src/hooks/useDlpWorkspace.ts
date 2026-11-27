@@ -32,8 +32,10 @@ import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import { useConfirmDialog } from "./useConfirmDialog";
 import {
   appendUniqueId,
+  createFreshDlpCreationFormState,
   isDlpDraftDirty,
   resolveLessonRouteSelection,
+  shouldResetCreationFormOnRouteChange,
   type DlpLaunchTarget,
 } from "./workspaceLaunchHelpers";
 
@@ -170,7 +172,31 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   const interactedFieldsRef = useRef<Set<DlpBuilderFieldKey>>(new Set());
   const recentlyDeletedIdRef = useRef<string | null>(null);
   const reportedMissingIdRef = useRef<string | null>(null);
+  const prevRouteLessonIdRef = useRef<string | undefined>(routeLessonId);
+  const sectionsRef = useRef<ClassSection[]>(sections);
+  sectionsRef.current = sections;
+  const dllsRef = useRef<DailyLessonLog[]>(dlls);
+  dllsRef.current = dlls;
   const confirmDialog = useConfirmDialog();
+
+  const resetCreationForm = useCallback((launchTarget?: DlpLaunchTarget | null) => {
+    const fresh = createFreshDlpCreationFormState(
+      sectionsRef.current,
+      dllsRef.current,
+      launchTarget,
+    );
+    setBuilderMode(fresh.builderMode);
+    setDeriveDllId(fresh.deriveDllId);
+    setDeriveSessionNumber(fresh.deriveSessionNumber);
+    setLessonTitle(fresh.lessonTitle);
+    setGradeAndSection(fresh.gradeAndSection);
+    setReferences(fresh.references);
+    setPromptNotes(fresh.promptNotes);
+    setSelectedCompetencyIds(fresh.selectedCompetencyIds);
+    setPickedCompetencyId(fresh.pickedCompetencyId);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
+  }, []);
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
@@ -257,10 +283,22 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
 
   useEffect(() => {
     if (routeResolution.kind === "loading") return;
+    const prevRouteLessonId = prevRouteLessonIdRef.current;
+    prevRouteLessonIdRef.current = routeLessonId;
+
     if (routeResolution.kind === "create") {
       reportedMissingIdRef.current = null;
       setSelectedDlpId("");
       setViewMode("edit");
+      if (
+        shouldResetCreationFormOnRouteChange(
+          prevRouteLessonId,
+          routeResolution.kind,
+        )
+      ) {
+        resetCreationForm(initialLaunchTarget);
+        setStatus(null);
+      }
       return;
     }
     if (routeResolution.kind === "open") {
@@ -277,7 +315,14 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
       reportedMissingIdRef.current = routeResolution.lessonId;
       onMissingLesson?.(routeResolution.lessonId);
     }
-  }, [routeResolution, loadFailed, onMissingLesson]);
+  }, [
+    routeResolution,
+    routeLessonId,
+    initialLaunchTarget,
+    resetCreationForm,
+    loadFailed,
+    onMissingLesson,
+  ]);
 
   const savedDlp = useMemo(
     () => dlps.find((d) => d.id === selectedDlpId) ?? null,
@@ -534,13 +579,15 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   }
 
   function startNewDlp() {
-    if (onRouteChange) {
+    if (onRouteChange && routeLessonId?.trim()) {
       onRouteChange(undefined, undefined);
       return;
     }
     setSelectedDlpId("");
     setViewMode("edit");
+    resetCreationForm();
     setStatus(null);
+    onRouteChange?.(undefined, undefined);
   }
 
   function requestDeleteDlp() {

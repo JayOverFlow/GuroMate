@@ -1,7 +1,8 @@
 export type InlineToken =
   | { type: "text"; text: string }
   | { type: "bold"; text: string }
-  | { type: "italic"; text: string };
+  | { type: "italic"; text: string }
+  | { type: "bold-italic"; text: string };
 
 export interface QuizChoice {
   label: string;
@@ -28,14 +29,46 @@ export type RichTextBlock =
 
 const WORD_OR_UNDERSCORE = /[A-Za-z0-9_]/;
 
-function pushText(tokens: InlineToken[], text: string): void {
+function pushToken(
+  tokens: InlineToken[],
+  type: InlineToken["type"],
+  text: string,
+): void {
   if (!text) return;
   const last = tokens[tokens.length - 1];
-  if (last && last.type === "text") {
+  if (last && last.type === type) {
     last.text += text;
   } else {
-    tokens.push({ type: "text", text });
+    tokens.push({ type, text });
   }
+}
+
+function resolveInlineTokenType(
+  bold: boolean,
+  italic: boolean,
+): InlineToken["type"] {
+  if (bold && italic) return "bold-italic";
+  if (bold) return "bold";
+  if (italic) return "italic";
+  return "text";
+}
+
+function endsWithClosedAsteriskItalic(inner: string): boolean {
+  let i = 0;
+  while (i < inner.length) {
+    if (inner[i] === "*" && inner[i + 1] !== "*") {
+      const closeIdx = findClosingAsteriskItalic(inner, i);
+      if (closeIdx !== -1) {
+        if (closeIdx === inner.length - 1) {
+          return true;
+        }
+        i = closeIdx + 1;
+        continue;
+      }
+    }
+    i += 1;
+  }
+  return false;
 }
 
 function findClosingBold(text: string, startAfterOpen: number): number {
@@ -45,6 +78,13 @@ function findClosingBold(text: string, startAfterOpen: number): number {
   let idx = text.indexOf("**", startAfterOpen);
   while (idx !== -1) {
     if (idx > startAfterOpen && !/\s/.test(text[idx - 1]!)) {
+      if (
+        text[idx + 2] === "*" &&
+        text[idx + 3] !== "*" &&
+        endsWithClosedAsteriskItalic(text.slice(startAfterOpen, idx + 1))
+      ) {
+        return idx + 1;
+      }
       return idx;
     }
     idx = text.indexOf("**", idx + 2);
@@ -52,7 +92,12 @@ function findClosingBold(text: string, startAfterOpen: number): number {
   return -1;
 }
 
-function findClosingAsteriskItalic(text: string, startAfterOpen: number): number {
+function findClosingAsteriskItalic(text: string, openIdx: number): number {
+  const prevChar = openIdx > 0 ? text[openIdx - 1]! : "";
+  if (prevChar && (WORD_OR_UNDERSCORE.test(prevChar) || prevChar === "*")) {
+    return -1;
+  }
+  const startAfterOpen = openIdx + 1;
   if (
     startAfterOpen >= text.length ||
     /\s/.test(text[startAfterOpen]!) ||
@@ -67,7 +112,12 @@ function findClosingAsteriskItalic(text: string, startAfterOpen: number): number
       j += 1;
       continue;
     }
-    if (j > startAfterOpen && !/\s/.test(text[j - 1]!)) {
+    const nextChar = j + 1 < text.length ? text[j + 1]! : "";
+    if (
+      j > startAfterOpen &&
+      !/\s/.test(text[j - 1]!) &&
+      (!nextChar || !WORD_OR_UNDERSCORE.test(nextChar))
+    ) {
       return j;
     }
   }
@@ -105,43 +155,51 @@ function findClosingUnderscoreItalic(
   return -1;
 }
 
-export function parseInlineRichText(text: string): InlineToken[] {
-  if (!text) return [];
-  const tokens: InlineToken[] = [];
+function parseInlineInto(
+  text: string,
+  bold: boolean,
+  italic: boolean,
+  tokens: InlineToken[],
+): void {
   let i = 0;
 
   while (i < text.length) {
-    if (text.startsWith("**", i)) {
+    if (!bold && text.startsWith("**", i)) {
       const closeIdx = findClosingBold(text, i + 2);
       if (closeIdx !== -1) {
-        tokens.push({ type: "bold", text: text.slice(i + 2, closeIdx) });
+        parseInlineInto(text.slice(i + 2, closeIdx), true, italic, tokens);
         i = closeIdx + 2;
         continue;
       }
     }
 
-    if (text[i] === "*" && text[i + 1] !== "*") {
-      const closeIdx = findClosingAsteriskItalic(text, i + 1);
+    if (!italic && text[i] === "*" && text[i + 1] !== "*") {
+      const closeIdx = findClosingAsteriskItalic(text, i);
       if (closeIdx !== -1) {
-        tokens.push({ type: "italic", text: text.slice(i + 1, closeIdx) });
+        parseInlineInto(text.slice(i + 1, closeIdx), bold, true, tokens);
         i = closeIdx + 1;
         continue;
       }
     }
 
-    if (text[i] === "_") {
+    if (!italic && text[i] === "_") {
       const closeIdx = findClosingUnderscoreItalic(text, i);
       if (closeIdx !== -1) {
-        tokens.push({ type: "italic", text: text.slice(i + 1, closeIdx) });
+        parseInlineInto(text.slice(i + 1, closeIdx), bold, true, tokens);
         i = closeIdx + 1;
         continue;
       }
     }
 
-    pushText(tokens, text[i]!);
+    pushToken(tokens, resolveInlineTokenType(bold, italic), text[i]!);
     i += 1;
   }
+}
 
+export function parseInlineRichText(text: string): InlineToken[] {
+  if (!text) return [];
+  const tokens: InlineToken[] = [];
+  parseInlineInto(text, false, false, tokens);
   return tokens;
 }
 

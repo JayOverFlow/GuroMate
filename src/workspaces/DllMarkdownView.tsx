@@ -1,6 +1,7 @@
 import { useMemo, useRef, type ReactNode } from "react";
+import { IntentionsListColumn } from "../components/IntentionsListColumn";
+import { CopyMarkdownButton } from "../components/LessonMarkdownToolbar";
 import {
-  CopyMarkdownButton,
   LessonRichText,
   renderInlineTokens,
 } from "../components/LessonRichText";
@@ -17,40 +18,6 @@ export interface DllMarkdownViewProps {
   onDeriveDlp?: (dllId: string, sessionNumber: SessionNumber) => void;
   onCreateQuiz?: (dllId: string, sessionNumber: SessionNumber) => void;
   toolbarActions?: ReactNode;
-}
-
-function IntentionsListColumn({
-  title,
-  items,
-}: {
-  title: string;
-  items: readonly string[];
-}) {
-  const cleaned = items.map((item) => item.trim()).filter(Boolean);
-  return (
-    <div className="flex flex-col gap-gutter-xs rounded bg-surface-container-low/60 border border-outline-variant/70 p-gutter-md">
-      <h3 className="font-label text-label-md uppercase tracking-wide text-primary">
-        {title}
-      </h3>
-      {cleaned.length === 0 ? (
-        <p className="font-body text-body-sm italic text-on-surface-variant">
-          —
-        </p>
-      ) : cleaned.length === 1 ? (
-        <p className="font-body text-body-sm text-on-surface leading-relaxed">
-          {renderInlineTokens(cleaned[0]!)}
-        </p>
-      ) : (
-        <ul className="list-disc pl-4 flex flex-col gap-1 font-body text-body-sm text-on-surface marker:text-primary">
-          {cleaned.map((item, idx) => (
-            <li key={idx} className="leading-relaxed">
-              {renderInlineTokens(item)}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 function SessionFieldBlock({
@@ -359,7 +326,7 @@ export function DllMarkdownView({
                 <span className="font-body text-body-md text-on-surface-variant">
                   {session.nonInstructionalReason?.trim() ||
                     session.learningObjectives.trim() ||
-                    "Non-instructional day"}
+                    "Non-instructional Session"}
                 </span>
               </div>
             </article>

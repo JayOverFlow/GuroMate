@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppShell,
   WORKSPACES,
@@ -22,6 +22,7 @@ import {
   parseHashRoute,
   serializeHashRoute,
   type AppRoute,
+  type LessonKind,
   type LessonViewMode,
 } from "./utils/workspaceRouting";
 import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
@@ -141,7 +142,7 @@ export function App() {
       }
 
       if (dirtyRef.current.isDirty && isLeavingActiveLesson(prev, next)) {
-        window.history.replaceState(null, "", serializeHashRoute(prev));
+        window.history.pushState(null, "", serializeHashRoute(prev));
         requestConfirm(
           buildUnsavedChangesPrompt(dirtyRef.current.lessonLabel),
           () => {
@@ -238,107 +239,49 @@ export function App() {
     navigateToRoute({ workspace: "library" });
   }, [navigateToRoute]);
 
-  const handleOpenDll = useCallback(
-    (lessonId: string, viewMode: LessonViewMode = "edit") => {
-      navigateToRoute({ workspace: "dll", lessonId, viewMode });
-    },
-    [navigateToRoute],
-  );
-
-  const handleOpenDlp = useCallback(
-    (lessonId: string, viewMode: LessonViewMode = "edit") => {
-      navigateToRoute({ workspace: "dlp", lessonId, viewMode });
-    },
-    [navigateToRoute],
-  );
-
-  const handleDllRouteChange = useCallback(
-    (lessonId?: string, viewMode?: LessonViewMode) => {
-      navigateToRoute(
-        lessonId
-          ? { workspace: "dll", lessonId, viewMode: viewMode ?? "edit" }
-          : { workspace: "dll" },
-      );
-    },
-    [navigateToRoute],
-  );
-
-  const handleDlpRouteChange = useCallback(
-    (lessonId?: string, viewMode?: LessonViewMode) => {
-      navigateToRoute(
-        lessonId
-          ? { workspace: "dlp", lessonId, viewMode: viewMode ?? "edit" }
-          : { workspace: "dlp" },
-      );
-    },
-    [navigateToRoute],
-  );
-
-  const handleMissingDll = useCallback(
-    (lessonId: string) => {
-      navigateToRoute(
-        { workspace: "library" },
-        {
-          replace: true,
-          force: true,
-          notice: {
-            tone: "info",
-            text: buildMissingLessonNotice("dll", lessonId),
+  const lessonHandlers = useMemo(() => {
+    const build = (kind: LessonKind) => ({
+      open: (lessonId: string, viewMode: LessonViewMode = "edit") => {
+        navigateToRoute({ workspace: kind, lessonId, viewMode });
+      },
+      routeChange: (lessonId?: string, viewMode?: LessonViewMode) => {
+        navigateToRoute(
+          lessonId
+            ? { workspace: kind, lessonId, viewMode: viewMode ?? "edit" }
+            : { workspace: kind },
+        );
+      },
+      missing: (lessonId: string) => {
+        navigateToRoute(
+          { workspace: "library" },
+          {
+            replace: true,
+            force: true,
+            notice: {
+              tone: "info",
+              text: buildMissingLessonNotice(kind, lessonId),
+            },
           },
-        },
-      );
-    },
-    [navigateToRoute],
-  );
-
-  const handleMissingDlp = useCallback(
-    (lessonId: string) => {
-      navigateToRoute(
-        { workspace: "library" },
-        {
-          replace: true,
-          force: true,
-          notice: {
-            tone: "info",
-            text: buildMissingLessonNotice("dlp", lessonId),
+        );
+      },
+      deleted: (lessonTitle: string) => {
+        navigateToRoute(
+          { workspace: "library" },
+          {
+            force: true,
+            notice: {
+              tone: "success",
+              text: buildDeletedLessonNotice(kind, lessonTitle),
+            },
           },
-        },
-      );
-    },
-    [navigateToRoute],
-  );
-
-  const handleDeletedDll = useCallback(
-    (lessonTitle: string) => {
-      navigateToRoute(
-        { workspace: "library" },
-        {
-          force: true,
-          notice: {
-            tone: "success",
-            text: buildDeletedLessonNotice("dll", lessonTitle),
-          },
-        },
-      );
-    },
-    [navigateToRoute],
-  );
-
-  const handleDeletedDlp = useCallback(
-    (lessonTitle: string) => {
-      navigateToRoute(
-        { workspace: "library" },
-        {
-          force: true,
-          notice: {
-            tone: "success",
-            text: buildDeletedLessonNotice("dlp", lessonTitle),
-          },
-        },
-      );
-    },
-    [navigateToRoute],
-  );
+        );
+      },
+    });
+    return {
+      dll: build("dll"),
+      dlp: build("dlp"),
+    };
+  }, [navigateToRoute]);
 
   const handleLaunchDll = useCallback(
     (target: DllLaunchTarget) => {
@@ -398,7 +341,6 @@ export function App() {
         timer={timer}
         teacherName={teacherName}
         focusMode={activeFocusMode}
-        onExitFocusMode={handleExitFocusMode}
       >
         {route.workspace === "library" ? (
           <LessonLibraryWorkspace
@@ -406,8 +348,8 @@ export function App() {
             onDismissNotice={() => setLibraryNotice(null)}
             onNewDll={() => navigateToRoute({ workspace: "dll" })}
             onNewDlp={() => navigateToRoute({ workspace: "dlp" })}
-            onOpenDll={handleOpenDll}
-            onOpenDlp={handleOpenDlp}
+            onOpenDll={lessonHandlers.dll.open}
+            onOpenDlp={lessonHandlers.dlp.open}
             onDeriveDlp={handleDeriveDlp}
             onCreateQuiz={handleLaunchQuiz}
             onOpenSettings={() => navigateToRoute({ workspace: "settings" })}
@@ -418,10 +360,10 @@ export function App() {
             onConsumeLaunchTarget={handleConsumeDllTarget}
             routeLessonId={route.lessonId}
             routeViewMode={route.viewMode}
-            onRouteChange={handleDllRouteChange}
+            onRouteChange={lessonHandlers.dll.routeChange}
             onBackToLibrary={handleBackToLibrary}
-            onMissingLesson={handleMissingDll}
-            onDeletedLesson={handleDeletedDll}
+            onMissingLesson={lessonHandlers.dll.missing}
+            onDeletedLesson={lessonHandlers.dll.deleted}
             onDirtyChange={handleBuilderDirtyChange}
             onDeriveDlp={handleDeriveDlp}
             onCreateQuiz={(dllId, sessionNumber) =>
@@ -437,12 +379,12 @@ export function App() {
             onConsumeLaunchTarget={handleConsumeDlpTarget}
             routeLessonId={route.lessonId}
             routeViewMode={route.viewMode}
-            onRouteChange={handleDlpRouteChange}
+            onRouteChange={lessonHandlers.dlp.routeChange}
             onBackToLibrary={handleBackToLibrary}
-            onMissingLesson={handleMissingDlp}
-            onDeletedLesson={handleDeletedDlp}
+            onMissingLesson={lessonHandlers.dlp.missing}
+            onDeletedLesson={lessonHandlers.dlp.deleted}
             onDirtyChange={handleBuilderDirtyChange}
-            onOpenParentDll={(dllId) => handleOpenDll(dllId, "edit")}
+            onOpenParentDll={(dllId) => lessonHandlers.dll.open(dllId, "edit")}
             onCreateQuiz={(dlpId) =>
               handleLaunchQuiz({ sourceKind: "dlp", dlpId })
             }

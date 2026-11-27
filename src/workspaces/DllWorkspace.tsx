@@ -1,7 +1,7 @@
 import { useEffect, useId } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
-import { FocusModeToggleButton } from "../components/LessonRichText";
+import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
 import { formatLearningAreas } from "../engine/lessonHelpers";
 import { type SessionNumber } from "../engine/types";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
@@ -628,13 +628,6 @@ export function DllWorkspace({
                 <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                   5 Sessions
                 </span>
-                {derivedDlpCount > 0 && (
-                  <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm tabular-nums">
-                    {derivedDlpCount === 1
-                      ? "1 derived DLP"
-                      : `${derivedDlpCount} derived DLPs`}
-                  </span>
-                )}
                 {isDirty && (
                   <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
                     Unsaved edits

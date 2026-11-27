@@ -10,11 +10,14 @@ import {
   applyDllLaunchTarget,
   applyDlpLaunchTarget,
   applyQuizLaunchTarget,
+  createFreshDllCreationFormState,
+  createFreshDlpCreationFormState,
   createInitialDllSessionConfigs,
   isDllDraftDirty,
   isDlpDraftDirty,
   isLeavingActiveLesson,
   resolveLessonRouteSelection,
+  shouldResetCreationFormOnRouteChange,
   type DlpLaunchState,
   type QuizLaunchState,
 } from "./workspaceLaunchHelpers";
@@ -223,7 +226,7 @@ describe("applyQuizLaunchTarget", () => {
 });
 
 describe("resolveLessonRouteSelection", () => {
-  it("starts a fresh creation form without auto-loading saved lessons when route has no lessonId", () => {
+  it("starts a fresh creation form without auto-loading saved DLLs/DLPs when route has no lessonId", () => {
     expect(
       resolveLessonRouteSelection(undefined, undefined, ["dll-1", "dll-2"], false),
     ).toEqual({ kind: "create" });
@@ -457,5 +460,98 @@ describe("isLeavingActiveLesson", () => {
         { workspace: "quiz" },
       ),
     ).toBe(true);
+  });
+});
+
+describe("shouldResetCreationFormOnRouteChange", () => {
+  it("returns true only when transitioning from an active lesson ID into create mode", () => {
+    expect(shouldResetCreationFormOnRouteChange("dll-1", "create")).toBe(true);
+    expect(shouldResetCreationFormOnRouteChange("dlp-42", "create")).toBe(true);
+    expect(shouldResetCreationFormOnRouteChange(undefined, "create")).toBe(false);
+    expect(shouldResetCreationFormOnRouteChange("   ", "create")).toBe(false);
+    expect(shouldResetCreationFormOnRouteChange("dll-1", "open")).toBe(false);
+    expect(shouldResetCreationFormOnRouteChange("dll-1", "loading")).toBe(false);
+    expect(shouldResetCreationFormOnRouteChange("dll-1", "missing")).toBe(false);
+  });
+});
+
+describe("createFreshDllCreationFormState", () => {
+  it("builds a clean DLL creation state using the first saved Class Section", () => {
+    const state = createFreshDllCreationFormState([
+      { gradeLevel: 7, sectionName: "Rizal" },
+      { gradeLevel: 8, sectionName: "Narra" },
+    ]);
+
+    expect(state).toEqual({
+      lessonTitle: "",
+      gradeAndSection: "Grade 7 - Rizal",
+      references: "",
+      promptNotes: "",
+      sessionConfigs: createInitialDllSessionConfigs(),
+      pickedCompetencyId: "",
+    });
+  });
+
+  it("preserves an explicit DllLaunchTarget competency on Session 1", () => {
+    const state = createFreshDllCreationFormState([], {
+      competencyId: "g7-ict-q1-lc1",
+    });
+
+    expect(state.gradeAndSection).toBe("");
+    expect(state.pickedCompetencyId).toBe("g7-ict-q1-lc1");
+    expect(state.sessionConfigs[0]?.competencyIds).toEqual(["g7-ict-q1-lc1"]);
+  });
+});
+
+describe("createFreshDlpCreationFormState", () => {
+  it("resets DLP creation fields to scratch mode with default Class Section and DLL", () => {
+    const state = createFreshDlpCreationFormState(
+      [{ gradeLevel: 8, sectionName: "Narra" }],
+      [{ id: "dll-1" }, { id: "dll-2" }],
+    );
+
+    expect(state).toEqual({
+      builderMode: "scratch",
+      deriveDllId: "dll-1",
+      deriveSessionNumber: 1,
+      lessonTitle: "",
+      gradeAndSection: "Grade 8 - Narra",
+      references: "",
+      promptNotes: "",
+      selectedCompetencyIds: [],
+      pickedCompetencyId: "",
+    });
+  });
+
+  it("preserves derive launchTarget without clobbering builderMode, parent DLL, or Session", () => {
+    const state = createFreshDlpCreationFormState(
+      [{ gradeLevel: 8, sectionName: "Narra" }],
+      [{ id: "dll-1" }, { id: "dll-9" }],
+      { mode: "derive", dllId: "dll-9", sessionNumber: 4 },
+    );
+
+    expect(state).toEqual({
+      builderMode: "derive",
+      deriveDllId: "dll-9",
+      deriveSessionNumber: 4,
+      lessonTitle: "",
+      gradeAndSection: "Grade 8 - Narra",
+      references: "",
+      promptNotes: "",
+      selectedCompetencyIds: [],
+      pickedCompetencyId: "",
+    });
+  });
+
+  it("preserves scratch launchTarget competency selection cleanly", () => {
+    const state = createFreshDlpCreationFormState(
+      [],
+      [{ id: "dll-1" }],
+      { mode: "scratch", competencyId: "g11-shs-core-q1-lc2" },
+    );
+
+    expect(state.builderMode).toBe("scratch");
+    expect(state.selectedCompetencyIds).toEqual(["g11-shs-core-q1-lc2"]);
+    expect(state.pickedCompetencyId).toBe("g11-shs-core-q1-lc2");
   });
 });

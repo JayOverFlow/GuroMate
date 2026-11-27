@@ -1,7 +1,8 @@
 import { useEffect, useId } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DlpLineageBadge } from "../components/DlpLineageBadge";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
-import { FocusModeToggleButton } from "../components/LessonRichText";
+import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
 import { formatLearningAreas } from "../engine/lessonHelpers";
 import type { SessionNumber } from "../engine/types";
 import {
@@ -12,8 +13,6 @@ import {
   type ViewMode,
 } from "../hooks/useDlpWorkspace";
 import { buildDescribedBy } from "../utils/formValidation";
-import { formatOrphanedDlpLabel } from "../utils/lessonLibraryQuery";
-import { serializeHashRoute } from "../utils/workspaceRouting";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
 import { DlpMarkdownView } from "./DlpMarkdownView";
 
@@ -615,55 +614,10 @@ export function DlpWorkspace({
               <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                 1 Session
               </span>
-              {draftLineage?.status === "linked" ? (
-                <a
-                  href={serializeHashRoute({
-                    workspace: "dll",
-                    lessonId: draftLineage.parentDllId,
-                    viewMode: "edit",
-                  })}
-                  onClick={(event) => {
-                    if (
-                      event.metaKey ||
-                      event.ctrlKey ||
-                      event.shiftKey ||
-                      event.altKey ||
-                      event.button !== 0 ||
-                      !onOpenParentDll
-                    ) {
-                      return;
-                    }
-                    event.preventDefault();
-                    onOpenParentDll(draftLineage.parentDllId);
-                  }}
-                  className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm hover:underline focus-visible:outline-2 focus-visible:outline-primary"
-                >
-                  <span
-                    className="material-symbols-outlined text-body-sm"
-                    aria-hidden="true"
-                  >
-                    link
-                  </span>
-                  <span>
-                    Derived from {draftLineage.parentDllTitle}
-                    {draftLineage.sessionNumber !== undefined
-                      ? ` · Session ${draftLineage.sessionNumber}`
-                      : ""}
-                  </span>
-                </a>
-              ) : draftLineage?.status === "orphaned" ? (
-                <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
-                  <span
-                    className="material-symbols-outlined text-body-sm"
-                    aria-hidden="true"
-                  >
-                    link_off
-                  </span>
-                  <span>
-                    {formatOrphanedDlpLabel(draftLineage.sessionNumber)}
-                  </span>
-                </span>
-              ) : null}
+              <DlpLineageBadge
+                lineage={draftLineage}
+                onOpenParentDll={onOpenParentDll}
+              />
               {isDirty && (
                 <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
                   Unsaved edits

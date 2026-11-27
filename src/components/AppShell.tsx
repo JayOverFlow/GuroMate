@@ -8,7 +8,10 @@ import {
 } from "react";
 import type { ClassroomTimerState } from "../hooks/useClassroomTimer";
 import { formatClock } from "../hooks/useClassroomTimer";
-import type { WorkspaceId } from "../utils/workspaceRouting";
+import {
+  isPlainLeftClick,
+  type WorkspaceId,
+} from "../utils/workspaceRouting";
 
 export type { WorkspaceId };
 
@@ -104,7 +107,6 @@ interface AppShellProps {
   timer: ClassroomTimerState;
   teacherName?: string;
   focusMode?: boolean;
-  onExitFocusMode?: () => void;
   children: ReactNode;
 }
 
@@ -115,7 +117,6 @@ export function AppShell({
   timer,
   teacherName,
   focusMode = false,
-  onExitFocusMode,
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -217,13 +218,7 @@ export function AppShell({
   }, [focusMode, closeDrawer]);
 
   function handleNav(event: MouseEvent<HTMLAnchorElement>, id: WorkspaceId) {
-    if (
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey ||
-      event.button !== 0
-    ) {
+    if (!isPlainLeftClick(event)) {
       return;
     }
     event.preventDefault();
@@ -505,26 +500,6 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-gutter-sm">
-            {focusMode && onExitFocusMode && (
-              <button
-                type="button"
-                onClick={onExitFocusMode}
-                title="Exit Full-Width reading mode (Esc)"
-                className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-primary/50 text-primary font-label text-label-md hover:bg-surface-container transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                <span
-                  className="material-symbols-outlined text-title-md"
-                  aria-hidden="true"
-                >
-                  fullscreen_exit
-                </span>
-                <span>Exit Full-Width</span>
-                <kbd className="hidden sm:inline-block px-1 py-0.5 rounded-xs bg-surface-container text-on-surface-variant font-mono text-label-sm">
-                  Esc
-                </kbd>
-              </button>
-            )}
-
             {/* Persistent Classroom Timer Mini-Bar */}
             <div
               className={`flex items-center gap-gutter-sm px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border ${

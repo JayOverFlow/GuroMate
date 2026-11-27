@@ -1,62 +1,24 @@
 import { useMemo, type ReactNode } from "react";
+import { DlpLineageBadge } from "../components/DlpLineageBadge";
+import { IntentionsListColumn } from "../components/IntentionsListColumn";
+import { CopyMarkdownButton } from "../components/LessonMarkdownToolbar";
 import {
-  CopyMarkdownButton,
   LessonRichText,
   renderInlineTokens,
 } from "../components/LessonRichText";
 import { renderDlpMarkdown } from "../engine/dlp";
 import type { DailyLessonPlan } from "../engine/types";
-import {
-  formatOrphanedDlpLabel,
-  type DlpDerivationLineage,
-} from "../utils/lessonLibraryQuery";
-import { serializeHashRoute } from "../utils/workspaceRouting";
+import type { DlpDerivationLineage } from "../utils/lessonLibraryQuery";
 import {
   buildDlpReadingSections,
-  formatDlpSourceLabel,
   type DlpReadingSection,
 } from "./dlpReadingHelpers";
 
 export interface DlpMarkdownViewProps {
   dlp: DailyLessonPlan;
-  sourceDllTitle?: string;
   lineage?: DlpDerivationLineage | null;
   onOpenParentDll?: (dllId: string) => void;
   toolbarActions?: ReactNode;
-}
-
-function IntentionsListColumn({
-  title,
-  items,
-}: {
-  title: string;
-  items: readonly string[];
-}) {
-  const cleaned = items.map((item) => item.trim()).filter(Boolean);
-  return (
-    <div className="flex flex-col gap-gutter-xs rounded bg-surface-container-low/60 border border-outline-variant/70 p-gutter-md min-w-0">
-      <h3 className="font-label text-label-md uppercase tracking-wide text-primary">
-        {title}
-      </h3>
-      {cleaned.length === 0 ? (
-        <p className="font-body text-body-sm italic text-on-surface-variant">
-          —
-        </p>
-      ) : cleaned.length === 1 ? (
-        <p className="font-body text-body-sm text-on-surface leading-relaxed">
-          {renderInlineTokens(cleaned[0]!)}
-        </p>
-      ) : (
-        <ul className="list-disc pl-4 flex flex-col gap-1 font-body text-body-sm text-on-surface marker:text-primary">
-          {cleaned.map((item, idx) => (
-            <li key={idx} className="leading-relaxed">
-              {renderInlineTokens(item)}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 function PairedActivitySectionCard({
@@ -129,15 +91,12 @@ function PairedActivitySectionCard({
 
 export function DlpMarkdownView({
   dlp,
-  sourceDllTitle,
   lineage,
   onOpenParentDll,
   toolbarActions,
 }: DlpMarkdownViewProps) {
   const canonicalMarkdown = useMemo(() => renderDlpMarkdown(dlp), [dlp]);
   const sections = useMemo(() => buildDlpReadingSections(dlp), [dlp]);
-  const fallbackSourceLabel =
-    lineage === undefined ? formatDlpSourceLabel(dlp, sourceDllTitle) : null;
 
   return (
     <div className="w-full flex flex-col gap-gutter-lg">
@@ -165,57 +124,10 @@ export function DlpMarkdownView({
               <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                 1 Session
               </span>
-              {lineage?.status === "linked" ? (
-                <a
-                  href={serializeHashRoute({
-                    workspace: "dll",
-                    lessonId: lineage.parentDllId,
-                    viewMode: "edit",
-                  })}
-                  onClick={(event) => {
-                    if (
-                      event.metaKey ||
-                      event.ctrlKey ||
-                      event.shiftKey ||
-                      event.altKey ||
-                      event.button !== 0 ||
-                      !onOpenParentDll
-                    ) {
-                      return;
-                    }
-                    event.preventDefault();
-                    onOpenParentDll(lineage.parentDllId);
-                  }}
-                  className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm hover:underline focus-visible:outline-2 focus-visible:outline-primary"
-                >
-                  <span
-                    className="material-symbols-outlined text-body-sm"
-                    aria-hidden="true"
-                  >
-                    link
-                  </span>
-                  <span>
-                    Derived from {lineage.parentDllTitle}
-                    {lineage.sessionNumber !== undefined
-                      ? ` · Session ${lineage.sessionNumber}`
-                      : ""}
-                  </span>
-                </a>
-              ) : lineage?.status === "orphaned" ? (
-                <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
-                  <span
-                    className="material-symbols-outlined text-body-sm"
-                    aria-hidden="true"
-                  >
-                    link_off
-                  </span>
-                  <span>{formatOrphanedDlpLabel(lineage.sessionNumber)}</span>
-                </span>
-              ) : fallbackSourceLabel ? (
-                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
-                  {fallbackSourceLabel}
-                </span>
-              ) : null}
+              <DlpLineageBadge
+                lineage={lineage}
+                onOpenParentDll={onOpenParentDll}
+              />
             </div>
             <p className="font-body text-body-sm text-on-surface-variant">
               <strong className="font-semibold text-on-surface">

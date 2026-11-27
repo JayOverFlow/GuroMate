@@ -1,5 +1,6 @@
 import {
   SESSION_NUMBERS,
+  type ClassSection,
   type DailyLessonLog,
   type DailyLessonPlan,
   type DllSessionConfig,
@@ -45,6 +46,34 @@ export interface QuizLaunchState {
   pickedCompetencyId: string;
 }
 
+export interface DllCreationFormState {
+  lessonTitle: string;
+  gradeAndSection: string;
+  references: string;
+  promptNotes: string;
+  sessionConfigs: DllSessionConfig[];
+  pickedCompetencyId: string;
+}
+
+export interface DlpCreationFormState {
+  builderMode: "scratch" | "derive";
+  deriveDllId: string;
+  deriveSessionNumber: SessionNumber;
+  lessonTitle: string;
+  gradeAndSection: string;
+  references: string;
+  promptNotes: string;
+  selectedCompetencyIds: string[];
+  pickedCompetencyId: string;
+}
+
+function formatDefaultGradeAndSection(
+  sections: ReadonlyArray<Pick<ClassSection, "gradeLevel" | "sectionName">>,
+): string {
+  const first = sections[0];
+  return first ? `Grade ${first.gradeLevel} - ${first.sectionName}` : "";
+}
+
 export function createInitialDllSessionConfigs(): DllSessionConfig[] {
   return SESSION_NUMBERS.map((sessionNumber) => ({
     sessionNumber,
@@ -52,6 +81,70 @@ export function createInitialDllSessionConfigs(): DllSessionConfig[] {
     competencyIds: [],
     nonInstructionalReason: "",
   }));
+}
+
+export function createFreshDllCreationFormState(
+  sections: ReadonlyArray<Pick<ClassSection, "gradeLevel" | "sectionName">> = [],
+  launchTarget?: DllLaunchTarget | null,
+): DllCreationFormState {
+  const baseSessions = createInitialDllSessionConfigs();
+  const trimmedCompetency = launchTarget?.competencyId.trim() ?? "";
+  return {
+    lessonTitle: "",
+    gradeAndSection: formatDefaultGradeAndSection(sections),
+    references: "",
+    promptNotes: "",
+    sessionConfigs: launchTarget
+      ? applyDllLaunchTarget(baseSessions, launchTarget)
+      : baseSessions,
+    pickedCompetencyId: trimmedCompetency,
+  };
+}
+
+export function createFreshDlpCreationFormState(
+  sections: ReadonlyArray<Pick<ClassSection, "gradeLevel" | "sectionName">> = [],
+  dlls: ReadonlyArray<Pick<DailyLessonLog, "id">> = [],
+  launchTarget?: DlpLaunchTarget | null,
+): DlpCreationFormState {
+  const base: DlpCreationFormState = {
+    builderMode: "scratch",
+    deriveDllId: dlls[0]?.id ?? "",
+    deriveSessionNumber: 1,
+    lessonTitle: "",
+    gradeAndSection: formatDefaultGradeAndSection(sections),
+    references: "",
+    promptNotes: "",
+    selectedCompetencyIds: [],
+    pickedCompetencyId: "",
+  };
+
+  if (!launchTarget) {
+    return base;
+  }
+
+  if (launchTarget.mode === "derive") {
+    return {
+      ...base,
+      builderMode: "derive",
+      deriveDllId: launchTarget.dllId,
+      deriveSessionNumber: launchTarget.sessionNumber,
+    };
+  }
+
+  const trimmedCompetency = launchTarget.competencyId.trim();
+  return {
+    ...base,
+    builderMode: "scratch",
+    selectedCompetencyIds: appendUniqueId([], trimmedCompetency),
+    pickedCompetencyId: trimmedCompetency,
+  };
+}
+
+export function shouldResetCreationFormOnRouteChange(
+  previousRouteLessonId: string | undefined,
+  nextResolutionKind: LessonRouteResolution["kind"],
+): boolean {
+  return Boolean(previousRouteLessonId?.trim()) && nextResolutionKind === "create";
 }
 
 export function applyDllLaunchTarget(
