@@ -1,24 +1,38 @@
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DlpLineageBadge } from "../components/DlpLineageBadge";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
-import { renderDlpMarkdown } from "../engine/dlp";
+import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
+import { formatLearningAreas } from "../engine/lessonHelpers";
 import type { SessionNumber } from "../engine/types";
 import {
   DLP_ACTIVITY_ROWS,
   DLP_INTENTIONS_LIST_FIELDS,
   useDlpWorkspace,
   type DlpLaunchTarget,
+  type ViewMode,
 } from "../hooks/useDlpWorkspace";
 import { buildDescribedBy } from "../utils/formValidation";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
-import { renderMarkdownBlocks } from "./lessonViewHelpers";
+import { DlpMarkdownView } from "./DlpMarkdownView";
 
 export type { DlpLaunchTarget };
 
 interface DlpWorkspaceProps {
   initialLaunchTarget?: DlpLaunchTarget | null;
   onConsumeLaunchTarget?: () => void;
+  routeLessonId?: string;
+  routeViewMode?: ViewMode;
+  onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
+  onBackToLibrary?: () => void;
+  onMissingLesson?: (lessonId: string) => void;
+  onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
+  onOpenParentDll?: (dllId: string) => void;
   onCreateQuiz?: (dlpId: string) => void;
+  focusMode?: boolean;
+  onToggleFocusMode?: () => void;
+  onExitFocusMode?: () => void;
 }
 
 const INPUT_BASE_CLASS =
@@ -29,21 +43,32 @@ const INPUT_CLASS = `${INPUT_BASE_CLASS} border-outline-variant focus:border-pri
 export function DlpWorkspace({
   initialLaunchTarget,
   onConsumeLaunchTarget,
+  routeLessonId,
+  routeViewMode,
+  onRouteChange,
+  onBackToLibrary,
+  onMissingLesson,
+  onDeletedLesson,
+  onDirtyChange,
+  onOpenParentDll,
   onCreateQuiz,
+  focusMode = false,
+  onToggleFocusMode,
+  onExitFocusMode,
 }: DlpWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
 
   const {
-    dlps,
     dlls,
     curriculum,
     sections,
     loading,
     status,
-    selectedDlpId,
-    setSelectedDlpId,
+    startNewDlp,
     draftDlp,
+    isDirty,
+    draftLineage,
     viewMode,
     setViewMode,
     saving,
@@ -81,7 +106,22 @@ export function DlpWorkspace({
     handleSaveEdits,
     requestDeleteDlp,
     confirmDialog,
-  } = useDlpWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
+  } = useDlpWorkspace({
+    initialLaunchTarget,
+    onConsumeLaunchTarget,
+    routeLessonId,
+    routeViewMode,
+    onRouteChange,
+    onMissingLesson,
+    onDeletedLesson,
+    onDirtyChange,
+  });
+
+  useEffect(() => {
+    if (focusMode && (!draftDlp || viewMode !== "markdown")) {
+      onExitFocusMode?.();
+    }
+  }, [focusMode, draftDlp, viewMode, onExitFocusMode]);
 
   const gradeSectionErrId = `${baseId}-grade-section-err`;
   const gradeSectionInvalid = Boolean(fieldErrors.gradeAndSection);
@@ -112,27 +152,25 @@ export function DlpWorkspace({
         </div>
 
         <div className="flex flex-wrap items-center gap-gutter-sm">
-          {dlps.length > 0 && (
-            <select
-              id={`${baseId}-saved-dlp`}
-              aria-label="Saved Daily Lesson Plans"
-              value={selectedDlpId}
-              onChange={(e) => setSelectedDlpId(e.target.value)}
-              className="max-w-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+          {onBackToLibrary && (
+            <button
+              type="button"
+              onClick={onBackToLibrary}
+              className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
             >
-              <option value="">Create a new Daily Lesson Plan...</option>
-              {dlps.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.lessonTitle} — {item.learningAreas} (
-                  {item.gradeAndSection})
-                </option>
-              ))}
-            </select>
+              <span
+                className="material-symbols-outlined text-title-md"
+                aria-hidden="true"
+              >
+                arrow_back
+              </span>
+              <span>Lesson Library</span>
+            </button>
           )}
 
           <button
             type="button"
-            onClick={() => setSelectedDlpId("")}
+            onClick={startNewDlp}
             className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span
@@ -303,7 +341,7 @@ export function DlpWorkspace({
                         {activeSourceSessions.map((s) => (
                           <option key={s.sessionNumber} value={s.sessionNumber}>
                             Session {s.sessionNumber} (
-                            {s.components.join(", ") || "TLE"})
+                            {formatLearningAreas(s.components) || "TLE"})
                           </option>
                         ))}
                       </select>
@@ -316,7 +354,7 @@ export function DlpWorkspace({
                         <strong className="font-label">
                           Inherited TLE Component:
                         </strong>{" "}
-                        {selectedSourceSession.components.join(", ") ||
+                        {formatLearningAreas(selectedSourceSession.components) ||
                           selectedSourceDll?.learningAreas}
                       </div>
                       <div>
@@ -576,9 +614,13 @@ export function DlpWorkspace({
               <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                 1 Session
               </span>
-              {draftDlp.sourceDllId && (
-                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
-                  Derived from Session {draftDlp.sourceSessionNumber}
+              <DlpLineageBadge
+                lineage={draftLineage}
+                onOpenParentDll={onOpenParentDll}
+              />
+              {isDirty && (
+                <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                  Unsaved edits
                 </span>
               )}
             </div>
@@ -628,7 +670,10 @@ export function DlpWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={viewMode === "edit"}
-                  onClick={() => setViewMode("edit")}
+                  onClick={() => {
+                    onExitFocusMode?.();
+                    setViewMode("edit");
+                  }}
                   className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
                     viewMode === "edit"
                       ? "bg-surface-container-lowest text-primary border border-outline-variant"
@@ -665,17 +710,33 @@ export function DlpWorkspace({
               </div>
 
               <span className="font-body text-body-sm text-on-surface-variant">
-                Edit any cell inline before exporting to{" "}
-                <span className="font-mono text-mono-md">
-                  DLP_ILAW_template.docx
-                </span>
+                {viewMode === "markdown" ? (
+                  "Full-width ILAW reading view · Copy Markdown uses exact persisted format"
+                ) : (
+                  <>
+                    Edit any cell inline before exporting to{" "}
+                    <span className="font-mono text-mono-md">
+                      DLP_ILAW_template.docx
+                    </span>
+                  </>
+                )}
               </span>
             </div>
 
             {viewMode === "markdown" ? (
-              <article className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col gap-gutter-sm max-w-prose">
-                {renderMarkdownBlocks(renderDlpMarkdown(draftDlp))}
-              </article>
+              <DlpMarkdownView
+                dlp={draftDlp}
+                lineage={draftLineage}
+                onOpenParentDll={onOpenParentDll}
+                toolbarActions={
+                  onToggleFocusMode ? (
+                    <FocusModeToggleButton
+                      active={focusMode}
+                      onToggle={onToggleFocusMode}
+                    />
+                  ) : undefined
+                }
+              />
             ) : (
               <div className="flex flex-col gap-gutter-lg">
                 {/* Header & Intentions Card */}

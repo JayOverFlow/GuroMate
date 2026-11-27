@@ -18,6 +18,10 @@ _Avoid_: Weekly plan, lesson outline
 A detailed single-session lesson plan (created from scratch or derived from one **Session** of a **Daily Lesson Log**) that splits **Learning Experience**, **Assessing Learning**, and **Ways Forward** into **Teacher's Activity** and **Student's Activity** columns.
 _Avoid_: Detailed lesson plan, lesson script
 
+**Lesson Library**:
+The unified workspace listing saved **Daily Lesson Logs (DLLs)** and **Daily Lesson Plans (DLPs)** with their derivation lineage across **Sessions**.
+_Avoid_: Saved lessons, my plans, lesson dashboard
+
 **Session**:
 A single instructional period or day within a **Daily Lesson Log** (e.g., Session 1 through Session 5).
 _Avoid_: Day, period, class meeting

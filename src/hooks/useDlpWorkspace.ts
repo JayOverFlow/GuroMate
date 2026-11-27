@@ -27,10 +27,15 @@ import {
   type DlpBuilderFieldKey,
   type FieldErrors,
 } from "../utils/formValidation";
+import { resolveDlpLineage } from "../utils/lessonLibraryQuery";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import { useConfirmDialog } from "./useConfirmDialog";
 import {
   appendUniqueId,
+  createFreshDlpCreationFormState,
+  isDlpDraftDirty,
+  resolveLessonRouteSelection,
+  shouldResetCreationFormOnRouteChange,
   type DlpLaunchTarget,
 } from "./workspaceLaunchHelpers";
 
@@ -38,6 +43,17 @@ export type { DlpLaunchTarget };
 
 export type ViewMode = "edit" | "markdown";
 export type BuilderMode = "scratch" | "derive";
+
+export interface UseDlpWorkspaceOptions {
+  initialLaunchTarget?: DlpLaunchTarget | null;
+  onConsumeLaunchTarget?: () => void;
+  routeLessonId?: string;
+  routeViewMode?: ViewMode;
+  onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
+  onMissingLesson?: (lessonId: string) => void;
+  onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
+}
 
 export interface DlpStatusState {
   tone: "success" | "error";
@@ -112,20 +128,28 @@ export const DLP_INTENTIONS_LIST_FIELDS: ReadonlyArray<{
   { key: "performanceStandards", label: "Performance Standards (one per line)" },
 ];
 
-export function useDlpWorkspace(
-  initialLaunchTarget?: DlpLaunchTarget | null,
-  onConsumeLaunchTarget?: () => void,
-) {
+export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
+  const {
+    initialLaunchTarget,
+    onConsumeLaunchTarget,
+    routeLessonId,
+    routeViewMode,
+    onRouteChange,
+    onMissingLesson,
+    onDeletedLesson,
+    onDirtyChange,
+  } = options;
   const [dlps, setDlps] = useState<DailyLessonPlan[]>([]);
   const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
   const [curriculum, setCurriculum] = useState<CurriculumCompetency[]>([]);
   const [sections, setSections] = useState<ClassSection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [status, setStatus] = useState<DlpStatusState | null>(null);
 
   const [selectedDlpId, setSelectedDlpId] = useState("");
   const [draftDlp, setDraftDlp] = useState<DailyLessonPlan | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("edit");
+  const [viewMode, setViewMode] = useState<ViewMode>(routeViewMode ?? "edit");
   const [saving, setSaving] = useState(false);
 
   const [builderMode, setBuilderMode] = useState<BuilderMode>("scratch");
@@ -146,11 +170,37 @@ export function useDlpWorkspace(
   >({});
   const formRef = useRef<HTMLFormElement>(null);
   const interactedFieldsRef = useRef<Set<DlpBuilderFieldKey>>(new Set());
-  const launchIntentRef = useRef(Boolean(initialLaunchTarget));
+  const recentlyDeletedIdRef = useRef<string | null>(null);
+  const reportedMissingIdRef = useRef<string | null>(null);
+  const prevRouteLessonIdRef = useRef<string | undefined>(routeLessonId);
+  const sectionsRef = useRef<ClassSection[]>(sections);
+  sectionsRef.current = sections;
+  const dllsRef = useRef<DailyLessonLog[]>(dlls);
+  dllsRef.current = dlls;
   const confirmDialog = useConfirmDialog();
+
+  const resetCreationForm = useCallback((launchTarget?: DlpLaunchTarget | null) => {
+    const fresh = createFreshDlpCreationFormState(
+      sectionsRef.current,
+      dllsRef.current,
+      launchTarget,
+    );
+    setBuilderMode(fresh.builderMode);
+    setDeriveDllId(fresh.deriveDllId);
+    setDeriveSessionNumber(fresh.deriveSessionNumber);
+    setLessonTitle(fresh.lessonTitle);
+    setGradeAndSection(fresh.gradeAndSection);
+    setReferences(fresh.references);
+    setPromptNotes(fresh.promptNotes);
+    setSelectedCompetencyIds(fresh.selectedCompetencyIds);
+    setPickedCompetencyId(fresh.pickedCompetencyId);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
+  }, []);
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const [dlpRes, dllRes, currRes, secRes] = await Promise.all([
         fetch("/api/dlps"),
@@ -184,12 +234,8 @@ export function useDlpWorkspace(
           prev && loadedDlls.some((d) => d.id === prev) ? prev : loadedDlls[0]!.id,
         );
       }
-      if (loadedDlps.length > 0 && !launchIntentRef.current) {
-        setSelectedDlpId((prev) =>
-          prev && loadedDlps.some((d) => d.id === prev) ? prev : loadedDlps[0]!.id,
-        );
-      }
     } catch (err) {
+      setLoadFailed(true);
       setStatus({
         tone: "error",
         text: err instanceof Error ? err.message : String(err),
@@ -205,8 +251,8 @@ export function useDlpWorkspace(
 
   useEffect(() => {
     if (!initialLaunchTarget) return;
-    launchIntentRef.current = true;
     setSelectedDlpId("");
+    setViewMode("edit");
     interactedFieldsRef.current.clear();
     setFieldErrors({});
     if (initialLaunchTarget.mode === "derive") {
@@ -224,12 +270,90 @@ export function useDlpWorkspace(
     onConsumeLaunchTarget?.();
   }, [initialLaunchTarget, onConsumeLaunchTarget]);
 
+  const routeResolution = useMemo(
+    () =>
+      resolveLessonRouteSelection(
+        routeLessonId,
+        routeViewMode,
+        dlps.map((d) => d.id),
+        loading,
+      ),
+    [routeLessonId, routeViewMode, dlps, loading],
+  );
+
   useEffect(() => {
-    const match = dlps.find((d) => d.id === selectedDlpId) ?? null;
-    setDraftDlp(match ? structuredClone(match) : null);
+    if (routeResolution.kind === "loading") return;
+    const prevRouteLessonId = prevRouteLessonIdRef.current;
+    prevRouteLessonIdRef.current = routeLessonId;
+
+    if (routeResolution.kind === "create") {
+      reportedMissingIdRef.current = null;
+      setSelectedDlpId("");
+      setViewMode("edit");
+      if (
+        shouldResetCreationFormOnRouteChange(
+          prevRouteLessonId,
+          routeResolution.kind,
+        )
+      ) {
+        resetCreationForm(initialLaunchTarget);
+        setStatus(null);
+      }
+      return;
+    }
+    if (routeResolution.kind === "open") {
+      reportedMissingIdRef.current = null;
+      setSelectedDlpId(routeResolution.lessonId);
+      setViewMode(routeResolution.viewMode);
+      return;
+    }
+    if (
+      !loadFailed &&
+      recentlyDeletedIdRef.current !== routeResolution.lessonId &&
+      reportedMissingIdRef.current !== routeResolution.lessonId
+    ) {
+      reportedMissingIdRef.current = routeResolution.lessonId;
+      onMissingLesson?.(routeResolution.lessonId);
+    }
+  }, [
+    routeResolution,
+    routeLessonId,
+    initialLaunchTarget,
+    resetCreationForm,
+    loadFailed,
+    onMissingLesson,
+  ]);
+
+  const savedDlp = useMemo(
+    () => dlps.find((d) => d.id === selectedDlpId) ?? null,
+    [dlps, selectedDlpId],
+  );
+
+  useEffect(() => {
+    setDraftDlp(savedDlp ? structuredClone(savedDlp) : null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
-  }, [dlps, selectedDlpId]);
+  }, [savedDlp]);
+
+  const isDirty = useMemo(
+    () => isDlpDraftDirty(savedDlp, draftDlp),
+    [savedDlp, draftDlp],
+  );
+
+  const draftLineage = useMemo(
+    () => (draftDlp ? resolveDlpLineage(draftDlp, dlls) : null),
+    [draftDlp, dlls],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty, draftDlp?.lessonTitle);
+  }, [isDirty, draftDlp?.lessonTitle, onDirtyChange]);
+
+  useEffect(() => {
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [onDirtyChange]);
 
   const competencyMap = useMemo(
     () => new Map(curriculum.map((c) => [c.id, c])),
@@ -380,6 +504,7 @@ export function useDlpWorkspace(
       setDlps((prev) => [created, ...prev]);
       setSelectedDlpId(created.id);
       setViewMode("edit");
+      onRouteChange?.(created.id, "edit");
       setStatus({
         tone: "success",
         text: `Generated Daily Lesson Plan "${created.lessonTitle}" (${created.learningAreas}).`,
@@ -446,6 +571,25 @@ export function useDlpWorkspace(
     }
   }
 
+  function selectViewMode(nextMode: ViewMode) {
+    setViewMode(nextMode);
+    if (selectedDlpId) {
+      onRouteChange?.(selectedDlpId, nextMode);
+    }
+  }
+
+  function startNewDlp() {
+    if (onRouteChange && routeLessonId?.trim()) {
+      onRouteChange(undefined, undefined);
+      return;
+    }
+    setSelectedDlpId("");
+    setViewMode("edit");
+    resetCreationForm();
+    setStatus(null);
+    onRouteChange?.(undefined, undefined);
+  }
+
   function requestDeleteDlp() {
     if (!draftDlp) return;
     const target = draftDlp;
@@ -457,29 +601,43 @@ export function useDlpWorkspace(
           method: "DELETE",
         });
         if (!res.ok) throw new Error(await readErrorMessage(res));
+        recentlyDeletedIdRef.current = target.id;
         const remaining = dlps.filter((d) => d.id !== target.id);
         setDlps(remaining);
-        setSelectedDlpId(remaining[0]?.id ?? "");
-        setStatus({
-          tone: "success",
-          text: `Deleted "${target.lessonTitle}".`,
-        });
+        setSelectedDlpId("");
+        if (onDeletedLesson) {
+          onDeletedLesson(target.lessonTitle);
+        } else {
+          setStatus({
+            tone: "success",
+            text: `Deleted "${target.lessonTitle}".`,
+          });
+        }
       },
     );
   }
+
+  const resolvingDeepLink =
+    !loadFailed &&
+    (routeResolution.kind === "loading" ||
+      (routeResolution.kind === "open" &&
+        draftDlp?.id !== routeResolution.lessonId));
 
   return {
     dlps,
     dlls,
     curriculum,
     sections,
-    loading,
+    loading: loading || resolvingDeepLink,
     status,
     selectedDlpId,
     setSelectedDlpId,
+    startNewDlp,
     draftDlp,
+    isDirty,
+    draftLineage,
     viewMode,
-    setViewMode,
+    setViewMode: selectViewMode,
     saving,
     builderMode,
     selectBuilderMode,

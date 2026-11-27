@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import type { ClassroomTimerState } from "../hooks/useClassroomTimer";
 import { formatClock } from "../hooks/useClassroomTimer";
+import {
+  isPlainLeftClick,
+  type WorkspaceId,
+} from "../utils/workspaceRouting";
 
-export type WorkspaceId =
-  | "dll"
-  | "dlp"
-  | "quiz"
-  | "classroom"
-  | "curriculum"
-  | "settings";
+export type { WorkspaceId };
 
 export interface WorkspaceDef {
   id: WorkspaceId;
@@ -20,6 +25,15 @@ export interface WorkspaceDef {
 }
 
 export const WORKSPACES: readonly WorkspaceDef[] = [
+  {
+    id: "library",
+    label: "Lesson Library",
+    breadcrumbGroup: "Lesson Authoring",
+    statusTag: "Saved DLLs & DLPs",
+    icon: "library_books",
+    description:
+      "Browse, open, export, and manage saved Daily Lesson Logs and Daily Lesson Plans.",
+  },
   {
     id: "dll",
     label: "DLL Builder",
@@ -92,6 +106,7 @@ interface AppShellProps {
   onOpenTimerWorkspace: () => void;
   timer: ClassroomTimerState;
   teacherName?: string;
+  focusMode?: boolean;
   children: ReactNode;
 }
 
@@ -101,6 +116,7 @@ export function AppShell({
   onOpenTimerWorkspace,
   timer,
   teacherName,
+  focusMode = false,
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -109,7 +125,7 @@ export function AppShell({
   const sheetRef = useRef<HTMLElement>(null);
 
   const current =
-    WORKSPACES.find((w) => w.id === activeWorkspace) ?? WORKSPACES[5]!;
+    WORKSPACES.find((w) => w.id === activeWorkspace) ?? WORKSPACES[0]!;
   const isCatalogOrSettings =
     activeWorkspace === "curriculum" || activeWorkspace === "settings";
 
@@ -195,7 +211,17 @@ export function AppShell({
     };
   }, [closeDrawer]);
 
-  function handleNav(id: WorkspaceId) {
+  useEffect(() => {
+    if (focusMode) {
+      closeDrawer();
+    }
+  }, [focusMode, closeDrawer]);
+
+  function handleNav(event: MouseEvent<HTMLAnchorElement>, id: WorkspaceId) {
+    if (!isPlainLeftClick(event)) {
+      return;
+    }
+    event.preventDefault();
     onSelectWorkspace(id);
     closeDrawer();
   }
@@ -206,14 +232,14 @@ export function AppShell({
   const renderNavLinks = () => (
     <>
       <nav aria-label="Primary workspaces" className="flex flex-col gap-gutter-xs">
-        {WORKSPACES.slice(0, 4).map((workspace) => {
+        {WORKSPACES.slice(0, 5).map((workspace) => {
           const isCurrent = activeWorkspace === workspace.id;
           return (
             <a
               key={workspace.id}
               href={`#${workspace.id}`}
               aria-current={isCurrent ? "page" : undefined}
-              onClick={() => handleNav(workspace.id)}
+              onClick={(event) => handleNav(event, workspace.id)}
               className={
                 isCurrent
                   ? "flex items-center gap-gutter-sm px-gutter-sm py-gutter-sm rounded bg-primary text-on-primary font-label transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -234,8 +260,11 @@ export function AppShell({
         <a
           href="#curriculum"
           aria-current={isCatalogOrSettings ? "page" : undefined}
-          onClick={() =>
-            handleNav(activeWorkspace === "settings" ? "settings" : "curriculum")
+          onClick={(event) =>
+            handleNav(
+              event,
+              activeWorkspace === "settings" ? "settings" : "curriculum",
+            )
           }
           className={
             isCatalogOrSettings
@@ -260,7 +289,7 @@ export function AppShell({
         <a
           href="#curriculum"
           aria-current={activeWorkspace === "curriculum" ? "page" : undefined}
-          onClick={() => handleNav("curriculum")}
+          onClick={(event) => handleNav(event, "curriculum")}
           className={
             activeWorkspace === "curriculum"
               ? "px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-between text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -275,7 +304,7 @@ export function AppShell({
         <a
           href="#settings"
           aria-current={activeWorkspace === "settings" ? "page" : undefined}
-          onClick={() => handleNav("settings")}
+          onClick={(event) => handleNav(event, "settings")}
           className={
             activeWorkspace === "settings"
               ? "px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-between text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -337,37 +366,39 @@ export function AppShell({
         Skip to main content
       </a>
 
-      {/* Desktop Persistent Left Navigation Rail */}
-      <aside className="hidden lg:flex w-64 shrink-0 min-h-screen sticky top-0 max-h-screen overflow-y-auto bg-surface-container-low border-r border-outline-variant flex-col justify-between p-gutter-md">
-        <div className="flex flex-col gap-gutter-lg">
-          <a
-            href="#settings"
-            onClick={() => handleNav("settings")}
-            className="flex items-center gap-gutter-sm px-gutter-sm pt-gutter-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded"
-          >
-            <div className="w-9 h-9 rounded bg-primary text-on-primary flex items-center justify-center shrink-0">
-              <span
-                className="material-symbols-outlined text-title-lg"
-                aria-hidden="true"
-              >
-                menu_book
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-title text-title-lg text-on-surface leading-tight">
-                GuroMate
-              </span>
-              <span className="font-label text-label-sm text-on-surface-variant">
-                TLE ILAW Studio
-              </span>
-            </div>
-          </a>
+      {/* Desktop Persistent Left Navigation Rail (hidden in Focus / Full-Width mode) */}
+      {!focusMode && (
+        <aside className="hidden lg:flex w-64 shrink-0 min-h-screen sticky top-0 max-h-screen overflow-y-auto bg-surface-container-low border-r border-outline-variant flex-col justify-between p-gutter-md">
+          <div className="flex flex-col gap-gutter-lg">
+            <a
+              href="#library"
+              onClick={(event) => handleNav(event, "library")}
+              className="flex items-center gap-gutter-sm px-gutter-sm pt-gutter-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded"
+            >
+              <div className="w-9 h-9 rounded bg-primary text-on-primary flex items-center justify-center shrink-0">
+                <span
+                  className="material-symbols-outlined text-title-lg"
+                  aria-hidden="true"
+                >
+                  menu_book
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-title text-title-lg text-on-surface leading-tight">
+                  GuroMate
+                </span>
+                <span className="font-label text-label-sm text-on-surface-variant">
+                  TLE ILAW Studio
+                </span>
+              </div>
+            </a>
 
-          {renderNavLinks()}
-        </div>
+            {renderNavLinks()}
+          </div>
 
-        {renderSidebarFooter()}
-      </aside>
+          {renderSidebarFooter()}
+        </aside>
+      )}
 
       {/* Mobile Navigation Drawer (<dialog> + scroll-snap swipe) */}
       <dialog
@@ -433,21 +464,23 @@ export function AppShell({
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="sticky top-0 z-20 bg-surface/95 backdrop-blur-xs border-b border-outline-variant px-gutter-md lg:px-page-margin py-gutter-sm flex flex-wrap items-center justify-between gap-gutter-md">
           <div className="flex items-center gap-gutter-sm min-w-0">
-            <button
-              type="button"
-              aria-label="Open navigation menu"
-              aria-expanded={drawerOpen}
-              aria-controls="workspace-drawer"
-              onClick={() => void openDrawer()}
-              className="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded bg-surface-container-lowest border border-outline-variant text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
-            >
-              <span
-                className="material-symbols-outlined text-title-lg"
-                aria-hidden="true"
+            {!focusMode && (
+              <button
+                type="button"
+                aria-label="Open navigation menu"
+                aria-expanded={drawerOpen}
+                aria-controls="workspace-drawer"
+                onClick={() => void openDrawer()}
+                className="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded bg-surface-container-lowest border border-outline-variant text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
               >
-                menu
-              </span>
-            </button>
+                <span
+                  className="material-symbols-outlined text-title-lg"
+                  aria-hidden="true"
+                >
+                  menu
+                </span>
+              </button>
+            )}
 
             <span className="hidden sm:inline font-label text-label-md text-on-surface-variant">
               {current.breadcrumbGroup}
@@ -534,7 +567,11 @@ export function AppShell({
 
         <main
           id="main-content"
-          className="flex-1 p-gutter-md lg:p-page-margin w-full max-w-[1360px] mx-auto"
+          className={
+            focusMode
+              ? "flex-1 p-gutter-md lg:p-page-margin w-full"
+              : "flex-1 p-gutter-md lg:p-page-margin w-full max-w-[1360px] mx-auto"
+          }
         >
           {children}
         </main>

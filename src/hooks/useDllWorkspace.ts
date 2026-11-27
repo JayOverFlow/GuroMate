@@ -10,6 +10,7 @@ import {
   type ClassSection,
   type CurriculumCompetency,
   type DailyLessonLog,
+  type DailyLessonPlan,
   type DllIntentions,
   type DllSessionConfig,
   type SessionNumber,
@@ -24,16 +25,32 @@ import {
   type DllBuilderFieldKey,
   type FieldErrors,
 } from "../utils/formValidation";
+import { countDerivedDlps } from "../utils/lessonLibraryQuery";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import {
   applyDllLaunchTarget,
+  createFreshDllCreationFormState,
   createInitialDllSessionConfigs,
+  isDllDraftDirty,
+  resolveLessonRouteSelection,
+  shouldResetCreationFormOnRouteChange,
   type DllLaunchTarget,
 } from "./workspaceLaunchHelpers";
 
 export type { DllLaunchTarget };
 
 export type ViewMode = "edit" | "markdown";
+
+export interface UseDllWorkspaceOptions {
+  initialLaunchTarget?: DllLaunchTarget | null;
+  onConsumeLaunchTarget?: () => void;
+  routeLessonId?: string;
+  routeViewMode?: ViewMode;
+  onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
+  onMissingLesson?: (lessonId: string) => void;
+  onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
+}
 
 export interface DllStatusState {
   tone: "success" | "error";
@@ -115,19 +132,28 @@ export const INTENTIONS_LIST_FIELDS: ReadonlyArray<{
   { key: "performanceStandards", label: "Performance Standards (one per line)" },
 ];
 
-export function useDllWorkspace(
-  initialLaunchTarget?: DllLaunchTarget | null,
-  onConsumeLaunchTarget?: () => void,
-) {
+export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
+  const {
+    initialLaunchTarget,
+    onConsumeLaunchTarget,
+    routeLessonId,
+    routeViewMode,
+    onRouteChange,
+    onMissingLesson,
+    onDeletedLesson,
+    onDirtyChange,
+  } = options;
   const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
+  const [dlps, setDlps] = useState<DailyLessonPlan[]>([]);
   const [curriculum, setCurriculum] = useState<CurriculumCompetency[]>([]);
   const [sections, setSections] = useState<ClassSection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [status, setStatus] = useState<DllStatusState | null>(null);
 
   const [selectedDllId, setSelectedDllId] = useState<string>("");
   const [draftDll, setDraftDll] = useState<DailyLessonLog | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("edit");
+  const [viewMode, setViewMode] = useState<ViewMode>(routeViewMode ?? "edit");
   const [saving, setSaving] = useState(false);
 
   const [lessonTitle, setLessonTitle] = useState("");
@@ -152,25 +178,49 @@ export function useDllWorkspace(
   >({});
   const sessionsGroupRef = useRef<HTMLDivElement>(null);
   const interactedFieldsRef = useRef<Set<DllBuilderFieldKey>>(new Set());
-  const launchIntentRef = useRef(Boolean(initialLaunchTarget));
+  const recentlyDeletedIdRef = useRef<string | null>(null);
+  const reportedMissingIdRef = useRef<string | null>(null);
+  const prevRouteLessonIdRef = useRef<string | undefined>(routeLessonId);
+  const sectionsRef = useRef<ClassSection[]>(sections);
+  sectionsRef.current = sections;
+
+  const resetCreationForm = useCallback((launchTarget?: DllLaunchTarget | null) => {
+    const fresh = createFreshDllCreationFormState(
+      sectionsRef.current,
+      launchTarget,
+    );
+    setLessonTitle(fresh.lessonTitle);
+    setGradeAndSection(fresh.gradeAndSection);
+    setReferences(fresh.references);
+    setPromptNotes(fresh.promptNotes);
+    setSessionConfigs(fresh.sessionConfigs);
+    setPickedCompetencyId(fresh.pickedCompetencyId);
+    interactedFieldsRef.current.clear();
+    setFieldErrors({});
+  }, []);
 
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
-      const [dllRes, currRes, secRes] = await Promise.all([
+      const [dllRes, dlpRes, currRes, secRes] = await Promise.all([
         fetch("/api/dlls"),
+        fetch("/api/dlps"),
         fetch("/api/curriculum"),
         fetch("/api/class-sections"),
       ]);
       if (!dllRes.ok) throw new Error(await readErrorMessage(dllRes));
+      if (!dlpRes.ok) throw new Error(await readErrorMessage(dlpRes));
       if (!currRes.ok) throw new Error(await readErrorMessage(currRes));
       if (!secRes.ok) throw new Error(await readErrorMessage(secRes));
 
       const loadedDlls = (await dllRes.json()) as DailyLessonLog[];
+      const loadedDlps = (await dlpRes.json()) as DailyLessonPlan[];
       const loadedCurr = (await currRes.json()) as CurriculumCompetency[];
       const loadedSec = (await secRes.json()) as ClassSection[];
 
       setDlls(loadedDlls);
+      setDlps(loadedDlps);
       setCurriculum(loadedCurr);
       setSections(loadedSec);
       if (loadedSec.length > 0) {
@@ -179,12 +229,8 @@ export function useDllWorkspace(
           (prev) => prev || `Grade ${first.gradeLevel} - ${first.sectionName}`,
         );
       }
-      if (loadedDlls.length > 0 && !launchIntentRef.current) {
-        setSelectedDllId((prev) =>
-          prev && loadedDlls.some((d) => d.id === prev) ? prev : loadedDlls[0]!.id,
-        );
-      }
     } catch (err) {
+      setLoadFailed(true);
       setStatus({
         tone: "error",
         text: err instanceof Error ? err.message : String(err),
@@ -200,8 +246,8 @@ export function useDllWorkspace(
 
   useEffect(() => {
     if (!initialLaunchTarget) return;
-    launchIntentRef.current = true;
     setSelectedDllId("");
+    setViewMode("edit");
     setSessionConfigs((prev) => applyDllLaunchTarget(prev, initialLaunchTarget));
     interactedFieldsRef.current.clear();
     setFieldErrors({});
@@ -210,12 +256,90 @@ export function useDllWorkspace(
     onConsumeLaunchTarget?.();
   }, [initialLaunchTarget, onConsumeLaunchTarget]);
 
+  const routeResolution = useMemo(
+    () =>
+      resolveLessonRouteSelection(
+        routeLessonId,
+        routeViewMode,
+        dlls.map((d) => d.id),
+        loading,
+      ),
+    [routeLessonId, routeViewMode, dlls, loading],
+  );
+
   useEffect(() => {
-    const match = dlls.find((d) => d.id === selectedDllId) ?? null;
-    setDraftDll(match ? structuredClone(match) : null);
+    if (routeResolution.kind === "loading") return;
+    const prevRouteLessonId = prevRouteLessonIdRef.current;
+    prevRouteLessonIdRef.current = routeLessonId;
+
+    if (routeResolution.kind === "create") {
+      reportedMissingIdRef.current = null;
+      setSelectedDllId("");
+      setViewMode("edit");
+      if (
+        shouldResetCreationFormOnRouteChange(
+          prevRouteLessonId,
+          routeResolution.kind,
+        )
+      ) {
+        resetCreationForm(initialLaunchTarget);
+        setStatus(null);
+      }
+      return;
+    }
+    if (routeResolution.kind === "open") {
+      reportedMissingIdRef.current = null;
+      setSelectedDllId(routeResolution.lessonId);
+      setViewMode(routeResolution.viewMode);
+      return;
+    }
+    if (
+      !loadFailed &&
+      recentlyDeletedIdRef.current !== routeResolution.lessonId &&
+      reportedMissingIdRef.current !== routeResolution.lessonId
+    ) {
+      reportedMissingIdRef.current = routeResolution.lessonId;
+      onMissingLesson?.(routeResolution.lessonId);
+    }
+  }, [
+    routeResolution,
+    routeLessonId,
+    initialLaunchTarget,
+    resetCreationForm,
+    loadFailed,
+    onMissingLesson,
+  ]);
+
+  const savedDll = useMemo(
+    () => dlls.find((d) => d.id === selectedDllId) ?? null,
+    [dlls, selectedDllId],
+  );
+
+  useEffect(() => {
+    setDraftDll(savedDll ? structuredClone(savedDll) : null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
-  }, [dlls, selectedDllId]);
+  }, [savedDll]);
+
+  const isDirty = useMemo(
+    () => isDllDraftDirty(savedDll, draftDll),
+    [savedDll, draftDll],
+  );
+
+  const derivedDlpCount = useMemo(
+    () => (draftDll ? countDerivedDlps(draftDll.id, dlps) : 0),
+    [draftDll, dlps],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty, draftDll?.lessonTitle);
+  }, [isDirty, draftDll?.lessonTitle, onDirtyChange]);
+
+  useEffect(() => {
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [onDirtyChange]);
 
   useEffect(() => {
     if (!focusRequest) return;
@@ -408,6 +532,7 @@ export function useDllWorkspace(
       setDlls((prev) => [created, ...prev]);
       setSelectedDllId(created.id);
       setViewMode("edit");
+      onRouteChange?.(created.id, "edit");
       setStatus({
         tone: "success",
         text: `Generated Daily Lesson Log "${created.lessonTitle}" (${created.learningAreas}).`,
@@ -472,6 +597,25 @@ export function useDllWorkspace(
     }
   }
 
+  function selectViewMode(nextMode: ViewMode) {
+    setViewMode(nextMode);
+    if (selectedDllId) {
+      onRouteChange?.(selectedDllId, nextMode);
+    }
+  }
+
+  function startNewDll() {
+    if (onRouteChange && routeLessonId?.trim()) {
+      onRouteChange(undefined, undefined);
+      return;
+    }
+    setSelectedDllId("");
+    setViewMode("edit");
+    resetCreationForm();
+    setStatus(null);
+    onRouteChange?.(undefined, undefined);
+  }
+
   async function handleDeleteDll(targetDll?: DailyLessonLog) {
     const target = targetDll ?? draftDll;
     if (!target) return;
@@ -480,26 +624,40 @@ export function useDllWorkspace(
       method: "DELETE",
     });
     if (!res.ok) throw new Error(await readErrorMessage(res));
+    recentlyDeletedIdRef.current = target.id;
     const remaining = dlls.filter((d) => d.id !== target.id);
     setDlls(remaining);
-    setSelectedDllId(remaining[0]?.id ?? "");
-    setStatus({
-      tone: "success",
-      text: `Deleted "${target.lessonTitle}".`,
-    });
+    setSelectedDllId("");
+    if (onDeletedLesson) {
+      onDeletedLesson(target.lessonTitle);
+    } else {
+      setStatus({
+        tone: "success",
+        text: `Deleted "${target.lessonTitle}".`,
+      });
+    }
   }
+
+  const resolvingDeepLink =
+    !loadFailed &&
+    (routeResolution.kind === "loading" ||
+      (routeResolution.kind === "open" &&
+        draftDll?.id !== routeResolution.lessonId));
 
   return {
     dlls,
     curriculum,
     sections,
-    loading,
+    loading: loading || resolvingDeepLink,
     status,
     selectedDllId,
     setSelectedDllId,
+    startNewDll,
     draftDll,
+    isDirty,
+    derivedDlpCount,
     viewMode,
-    setViewMode,
+    setViewMode: selectViewMode,
     saving,
     lessonTitle,
     setLessonTitle,

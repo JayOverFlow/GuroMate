@@ -1,7 +1,8 @@
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
-import { renderDllMarkdown } from "../engine/dll";
+import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
+import { formatLearningAreas } from "../engine/lessonHelpers";
 import { type SessionNumber } from "../engine/types";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import {
@@ -9,6 +10,7 @@ import {
   SESSION_ILAW_FIELDS,
   useDllWorkspace,
   type DllLaunchTarget,
+  type ViewMode,
 } from "../hooks/useDllWorkspace";
 import {
   buildDeleteDllPrompt,
@@ -19,15 +21,25 @@ import {
   dllSessionFieldKey,
 } from "../utils/formValidation";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
-import { renderMarkdownBlocks } from "./lessonViewHelpers";
+import { DllMarkdownView } from "./DllMarkdownView";
 
 export type { DllLaunchTarget };
 
 interface DllWorkspaceProps {
   initialLaunchTarget?: DllLaunchTarget | null;
   onConsumeLaunchTarget?: () => void;
+  routeLessonId?: string;
+  routeViewMode?: ViewMode;
+  onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
+  onBackToLibrary?: () => void;
+  onMissingLesson?: (lessonId: string) => void;
+  onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
   onDeriveDlp?: (dllId: string, sessionNumber: SessionNumber) => void;
   onCreateQuiz?: (dllId: string, sessionNumber: SessionNumber) => void;
+  focusMode?: boolean;
+  onToggleFocusMode?: () => void;
+  onExitFocusMode?: () => void;
 }
 
 const INPUT_BASE_CLASS =
@@ -38,22 +50,32 @@ const INPUT_CLASS = `${INPUT_BASE_CLASS} border-outline-variant focus:border-pri
 export function DllWorkspace({
   initialLaunchTarget,
   onConsumeLaunchTarget,
+  routeLessonId,
+  routeViewMode,
+  onRouteChange,
+  onBackToLibrary,
+  onMissingLesson,
+  onDeletedLesson,
+  onDirtyChange,
   onDeriveDlp,
   onCreateQuiz,
+  focusMode = false,
+  onToggleFocusMode,
+  onExitFocusMode,
 }: DllWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
   const confirmDialog = useConfirmDialog();
 
   const {
-    dlls,
     curriculum,
     sections,
     loading,
     status,
-    selectedDllId,
-    setSelectedDllId,
+    startNewDll,
     draftDll,
+    isDirty,
+    derivedDlpCount,
     viewMode,
     setViewMode,
     saving,
@@ -85,7 +107,22 @@ export function DllWorkspace({
     updateDraftSessionField,
     handleSaveEdits,
     handleDeleteDll,
-  } = useDllWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
+  } = useDllWorkspace({
+    initialLaunchTarget,
+    onConsumeLaunchTarget,
+    routeLessonId,
+    routeViewMode,
+    onRouteChange,
+    onMissingLesson,
+    onDeletedLesson,
+    onDirtyChange,
+  });
+
+  useEffect(() => {
+    if (focusMode && (!draftDll || viewMode !== "markdown")) {
+      onExitFocusMode?.();
+    }
+  }, [focusMode, draftDll, viewMode, onExitFocusMode]);
 
   return (
     <section
@@ -113,27 +150,25 @@ export function DllWorkspace({
         </div>
 
         <div className="flex flex-wrap items-center gap-gutter-sm">
-          {dlls.length > 0 && (
-            <select
-              id={`${baseId}-saved-dll`}
-              aria-label="Saved Daily Lesson Logs"
-              value={selectedDllId}
-              onChange={(e) => setSelectedDllId(e.target.value)}
-              className="max-w-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+          {onBackToLibrary && (
+            <button
+              type="button"
+              onClick={onBackToLibrary}
+              className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
             >
-              <option value="">Create a new 5-Session DLL...</option>
-              {dlls.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.lessonTitle} — {item.learningAreas} (
-                  {item.gradeAndSection})
-                </option>
-              ))}
-            </select>
+              <span
+                className="material-symbols-outlined text-title-md"
+                aria-hidden="true"
+              >
+                arrow_back
+              </span>
+              <span>Lesson Library</span>
+            </button>
           )}
 
           <button
             type="button"
-            onClick={() => setSelectedDllId("")}
+            onClick={startNewDll}
             className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span
@@ -593,13 +628,18 @@ export function DllWorkspace({
                 <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                   5 Sessions
                 </span>
+                {isDirty && (
+                  <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                    Unsaved edits
+                  </span>
+                )}
               </div>
 
               <button
                 type="button"
                 onClick={() =>
                   confirmDialog.requestConfirm(
-                    buildDeleteDllPrompt(draftDll.lessonTitle),
+                    buildDeleteDllPrompt(draftDll.lessonTitle, derivedDlpCount),
                     () => handleDeleteDll(draftDll),
                   )
                 }
@@ -615,77 +655,79 @@ export function DllWorkspace({
               </button>
             </div>
 
-            {/* 5-Session Quick Strip */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-gutter-md items-stretch">
-              {draftDll.sessions.map((session) => (
-                <article
-                  key={session.sessionNumber}
-                  className={`h-full rounded-md border border-outline-variant p-gutter-md flex flex-col justify-between gap-gutter-sm ${
-                    session.mode === "non-instructional"
-                      ? "bg-surface-container-low"
-                      : "bg-surface-container-lowest"
-                  }`}
-                >
-                  <div className="flex flex-col gap-gutter-xs">
-                    <div className="flex items-center justify-between gap-gutter-xs">
-                      <span className="font-mono text-mono-md text-on-surface-variant tabular-nums">
-                        Session {session.sessionNumber}
-                      </span>
-                      {session.mode === "non-instructional" ? (
-                        <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
-                          Holiday
+            {/* 5-Session Quick Strip (hidden in Markdown Web View) */}
+            {viewMode === "edit" && (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-gutter-md items-stretch">
+                {draftDll.sessions.map((session) => (
+                  <article
+                    key={session.sessionNumber}
+                    className={`h-full rounded-md border border-outline-variant p-gutter-md flex flex-col justify-between gap-gutter-sm ${
+                      session.mode === "non-instructional"
+                        ? "bg-surface-container-low"
+                        : "bg-surface-container-lowest"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-gutter-xs">
+                      <div className="flex items-center justify-between gap-gutter-xs">
+                        <span className="font-mono text-mono-md text-on-surface-variant tabular-nums">
+                          Session {session.sessionNumber}
                         </span>
-                      ) : session.components.length > 0 ? (
-                        <span className="px-gutter-sm py-0.5 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
-                          {session.components.join(", ")}
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="font-body text-body-sm text-on-surface line-clamp-2">
-                      {session.mode === "non-instructional"
-                        ? session.nonInstructionalReason || "Non-instructional"
-                        : session.learningObjectives || "Instructional session"}
-                    </p>
-                  </div>
-
-                  {session.mode === "instructional" &&
-                    (onDeriveDlp || onCreateQuiz) && (
-                      <div className="flex items-center gap-gutter-xs pt-gutter-sm border-t border-outline-variant">
-                        {onDeriveDlp && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onDeriveDlp(draftDll.id, session.sessionNumber)
-                            }
-                            className="text-label-sm font-label text-primary hover:underline"
-                          >
-                            Derive DLP
-                          </button>
-                        )}
-                        {onDeriveDlp && onCreateQuiz && (
-                          <span
-                            className="text-on-surface-variant"
-                            aria-hidden="true"
-                          >
-                            •
+                        {session.mode === "non-instructional" ? (
+                          <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                            Holiday
                           </span>
-                        )}
-                        {onCreateQuiz && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onCreateQuiz(draftDll.id, session.sessionNumber)
-                            }
-                            className="text-label-sm font-label text-on-surface-variant hover:text-on-surface hover:underline"
-                          >
-                            Quiz
-                          </button>
-                        )}
+                        ) : session.components.length > 0 ? (
+                          <span className="px-gutter-sm py-0.5 rounded-full bg-tertiary-container text-on-tertiary-container font-label text-label-sm">
+                            {formatLearningAreas(session.components)}
+                          </span>
+                        ) : null}
                       </div>
-                    )}
-                </article>
-              ))}
-            </div>
+                      <p className="font-body text-body-sm text-on-surface line-clamp-2">
+                        {session.mode === "non-instructional"
+                          ? session.nonInstructionalReason || "Non-instructional"
+                          : session.learningObjectives || "Instructional session"}
+                      </p>
+                    </div>
+
+                    {session.mode === "instructional" &&
+                      (onDeriveDlp || onCreateQuiz) && (
+                        <div className="flex items-center gap-gutter-xs pt-gutter-sm border-t border-outline-variant">
+                          {onDeriveDlp && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onDeriveDlp(draftDll.id, session.sessionNumber)
+                              }
+                              className="text-label-sm font-label text-primary hover:underline"
+                            >
+                              Derive DLP
+                            </button>
+                          )}
+                          {onDeriveDlp && onCreateQuiz && (
+                            <span
+                              className="text-on-surface-variant"
+                              aria-hidden="true"
+                            >
+                              •
+                            </span>
+                          )}
+                          {onCreateQuiz && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onCreateQuiz(draftDll.id, session.sessionNumber)
+                              }
+                              className="text-label-sm font-label text-on-surface-variant hover:text-on-surface hover:underline"
+                            >
+                              Quiz
+                            </button>
+                          )}
+                        </div>
+                      )}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* View Mode Tabs */}
@@ -700,7 +742,10 @@ export function DllWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={viewMode === "edit"}
-                  onClick={() => setViewMode("edit")}
+                  onClick={() => {
+                    onExitFocusMode?.();
+                    setViewMode("edit");
+                  }}
                   className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
                     viewMode === "edit"
                       ? "bg-surface-container-lowest text-primary border border-outline-variant"
@@ -737,17 +782,33 @@ export function DllWorkspace({
               </div>
 
               <span className="font-body text-body-sm text-on-surface-variant">
-                Edit any field inline before exporting to{" "}
-                <span className="font-mono text-mono-md">
-                  DLL_ILAW_template.docx
-                </span>
+                {viewMode === "markdown" ? (
+                  "Full-width ILAW reading view · Copy Markdown uses exact persisted format"
+                ) : (
+                  <>
+                    Edit any field inline before exporting to{" "}
+                    <span className="font-mono text-mono-md">
+                      DLL_ILAW_template.docx
+                    </span>
+                  </>
+                )}
               </span>
             </div>
 
             {viewMode === "markdown" ? (
-              <article className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col gap-gutter-sm max-w-prose">
-                {renderMarkdownBlocks(renderDllMarkdown(draftDll))}
-              </article>
+              <DllMarkdownView
+                dll={draftDll}
+                onDeriveDlp={onDeriveDlp}
+                onCreateQuiz={onCreateQuiz}
+                toolbarActions={
+                  onToggleFocusMode ? (
+                    <FocusModeToggleButton
+                      active={focusMode}
+                      onToggle={onToggleFocusMode}
+                    />
+                  ) : undefined
+                }
+              />
             ) : (
               <div className="flex flex-col gap-gutter-lg">
                 {/* Header & Intentions Card */}
@@ -912,7 +973,7 @@ export function DllWorkspace({
                             {session.mode === "non-instructional"
                               ? `(${session.nonInstructionalReason || "Holiday"})`
                               : session.components.length > 0
-                                ? `(${session.components.join(", ")})`
+                                ? `(${formatLearningAreas(session.components)})`
                                 : ""}
                           </th>
                         ))}
