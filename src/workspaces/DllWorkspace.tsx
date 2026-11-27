@@ -9,6 +9,7 @@ import {
   SESSION_ILAW_FIELDS,
   useDllWorkspace,
   type DllLaunchTarget,
+  type ViewMode,
 } from "../hooks/useDllWorkspace";
 import {
   buildDeleteDllPrompt,
@@ -26,6 +27,12 @@ export type { DllLaunchTarget };
 interface DllWorkspaceProps {
   initialLaunchTarget?: DllLaunchTarget | null;
   onConsumeLaunchTarget?: () => void;
+  routeLessonId?: string;
+  routeViewMode?: ViewMode;
+  onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
+  onBackToLibrary?: () => void;
+  onMissingLesson?: (lessonId: string) => void;
+  onDeletedLesson?: (lessonTitle: string) => void;
   onDeriveDlp?: (dllId: string, sessionNumber: SessionNumber) => void;
   onCreateQuiz?: (dllId: string, sessionNumber: SessionNumber) => void;
 }
@@ -38,6 +45,12 @@ const INPUT_CLASS = `${INPUT_BASE_CLASS} border-outline-variant focus:border-pri
 export function DllWorkspace({
   initialLaunchTarget,
   onConsumeLaunchTarget,
+  routeLessonId,
+  routeViewMode,
+  onRouteChange,
+  onBackToLibrary,
+  onMissingLesson,
+  onDeletedLesson,
   onDeriveDlp,
   onCreateQuiz,
 }: DllWorkspaceProps) {
@@ -46,13 +59,11 @@ export function DllWorkspace({
   const confirmDialog = useConfirmDialog();
 
   const {
-    dlls,
     curriculum,
     sections,
     loading,
     status,
-    selectedDllId,
-    setSelectedDllId,
+    startNewDll,
     draftDll,
     viewMode,
     setViewMode,
@@ -85,7 +96,15 @@ export function DllWorkspace({
     updateDraftSessionField,
     handleSaveEdits,
     handleDeleteDll,
-  } = useDllWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
+  } = useDllWorkspace({
+    initialLaunchTarget,
+    onConsumeLaunchTarget,
+    routeLessonId,
+    routeViewMode,
+    onRouteChange,
+    onMissingLesson,
+    onDeletedLesson,
+  });
 
   return (
     <section
@@ -113,27 +132,25 @@ export function DllWorkspace({
         </div>
 
         <div className="flex flex-wrap items-center gap-gutter-sm">
-          {dlls.length > 0 && (
-            <select
-              id={`${baseId}-saved-dll`}
-              aria-label="Saved Daily Lesson Logs"
-              value={selectedDllId}
-              onChange={(e) => setSelectedDllId(e.target.value)}
-              className="max-w-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+          {onBackToLibrary && (
+            <button
+              type="button"
+              onClick={onBackToLibrary}
+              className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
             >
-              <option value="">Create a new 5-Session DLL...</option>
-              {dlls.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.lessonTitle} — {item.learningAreas} (
-                  {item.gradeAndSection})
-                </option>
-              ))}
-            </select>
+              <span
+                className="material-symbols-outlined text-title-md"
+                aria-hidden="true"
+              >
+                arrow_back
+              </span>
+              <span>Lesson Library</span>
+            </button>
           )}
 
           <button
             type="button"
-            onClick={() => setSelectedDllId("")}
+            onClick={startNewDll}
             className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span

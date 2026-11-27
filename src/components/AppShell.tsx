@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import type { ClassroomTimerState } from "../hooks/useClassroomTimer";
 import { formatClock } from "../hooks/useClassroomTimer";
+import type { WorkspaceId } from "../utils/workspaceRouting";
 
-export type WorkspaceId =
-  | "dll"
-  | "dlp"
-  | "quiz"
-  | "classroom"
-  | "curriculum"
-  | "settings";
+export type { WorkspaceId };
 
 export interface WorkspaceDef {
   id: WorkspaceId;
@@ -20,6 +22,15 @@ export interface WorkspaceDef {
 }
 
 export const WORKSPACES: readonly WorkspaceDef[] = [
+  {
+    id: "library",
+    label: "Lesson Library",
+    breadcrumbGroup: "Lesson Authoring",
+    statusTag: "Saved DLLs & DLPs",
+    icon: "library_books",
+    description:
+      "Browse, open, export, and manage saved Daily Lesson Logs and Daily Lesson Plans.",
+  },
   {
     id: "dll",
     label: "DLL Builder",
@@ -109,7 +120,7 @@ export function AppShell({
   const sheetRef = useRef<HTMLElement>(null);
 
   const current =
-    WORKSPACES.find((w) => w.id === activeWorkspace) ?? WORKSPACES[5]!;
+    WORKSPACES.find((w) => w.id === activeWorkspace) ?? WORKSPACES[0]!;
   const isCatalogOrSettings =
     activeWorkspace === "curriculum" || activeWorkspace === "settings";
 
@@ -195,7 +206,17 @@ export function AppShell({
     };
   }, [closeDrawer]);
 
-  function handleNav(id: WorkspaceId) {
+  function handleNav(event: MouseEvent<HTMLAnchorElement>, id: WorkspaceId) {
+    if (
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      event.button !== 0
+    ) {
+      return;
+    }
+    event.preventDefault();
     onSelectWorkspace(id);
     closeDrawer();
   }
@@ -206,14 +227,14 @@ export function AppShell({
   const renderNavLinks = () => (
     <>
       <nav aria-label="Primary workspaces" className="flex flex-col gap-gutter-xs">
-        {WORKSPACES.slice(0, 4).map((workspace) => {
+        {WORKSPACES.slice(0, 5).map((workspace) => {
           const isCurrent = activeWorkspace === workspace.id;
           return (
             <a
               key={workspace.id}
               href={`#${workspace.id}`}
               aria-current={isCurrent ? "page" : undefined}
-              onClick={() => handleNav(workspace.id)}
+              onClick={(event) => handleNav(event, workspace.id)}
               className={
                 isCurrent
                   ? "flex items-center gap-gutter-sm px-gutter-sm py-gutter-sm rounded bg-primary text-on-primary font-label transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -234,8 +255,11 @@ export function AppShell({
         <a
           href="#curriculum"
           aria-current={isCatalogOrSettings ? "page" : undefined}
-          onClick={() =>
-            handleNav(activeWorkspace === "settings" ? "settings" : "curriculum")
+          onClick={(event) =>
+            handleNav(
+              event,
+              activeWorkspace === "settings" ? "settings" : "curriculum",
+            )
           }
           className={
             isCatalogOrSettings
@@ -260,7 +284,7 @@ export function AppShell({
         <a
           href="#curriculum"
           aria-current={activeWorkspace === "curriculum" ? "page" : undefined}
-          onClick={() => handleNav("curriculum")}
+          onClick={(event) => handleNav(event, "curriculum")}
           className={
             activeWorkspace === "curriculum"
               ? "px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-between text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -275,7 +299,7 @@ export function AppShell({
         <a
           href="#settings"
           aria-current={activeWorkspace === "settings" ? "page" : undefined}
-          onClick={() => handleNav("settings")}
+          onClick={(event) => handleNav(event, "settings")}
           className={
             activeWorkspace === "settings"
               ? "px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-between text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -341,8 +365,8 @@ export function AppShell({
       <aside className="hidden lg:flex w-64 shrink-0 min-h-screen sticky top-0 max-h-screen overflow-y-auto bg-surface-container-low border-r border-outline-variant flex-col justify-between p-gutter-md">
         <div className="flex flex-col gap-gutter-lg">
           <a
-            href="#settings"
-            onClick={() => handleNav("settings")}
+            href="#library"
+            onClick={(event) => handleNav(event, "library")}
             className="flex items-center gap-gutter-sm px-gutter-sm pt-gutter-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded"
           >
             <div className="w-9 h-9 rounded bg-primary text-on-primary flex items-center justify-center shrink-0">

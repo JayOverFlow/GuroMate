@@ -3,6 +3,13 @@ import {
   type DllSessionConfig,
   type SessionNumber,
 } from "../engine/types";
+import type { LessonViewMode } from "../utils/workspaceRouting";
+
+export type LessonRouteResolution =
+  | { kind: "create" }
+  | { kind: "loading" }
+  | { kind: "open"; lessonId: string; viewMode: LessonViewMode }
+  | { kind: "missing"; lessonId: string };
 
 export interface DllLaunchTarget {
   competencyId: string;
@@ -135,4 +142,27 @@ export function applyQuizLaunchTarget(
     ),
     pickedCompetencyId: competencyId || state.pickedCompetencyId,
   };
+}
+
+export function resolveLessonRouteSelection(
+  routeLessonId: string | undefined,
+  routeViewMode: LessonViewMode | undefined,
+  savedIds: ReadonlyArray<string>,
+  loading: boolean,
+): LessonRouteResolution {
+  const id = routeLessonId?.trim();
+  if (!id) {
+    return { kind: "create" };
+  }
+  if (savedIds.includes(id)) {
+    return {
+      kind: "open",
+      lessonId: id,
+      viewMode: routeViewMode === "markdown" ? "markdown" : "edit",
+    };
+  }
+  if (loading) {
+    return { kind: "loading" };
+  }
+  return { kind: "missing", lessonId: id };
 }
