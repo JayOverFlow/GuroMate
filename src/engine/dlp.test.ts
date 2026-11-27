@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createGuroMateEngine } from "./createGuroMateEngine";
-import type { AiGenerateRequest, AiProviderAdapter } from "./types";
+import { renderDlpMarkdown } from "./dlp";
+import type {
+  AiGenerateRequest,
+  AiProviderAdapter,
+  DailyLessonPlan,
+} from "./types";
 
 describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
   const tempDirs: string[] = [];
@@ -519,5 +524,110 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     });
     expect(shsScratchDlp.learningAreas).toBe("SHS Core");
     expect(shsScratchDlp.learningAreas).not.toContain("SHS_CORE");
+  });
+
+  it("renders canonical DLP Markdown unchanged for persistence and Copy Markdown", () => {
+    const derivedDlp: DailyLessonPlan = {
+      id: "dlp-canonical-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      sourceDllId: "dll-parent-7",
+      sourceSessionNumber: 2,
+      competencyIds: ["c1"],
+      lessonTitle: "Number Systems Conversion",
+      learningAreas: "ICT, SHS Core",
+      gradeAndSection: "Grade 11 - Rizal",
+      references: "DepEd MATATAG CG",
+      promptNotes: "Private prompt note must not appear",
+      intentions: {
+        learningCompetencies: ["Convert binary and decimal numbers."],
+        contentStandards: ["Demonstrates understanding of number systems."],
+        performanceStandards: ["Converts numbers accurately."],
+        learningObjectives:
+          "• Convert 4-bit binary numbers to decimal.\n• Value *precision* in digital work.",
+        learnerContext: "",
+      },
+      preLesson: {
+        teacherActivity: "Greet class, pray, check attendance, and present hook.",
+        studentActivity: "Respond to greeting and state the objectives.",
+      },
+      lessonFlow: {
+        teacherActivity: "Model place-value table and facilitate pair drills.",
+        studentActivity: "Solve binary conversions in pairs.",
+      },
+      learningResources: {
+        teacherActivity: "• Slide deck\n• Place-value chart",
+        studentActivity: "• Conversion worksheet",
+      },
+      integrationAndContextualization: {
+        teacherActivity: "Relate binary codes to local barcode scanners.",
+        studentActivity: "",
+      },
+      formativeAssessment: {
+        teacherActivity:
+          "1. What is binary 1010 in decimal?\nA) 8\nB) 10\nC) 12\nD) 14",
+        studentActivity: "Answer the 5-item quiz independently.",
+      },
+      extendedLearningOpportunities: {
+        teacherActivity: "Convert your birth day to binary at home.",
+        studentActivity: "",
+      },
+      reflections: {
+        teacherActivity: "",
+        studentActivity: "",
+      },
+    };
+
+    const derivedMd = renderDlpMarkdown(derivedDlp);
+    expect(derivedMd).toContain("# Number Systems Conversion\n");
+    expect(derivedMd).toContain("- **Learning Area/s:** ICT, SHS Core\n");
+    expect(derivedMd).toContain("- **Grade Level and Section:** Grade 11 - Rizal\n");
+    expect(derivedMd).toContain("- **No. of Sessions:** 1\n");
+    expect(derivedMd).toContain("- **References:** DepEd MATATAG CG\n");
+    expect(derivedMd).toContain("- **Derived From:** dll-parent-7 (Session 2)\n");
+    expect(derivedMd).toContain(
+      "### Learning Objectives\n• Convert 4-bit binary numbers to decimal.\n• Value *precision* in digital work.\n",
+    );
+    expect(derivedMd).toContain(
+      "### Learner Context\n_(Left blank for manual completion)_\n",
+    );
+    expect(derivedMd).toContain("## Learning Experience\n");
+    expect(derivedMd).toContain(
+      "### Opportunities for Integration and Contextualization\n- **Teacher's Activity:** Relate binary codes to local barcode scanners.\n- **Student's Activity:** —\n",
+    );
+    expect(derivedMd).toContain("## Assessing Learning\n");
+    expect(derivedMd).toContain(
+      "### Formative Assessment\n- **Teacher's Activity:** 1. What is binary 1010 in decimal?\nA) 8\nB) 10\nC) 12\nD) 14\n- **Student's Activity:** Answer the 5-item quiz independently.\n",
+    );
+    expect(derivedMd).toContain("## Ways Forward\n");
+    expect(derivedMd).toContain(
+      "### Reflections\n- **Teacher's Activity:** _(Left blank for manual completion)_\n- **Student's Activity:** _(Left blank for manual completion)_\n",
+    );
+    expect(derivedMd).not.toContain("Private prompt note must not appear");
+
+    const standaloneDlp: DailyLessonPlan = {
+      ...derivedDlp,
+      sourceDllId: undefined,
+      sourceSessionNumber: undefined,
+      references: "",
+      intentions: {
+        ...derivedDlp.intentions,
+        learnerContext: "Learners excel in visual charts.",
+      },
+      reflections: {
+        teacherActivity: "Pacing worked well.",
+        studentActivity: "Requested extra practice.",
+      },
+    };
+
+    const standaloneMd = renderDlpMarkdown(standaloneDlp);
+    expect(standaloneMd).not.toContain("**Derived From:**");
+    expect(standaloneMd).toContain("- **References:** —\n");
+    expect(standaloneMd).toContain(
+      "### Learner Context\nLearners excel in visual charts.\n",
+    );
+    expect(standaloneMd).toContain(
+      "### Reflections\n- **Teacher's Activity:** Pacing worked well.\n- **Student's Activity:** Requested extra practice.\n",
+    );
   });
 });
