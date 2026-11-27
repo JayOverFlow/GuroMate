@@ -34,6 +34,7 @@ interface DllWorkspaceProps {
   onBackToLibrary?: () => void;
   onMissingLesson?: (lessonId: string) => void;
   onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
   onDeriveDlp?: (dllId: string, sessionNumber: SessionNumber) => void;
   onCreateQuiz?: (dllId: string, sessionNumber: SessionNumber) => void;
   focusMode?: boolean;
@@ -55,6 +56,7 @@ export function DllWorkspace({
   onBackToLibrary,
   onMissingLesson,
   onDeletedLesson,
+  onDirtyChange,
   onDeriveDlp,
   onCreateQuiz,
   focusMode = false,
@@ -72,6 +74,8 @@ export function DllWorkspace({
     status,
     startNewDll,
     draftDll,
+    isDirty,
+    derivedDlpCount,
     viewMode,
     setViewMode,
     saving,
@@ -111,6 +115,7 @@ export function DllWorkspace({
     onRouteChange,
     onMissingLesson,
     onDeletedLesson,
+    onDirtyChange,
   });
 
   useEffect(() => {
@@ -623,13 +628,25 @@ export function DllWorkspace({
                 <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                   5 Sessions
                 </span>
+                {derivedDlpCount > 0 && (
+                  <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm tabular-nums">
+                    {derivedDlpCount === 1
+                      ? "1 derived DLP"
+                      : `${derivedDlpCount} derived DLPs`}
+                  </span>
+                )}
+                {isDirty && (
+                  <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                    Unsaved edits
+                  </span>
+                )}
               </div>
 
               <button
                 type="button"
                 onClick={() =>
                   confirmDialog.requestConfirm(
-                    buildDeleteDllPrompt(draftDll.lessonTitle),
+                    buildDeleteDllPrompt(draftDll.lessonTitle, derivedDlpCount),
                     () => handleDeleteDll(draftDll),
                   )
                 }

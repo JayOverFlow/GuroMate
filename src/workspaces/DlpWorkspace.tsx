@@ -2,6 +2,7 @@ import { useEffect, useId } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { FocusModeToggleButton } from "../components/LessonRichText";
+import { formatLearningAreas } from "../engine/lessonHelpers";
 import type { SessionNumber } from "../engine/types";
 import {
   DLP_ACTIVITY_ROWS,
@@ -11,6 +12,8 @@ import {
   type ViewMode,
 } from "../hooks/useDlpWorkspace";
 import { buildDescribedBy } from "../utils/formValidation";
+import { formatOrphanedDlpLabel } from "../utils/lessonLibraryQuery";
+import { serializeHashRoute } from "../utils/workspaceRouting";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
 import { DlpMarkdownView } from "./DlpMarkdownView";
 
@@ -25,6 +28,8 @@ interface DlpWorkspaceProps {
   onBackToLibrary?: () => void;
   onMissingLesson?: (lessonId: string) => void;
   onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
+  onOpenParentDll?: (dllId: string) => void;
   onCreateQuiz?: (dlpId: string) => void;
   focusMode?: boolean;
   onToggleFocusMode?: () => void;
@@ -45,6 +50,8 @@ export function DlpWorkspace({
   onBackToLibrary,
   onMissingLesson,
   onDeletedLesson,
+  onDirtyChange,
+  onOpenParentDll,
   onCreateQuiz,
   focusMode = false,
   onToggleFocusMode,
@@ -61,6 +68,8 @@ export function DlpWorkspace({
     status,
     startNewDlp,
     draftDlp,
+    isDirty,
+    draftLineage,
     viewMode,
     setViewMode,
     saving,
@@ -106,6 +115,7 @@ export function DlpWorkspace({
     onRouteChange,
     onMissingLesson,
     onDeletedLesson,
+    onDirtyChange,
   });
 
   useEffect(() => {
@@ -332,7 +342,7 @@ export function DlpWorkspace({
                         {activeSourceSessions.map((s) => (
                           <option key={s.sessionNumber} value={s.sessionNumber}>
                             Session {s.sessionNumber} (
-                            {s.components.join(", ") || "TLE"})
+                            {formatLearningAreas(s.components) || "TLE"})
                           </option>
                         ))}
                       </select>
@@ -345,7 +355,7 @@ export function DlpWorkspace({
                         <strong className="font-label">
                           Inherited TLE Component:
                         </strong>{" "}
-                        {selectedSourceSession.components.join(", ") ||
+                        {formatLearningAreas(selectedSourceSession.components) ||
                           selectedSourceDll?.learningAreas}
                       </div>
                       <div>
@@ -605,9 +615,58 @@ export function DlpWorkspace({
               <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                 1 Session
               </span>
-              {draftDlp.sourceDllId && (
-                <span className="px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm">
-                  Derived from Session {draftDlp.sourceSessionNumber}
+              {draftLineage?.status === "linked" ? (
+                <a
+                  href={serializeHashRoute({
+                    workspace: "dll",
+                    lessonId: draftLineage.parentDllId,
+                    viewMode: "edit",
+                  })}
+                  onClick={(event) => {
+                    if (
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey ||
+                      event.button !== 0 ||
+                      !onOpenParentDll
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    onOpenParentDll(draftLineage.parentDllId);
+                  }}
+                  className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-success-container text-on-success-container font-label text-label-sm hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  <span
+                    className="material-symbols-outlined text-body-sm"
+                    aria-hidden="true"
+                  >
+                    link
+                  </span>
+                  <span>
+                    Derived from {draftLineage.parentDllTitle}
+                    {draftLineage.sessionNumber !== undefined
+                      ? ` · Session ${draftLineage.sessionNumber}`
+                      : ""}
+                  </span>
+                </a>
+              ) : draftLineage?.status === "orphaned" ? (
+                <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                  <span
+                    className="material-symbols-outlined text-body-sm"
+                    aria-hidden="true"
+                  >
+                    link_off
+                  </span>
+                  <span>
+                    {formatOrphanedDlpLabel(draftLineage.sessionNumber)}
+                  </span>
+                </span>
+              ) : null}
+              {isDirty && (
+                <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                  Unsaved edits
                 </span>
               )}
             </div>
@@ -713,12 +772,8 @@ export function DlpWorkspace({
             {viewMode === "markdown" ? (
               <DlpMarkdownView
                 dlp={draftDlp}
-                sourceDllTitle={
-                  draftDlp.sourceDllId
-                    ? dlls.find((item) => item.id === draftDlp.sourceDllId)
-                        ?.lessonTitle
-                    : undefined
-                }
+                lineage={draftLineage}
+                onOpenParentDll={onOpenParentDll}
                 toolbarActions={
                   onToggleFocusMode ? (
                     <FocusModeToggleButton

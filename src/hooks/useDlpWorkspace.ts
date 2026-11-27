@@ -27,10 +27,12 @@ import {
   type DlpBuilderFieldKey,
   type FieldErrors,
 } from "../utils/formValidation";
+import { resolveDlpLineage } from "../utils/lessonLibraryQuery";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 import { useConfirmDialog } from "./useConfirmDialog";
 import {
   appendUniqueId,
+  isDlpDraftDirty,
   resolveLessonRouteSelection,
   type DlpLaunchTarget,
 } from "./workspaceLaunchHelpers";
@@ -48,6 +50,7 @@ export interface UseDlpWorkspaceOptions {
   onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
   onMissingLesson?: (lessonId: string) => void;
   onDeletedLesson?: (lessonTitle: string) => void;
+  onDirtyChange?: (isDirty: boolean, lessonLabel?: string) => void;
 }
 
 export interface DlpStatusState {
@@ -132,6 +135,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     onRouteChange,
     onMissingLesson,
     onDeletedLesson,
+    onDirtyChange,
   } = options;
   const [dlps, setDlps] = useState<DailyLessonPlan[]>([]);
   const [dlls, setDlls] = useState<DailyLessonLog[]>([]);
@@ -275,12 +279,36 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     }
   }, [routeResolution, loadFailed, onMissingLesson]);
 
+  const savedDlp = useMemo(
+    () => dlps.find((d) => d.id === selectedDlpId) ?? null,
+    [dlps, selectedDlpId],
+  );
+
   useEffect(() => {
-    const match = dlps.find((d) => d.id === selectedDlpId) ?? null;
-    setDraftDlp(match ? structuredClone(match) : null);
+    setDraftDlp(savedDlp ? structuredClone(savedDlp) : null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
-  }, [dlps, selectedDlpId]);
+  }, [savedDlp]);
+
+  const isDirty = useMemo(
+    () => isDlpDraftDirty(savedDlp, draftDlp),
+    [savedDlp, draftDlp],
+  );
+
+  const draftLineage = useMemo(
+    () => (draftDlp ? resolveDlpLineage(draftDlp, dlls) : null),
+    [draftDlp, dlls],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty, draftDlp?.lessonTitle);
+  }, [isDirty, draftDlp?.lessonTitle, onDirtyChange]);
+
+  useEffect(() => {
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [onDirtyChange]);
 
   const competencyMap = useMemo(
     () => new Map(curriculum.map((c) => [c.id, c])),
@@ -506,10 +534,13 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   }
 
   function startNewDlp() {
+    if (onRouteChange) {
+      onRouteChange(undefined, undefined);
+      return;
+    }
     setSelectedDlpId("");
     setViewMode("edit");
     setStatus(null);
-    onRouteChange?.(undefined, undefined);
   }
 
   function requestDeleteDlp() {
@@ -556,6 +587,8 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     setSelectedDlpId,
     startNewDlp,
     draftDlp,
+    isDirty,
+    draftLineage,
     viewMode,
     setViewMode: selectViewMode,
     saving,

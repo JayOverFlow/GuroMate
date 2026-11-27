@@ -85,11 +85,21 @@ export function buildDeleteClassSectionPrompt(section: {
   };
 }
 
-export function buildDeleteDllPrompt(lessonTitle: string): ConfirmPrompt {
+export function buildDeleteDllPrompt(
+  lessonTitle: string,
+  derivedDlpCount = 0,
+): ConfirmPrompt {
   const title = lessonTitle.trim() || "this Daily Lesson Log";
+  const count = Math.max(0, Math.floor(derivedDlpCount));
+  const derivedWarning =
+    count === 1
+      ? " 1 derived Daily Lesson Plan references this DLL and will remain intact."
+      : count > 1
+        ? ` ${count} derived Daily Lesson Plans reference this DLL and will remain intact.`
+        : "";
   return {
     title: "Delete Daily Lesson Log?",
-    body: `Permanently delete "${title}" from local storage? This cannot be undone.`,
+    body: `Permanently delete "${title}" from local storage?${derivedWarning} This cannot be undone.`,
     confirmLabel: "Delete DLL",
     busyLabel: "Deleting...",
   };
@@ -146,5 +156,18 @@ export function buildRemoveQuizCompetencyPrompt(
     title: "Remove Learning Competency?",
     body: `Remove "${label}" from this Quiz? You can add it back anytime.`,
     confirmLabel: "Remove",
+  };
+}
+
+export function buildUnsavedChangesPrompt(
+  lessonLabel?: string,
+): ConfirmPrompt {
+  const label = lessonLabel?.trim();
+  return {
+    title: "Discard Unsaved Changes?",
+    body: label
+      ? `You have unsaved inline edits to "${label}". Leaving now will discard your unsaved changes.`
+      : "You have unsaved inline edits. Leaving now will discard your unsaved changes.",
+    confirmLabel: "Leave Without Saving",
   };
 }
