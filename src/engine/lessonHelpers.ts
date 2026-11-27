@@ -12,6 +12,27 @@ export function formatLearningAreas(components: readonly TleComponent[]): string
   return dedupeOrdered([...components]).map(formatComponentLabel).join(", ");
 }
 
+export function parseLearningAreaComponents(
+  learningAreas: string,
+): TleComponent[] {
+  const parts = learningAreas
+    .split(/[,;/|]+/)
+    .map((part) => part.trim().toUpperCase())
+    .filter(Boolean);
+
+  const mapped: TleComponent[] = [];
+  for (const token of parts) {
+    if (token === "ICT") mapped.push("ICT");
+    else if (token === "AFA") mapped.push("AFA");
+    else if (token === "FCS") mapped.push("FCS");
+    else if (token === "IA") mapped.push("IA");
+    else if (token === "SHS_CORE" || token === "SHS CORE") {
+      mapped.push("SHS_CORE");
+    }
+  }
+  return dedupeOrdered(mapped);
+}
+
 export function dedupeOrdered<T>(items: T[]): T[] {
   const seen = new Set<T>();
   const out: T[] = [];
