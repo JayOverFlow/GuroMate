@@ -207,3 +207,39 @@ export function CopyMarkdownButton({
     </button>
   );
 }
+
+export interface FocusModeToggleButtonProps {
+  active: boolean;
+  onToggle: () => void;
+}
+
+export function FocusModeToggleButton({
+  active,
+  onToggle,
+}: FocusModeToggleButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={
+        active
+          ? "Exit Full-Width reading mode (Esc)"
+          : "Enter Full-Width reading mode"
+      }
+      onClick={onToggle}
+      className={
+        active
+          ? "inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-primary text-on-primary border border-primary font-label text-label-md hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+          : "inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-xs rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-md hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
+      }
+    >
+      <span
+        className="material-symbols-outlined text-title-md"
+        aria-hidden="true"
+      >
+        {active ? "fullscreen_exit" : "fullscreen"}
+      </span>
+      <span>{active ? "Exit Full-Width" : "Full-Width"}</span>
+    </button>
+  );
+}

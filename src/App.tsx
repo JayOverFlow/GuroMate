@@ -11,6 +11,12 @@ import { useConfirmDialog } from "./hooks/useConfirmDialog";
 import { isLeavingActiveLesson } from "./hooks/workspaceLaunchHelpers";
 import { buildUnsavedChangesPrompt } from "./utils/confirmAction";
 import {
+  canUseFocusReadingMode,
+  resolveFocusReadingModeAfterRouteChange,
+  shouldExitFocusReadingModeOnKeyDown,
+  toggleFocusReadingMode,
+} from "./utils/focusReadingMode";
+import {
   buildDeletedLessonNotice,
   buildMissingLessonNotice,
   parseHashRoute,
@@ -47,6 +53,8 @@ export function App() {
   const [quizTarget, setQuizTarget] = useState<QuizLaunchTarget | null>(null);
   const [teacherName, setTeacherName] = useState<string>("");
   const [openTimerTabSignal, setOpenTimerTabSignal] = useState(0);
+  const [focusMode, setFocusMode] = useState(false);
+  const prevRouteRef = useRef<AppRoute>(route);
 
   const timer = useClassroomTimer();
   const {
@@ -61,6 +69,7 @@ export function App() {
     isDirty: false,
   });
   const activeWorkspace = route.workspace;
+  const activeFocusMode = focusMode && canUseFocusReadingMode(route);
 
   const handleBuilderDirtyChange = useCallback(
     (isDirty: boolean, lessonLabel?: string) => {
@@ -162,6 +171,37 @@ export function App() {
     const current = WORKSPACES.find((w) => w.id === activeWorkspace);
     document.title = `${current?.label ?? "GuroMate"} | GuroMate`;
   }, [activeWorkspace]);
+
+  useEffect(() => {
+    const prevRoute = prevRouteRef.current;
+    prevRouteRef.current = route;
+    setFocusMode((active) =>
+      resolveFocusReadingModeAfterRouteChange(active, prevRoute, route),
+    );
+  }, [route]);
+
+  useEffect(() => {
+    if (!activeFocusMode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const hasOpenDialog = Boolean(document.querySelector("dialog[open]"));
+      if (
+        shouldExitFocusReadingModeOnKeyDown({
+          focusMode: true,
+          key: event.key,
+          hasOpenDialog,
+          defaultPrevented: event.defaultPrevented,
+          ctrlKey: event.ctrlKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+        })
+      ) {
+        event.preventDefault();
+        setFocusMode(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeFocusMode]);
 
   useEffect(() => {
     let active = true;
@@ -341,6 +381,14 @@ export function App() {
   const handleConsumeDlpTarget = useCallback(() => setDlpTarget(null), []);
   const handleConsumeQuizTarget = useCallback(() => setQuizTarget(null), []);
 
+  const handleToggleFocusMode = useCallback(() => {
+    setFocusMode((active) => toggleFocusReadingMode(active, route));
+  }, [route]);
+
+  const handleExitFocusMode = useCallback(() => {
+    setFocusMode(false);
+  }, []);
+
   return (
     <>
       <AppShell
@@ -349,6 +397,8 @@ export function App() {
         onOpenTimerWorkspace={handleOpenTimerWorkspace}
         timer={timer}
         teacherName={teacherName}
+        focusMode={activeFocusMode}
+        onExitFocusMode={handleExitFocusMode}
       >
         {route.workspace === "library" ? (
           <LessonLibraryWorkspace
@@ -377,6 +427,9 @@ export function App() {
             onCreateQuiz={(dllId, sessionNumber) =>
               handleLaunchQuiz({ sourceKind: "dll", dllId, sessionNumber })
             }
+            focusMode={activeFocusMode}
+            onToggleFocusMode={handleToggleFocusMode}
+            onExitFocusMode={handleExitFocusMode}
           />
         ) : route.workspace === "dlp" ? (
           <DlpWorkspace
@@ -393,6 +446,9 @@ export function App() {
             onCreateQuiz={(dlpId) =>
               handleLaunchQuiz({ sourceKind: "dlp", dlpId })
             }
+            focusMode={activeFocusMode}
+            onToggleFocusMode={handleToggleFocusMode}
+            onExitFocusMode={handleExitFocusMode}
           />
         ) : route.workspace === "quiz" ? (
           <QuizWorkspace
