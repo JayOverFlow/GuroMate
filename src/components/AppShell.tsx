@@ -103,6 +103,8 @@ interface AppShellProps {
   onOpenTimerWorkspace: () => void;
   timer: ClassroomTimerState;
   teacherName?: string;
+  focusMode?: boolean;
+  onExitFocusMode?: () => void;
   children: ReactNode;
 }
 
@@ -112,6 +114,8 @@ export function AppShell({
   onOpenTimerWorkspace,
   timer,
   teacherName,
+  focusMode = false,
+  onExitFocusMode,
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -205,6 +209,12 @@ export function AppShell({
       dialog.removeEventListener("cancel", onCancel);
     };
   }, [closeDrawer]);
+
+  useEffect(() => {
+    if (focusMode) {
+      closeDrawer();
+    }
+  }, [focusMode, closeDrawer]);
 
   function handleNav(event: MouseEvent<HTMLAnchorElement>, id: WorkspaceId) {
     if (
@@ -361,37 +371,39 @@ export function AppShell({
         Skip to main content
       </a>
 
-      {/* Desktop Persistent Left Navigation Rail */}
-      <aside className="hidden lg:flex w-64 shrink-0 min-h-screen sticky top-0 max-h-screen overflow-y-auto bg-surface-container-low border-r border-outline-variant flex-col justify-between p-gutter-md">
-        <div className="flex flex-col gap-gutter-lg">
-          <a
-            href="#library"
-            onClick={(event) => handleNav(event, "library")}
-            className="flex items-center gap-gutter-sm px-gutter-sm pt-gutter-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded"
-          >
-            <div className="w-9 h-9 rounded bg-primary text-on-primary flex items-center justify-center shrink-0">
-              <span
-                className="material-symbols-outlined text-title-lg"
-                aria-hidden="true"
-              >
-                menu_book
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-title text-title-lg text-on-surface leading-tight">
-                GuroMate
-              </span>
-              <span className="font-label text-label-sm text-on-surface-variant">
-                TLE ILAW Studio
-              </span>
-            </div>
-          </a>
+      {/* Desktop Persistent Left Navigation Rail (hidden in Focus / Full-Width mode) */}
+      {!focusMode && (
+        <aside className="hidden lg:flex w-64 shrink-0 min-h-screen sticky top-0 max-h-screen overflow-y-auto bg-surface-container-low border-r border-outline-variant flex-col justify-between p-gutter-md">
+          <div className="flex flex-col gap-gutter-lg">
+            <a
+              href="#library"
+              onClick={(event) => handleNav(event, "library")}
+              className="flex items-center gap-gutter-sm px-gutter-sm pt-gutter-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded"
+            >
+              <div className="w-9 h-9 rounded bg-primary text-on-primary flex items-center justify-center shrink-0">
+                <span
+                  className="material-symbols-outlined text-title-lg"
+                  aria-hidden="true"
+                >
+                  menu_book
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-title text-title-lg text-on-surface leading-tight">
+                  GuroMate
+                </span>
+                <span className="font-label text-label-sm text-on-surface-variant">
+                  TLE ILAW Studio
+                </span>
+              </div>
+            </a>
 
-          {renderNavLinks()}
-        </div>
+            {renderNavLinks()}
+          </div>
 
-        {renderSidebarFooter()}
-      </aside>
+          {renderSidebarFooter()}
+        </aside>
+      )}
 
       {/* Mobile Navigation Drawer (<dialog> + scroll-snap swipe) */}
       <dialog
@@ -457,21 +469,23 @@ export function AppShell({
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="sticky top-0 z-20 bg-surface/95 backdrop-blur-xs border-b border-outline-variant px-gutter-md lg:px-page-margin py-gutter-sm flex flex-wrap items-center justify-between gap-gutter-md">
           <div className="flex items-center gap-gutter-sm min-w-0">
-            <button
-              type="button"
-              aria-label="Open navigation menu"
-              aria-expanded={drawerOpen}
-              aria-controls="workspace-drawer"
-              onClick={() => void openDrawer()}
-              className="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded bg-surface-container-lowest border border-outline-variant text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
-            >
-              <span
-                className="material-symbols-outlined text-title-lg"
-                aria-hidden="true"
+            {!focusMode && (
+              <button
+                type="button"
+                aria-label="Open navigation menu"
+                aria-expanded={drawerOpen}
+                aria-controls="workspace-drawer"
+                onClick={() => void openDrawer()}
+                className="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded bg-surface-container-lowest border border-outline-variant text-on-surface hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
               >
-                menu
-              </span>
-            </button>
+                <span
+                  className="material-symbols-outlined text-title-lg"
+                  aria-hidden="true"
+                >
+                  menu
+                </span>
+              </button>
+            )}
 
             <span className="hidden sm:inline font-label text-label-md text-on-surface-variant">
               {current.breadcrumbGroup}
@@ -491,6 +505,26 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-gutter-sm">
+            {focusMode && onExitFocusMode && (
+              <button
+                type="button"
+                onClick={onExitFocusMode}
+                title="Exit Full-Width reading mode (Esc)"
+                className="inline-flex items-center gap-gutter-xs px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-primary/50 text-primary font-label text-label-md hover:bg-surface-container transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  fullscreen_exit
+                </span>
+                <span>Exit Full-Width</span>
+                <kbd className="hidden sm:inline-block px-1 py-0.5 rounded-xs bg-surface-container text-on-surface-variant font-mono text-label-sm">
+                  Esc
+                </kbd>
+              </button>
+            )}
+
             {/* Persistent Classroom Timer Mini-Bar */}
             <div
               className={`flex items-center gap-gutter-sm px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border ${
@@ -558,7 +592,11 @@ export function AppShell({
 
         <main
           id="main-content"
-          className="flex-1 p-gutter-md lg:p-page-margin w-full max-w-[1360px] mx-auto"
+          className={
+            focusMode
+              ? "flex-1 p-gutter-md lg:p-page-margin w-full"
+              : "flex-1 p-gutter-md lg:p-page-margin w-full max-w-[1360px] mx-auto"
+          }
         >
           {children}
         </main>
