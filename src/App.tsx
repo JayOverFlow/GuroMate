@@ -317,6 +317,7 @@ export function App() {
           onNewDlp={() => navigateToRoute({ workspace: "dlp" })}
           onOpenDll={handleOpenDll}
           onOpenDlp={handleOpenDlp}
+          onOpenSettings={() => navigateToRoute({ workspace: "settings" })}
         />
       ) : route.workspace === "dll" ? (
         <DllWorkspace
