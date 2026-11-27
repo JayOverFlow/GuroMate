@@ -1,6 +1,7 @@
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
+import { FocusModeToggleButton } from "../components/LessonRichText";
 import type { SessionNumber } from "../engine/types";
 import {
   DLP_ACTIVITY_ROWS,
@@ -25,6 +26,9 @@ interface DlpWorkspaceProps {
   onMissingLesson?: (lessonId: string) => void;
   onDeletedLesson?: (lessonTitle: string) => void;
   onCreateQuiz?: (dlpId: string) => void;
+  focusMode?: boolean;
+  onToggleFocusMode?: () => void;
+  onExitFocusMode?: () => void;
 }
 
 const INPUT_BASE_CLASS =
@@ -42,6 +46,9 @@ export function DlpWorkspace({
   onMissingLesson,
   onDeletedLesson,
   onCreateQuiz,
+  focusMode = false,
+  onToggleFocusMode,
+  onExitFocusMode,
 }: DlpWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
@@ -100,6 +107,12 @@ export function DlpWorkspace({
     onMissingLesson,
     onDeletedLesson,
   });
+
+  useEffect(() => {
+    if (focusMode && (!draftDlp || viewMode !== "markdown")) {
+      onExitFocusMode?.();
+    }
+  }, [focusMode, draftDlp, viewMode, onExitFocusMode]);
 
   const gradeSectionErrId = `${baseId}-grade-section-err`;
   const gradeSectionInvalid = Boolean(fieldErrors.gradeAndSection);
@@ -644,7 +657,10 @@ export function DlpWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={viewMode === "edit"}
-                  onClick={() => setViewMode("edit")}
+                  onClick={() => {
+                    onExitFocusMode?.();
+                    setViewMode("edit");
+                  }}
                   className={`inline-flex items-center gap-gutter-xs px-gutter-md py-gutter-xs rounded-sm font-label text-label-lg transition-colors duration-state-change ${
                     viewMode === "edit"
                       ? "bg-surface-container-lowest text-primary border border-outline-variant"
@@ -702,6 +718,14 @@ export function DlpWorkspace({
                     ? dlls.find((item) => item.id === draftDlp.sourceDllId)
                         ?.lessonTitle
                     : undefined
+                }
+                toolbarActions={
+                  onToggleFocusMode ? (
+                    <FocusModeToggleButton
+                      active={focusMode}
+                      onToggle={onToggleFocusMode}
+                    />
+                  ) : undefined
                 }
               />
             ) : (
