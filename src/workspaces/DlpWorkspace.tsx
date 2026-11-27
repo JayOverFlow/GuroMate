@@ -1,7 +1,6 @@
 import { useId } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
-import { renderDlpMarkdown } from "../engine/dlp";
 import type { SessionNumber } from "../engine/types";
 import {
   DLP_ACTIVITY_ROWS,
@@ -11,7 +10,7 @@ import {
 } from "../hooks/useDlpWorkspace";
 import { buildDescribedBy } from "../utils/formValidation";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
-import { renderMarkdownBlocks } from "./lessonViewHelpers";
+import { DlpMarkdownView } from "./DlpMarkdownView";
 
 export type { DlpLaunchTarget };
 
@@ -665,17 +664,29 @@ export function DlpWorkspace({
               </div>
 
               <span className="font-body text-body-sm text-on-surface-variant">
-                Edit any cell inline before exporting to{" "}
-                <span className="font-mono text-mono-md">
-                  DLP_ILAW_template.docx
-                </span>
+                {viewMode === "markdown" ? (
+                  "Full-width ILAW reading view · Copy Markdown uses exact persisted format"
+                ) : (
+                  <>
+                    Edit any cell inline before exporting to{" "}
+                    <span className="font-mono text-mono-md">
+                      DLP_ILAW_template.docx
+                    </span>
+                  </>
+                )}
               </span>
             </div>
 
             {viewMode === "markdown" ? (
-              <article className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-xl flex flex-col gap-gutter-sm max-w-prose">
-                {renderMarkdownBlocks(renderDlpMarkdown(draftDlp))}
-              </article>
+              <DlpMarkdownView
+                dlp={draftDlp}
+                sourceDllTitle={
+                  draftDlp.sourceDllId
+                    ? dlls.find((item) => item.id === draftDlp.sourceDllId)
+                        ?.lessonTitle
+                    : undefined
+                }
+              />
             ) : (
               <div className="flex flex-col gap-gutter-lg">
                 {/* Header & Intentions Card */}
