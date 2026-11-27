@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createGuroMateEngine } from "./createGuroMateEngine";
-import type { AiGenerateRequest, AiProviderAdapter } from "./types";
+import { renderDllMarkdown } from "./dll";
+import type { AiGenerateRequest, AiProviderAdapter, DailyLessonLog } from "./types";
 
 describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
   const tempDirs: string[] = [];
@@ -527,5 +528,81 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(customRefDll.learningAreas).toBe("SHS Core");
     expect(customRefDll.learningAreas).not.toContain("SHS_CORE");
     expect(customRefDll.references).toBe("Teacher Custom Module 2026");
+  });
+
+  it("renders canonical DLL Markdown unchanged for persistence and Copy Markdown", () => {
+    const makeSession = (
+      sessionNumber: 1 | 2 | 3 | 4 | 5,
+      overrides: Partial<DailyLessonLog["sessions"][number]> = {},
+    ): DailyLessonLog["sessions"][number] => ({
+      sessionNumber,
+      mode: "instructional",
+      competencyIds: ["c1"],
+      components: ["ICT"],
+      learningObjectives: `• Objective ${sessionNumber}`,
+      preLesson: `Pre-Lesson ${sessionNumber}`,
+      lessonFlow: `Lesson Flow ${sessionNumber}`,
+      learningResources: `• Resource ${sessionNumber}`,
+      integrationAndContextualization: `Integration ${sessionNumber}`,
+      formativeAssessment: `1. Question ${sessionNumber}\nA) One\nB) Two`,
+      extendedLearningOpportunities: `Extended ${sessionNumber}`,
+      reflections: "",
+      ...overrides,
+    });
+
+    const dll: DailyLessonLog = {
+      id: "dll-canonical-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      lessonTitle: "Number Systems and Hospitality",
+      learningAreas: "ICT, SHS Core",
+      gradeAndSection: "Grade 11 - Rizal",
+      references: "DepEd MATATAG CG",
+      promptNotes: "Private prompt note",
+      intentions: {
+        learningCompetencies: ["Convert binary and decimal numbers."],
+        contentStandards: ["Demonstrates understanding of number systems."],
+        performanceStandards: ["Converts numbers accurately."],
+        learnerContext: "",
+      },
+      sessions: [
+        makeSession(1, { components: ["ICT"] }),
+        makeSession(2, { components: ["SHS_CORE"] }),
+        makeSession(3, {
+          mode: "non-instructional",
+          competencyIds: [],
+          components: [],
+          nonInstructionalReason: "Bonifacio Day",
+          learningObjectives: "Bonifacio Day",
+          preLesson: "",
+          lessonFlow: "",
+          learningResources: "",
+          integrationAndContextualization: "",
+          formativeAssessment: "",
+          extendedLearningOpportunities: "",
+        }),
+        makeSession(4, { components: ["ICT"] }),
+        makeSession(5, { components: ["ICT"], reflections: "Students excelled." }),
+      ],
+    };
+
+    const md = renderDllMarkdown(dll);
+    expect(md).toContain("# Number Systems and Hospitality\n");
+    expect(md).toContain("- **Learning Area/s:** ICT, SHS Core\n");
+    expect(md).toContain("- **Grade Level and Section:** Grade 11 - Rizal\n");
+    expect(md).toContain("- **No. of Sessions:** 5\n");
+    expect(md).toContain("- **References:** DepEd MATATAG CG\n");
+    expect(md).toContain(
+      "### Learner Context\n_(Left blank for manual completion)_\n",
+    );
+    expect(md).toContain("### Session 1 — ICT\n");
+    expect(md).toContain("### Session 2 — SHS Core\n");
+    expect(md).toContain("### Session 3 — Non-Instructional (Bonifacio Day)\n");
+    expect(md).toContain(
+      "- **Reflections:** _(Left blank for manual completion)_\n",
+    );
+    expect(md).toContain("- **Reflections:** Students excelled.\n");
+    expect(md).not.toContain("SHS_CORE");
+    expect(md).not.toContain("Private prompt note");
   });
 });

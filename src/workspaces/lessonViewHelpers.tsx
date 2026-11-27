@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { renderInlineTokens } from "../components/LessonRichText";
 
 export async function readErrorMessage(res: Response): Promise<string> {
   try {
@@ -7,27 +8,6 @@ export async function readErrorMessage(res: Response): Promise<string> {
   } catch {
     return `Request failed (HTTP ${res.status}).`;
   }
-}
-
-function renderInlineMarkdown(text: string): ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|_[^_]+_)/g);
-  return parts.map((part, idx) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return (
-        <strong key={idx} className="font-semibold text-on-surface">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    if (part.startsWith("_") && part.endsWith("_")) {
-      return (
-        <em key={idx} className="italic">
-          {part.slice(1, -1)}
-        </em>
-      );
-    }
-    return part;
-  });
 }
 
 export function renderMarkdownBlocks(markdown: string): ReactNode[] {
@@ -43,7 +23,7 @@ export function renderMarkdownBlocks(markdown: string): ReactNode[] {
         className="list-disc list-inside flex flex-col gap-gutter-xs font-body text-body-md text-on-surface-variant pl-2"
       >
         {listItems.map((item, i) => (
-          <li key={i}>{renderInlineMarkdown(item)}</li>
+          <li key={i}>{renderInlineTokens(item)}</li>
         ))}
       </ul>,
     );
@@ -51,7 +31,7 @@ export function renderMarkdownBlocks(markdown: string): ReactNode[] {
   };
 
   lines.forEach((line, idx) => {
-    if (line.startsWith("- ")) {
+    if (line.startsWith("- ") || line.startsWith("• ")) {
       listItems.push(line.slice(2));
       return;
     }
@@ -63,7 +43,7 @@ export function renderMarkdownBlocks(markdown: string): ReactNode[] {
           key={idx}
           className="font-headline text-headline-md text-on-surface mt-2"
         >
-          {renderInlineMarkdown(line.slice(2))}
+          {renderInlineTokens(line.slice(2))}
         </h2>,
       );
     } else if (line.startsWith("## ")) {
@@ -72,7 +52,7 @@ export function renderMarkdownBlocks(markdown: string): ReactNode[] {
           key={idx}
           className="font-title text-title-lg text-primary mt-3 pt-2 border-t border-outline-variant"
         >
-          {renderInlineMarkdown(line.slice(3))}
+          {renderInlineTokens(line.slice(3))}
         </h3>,
       );
     } else if (line.startsWith("### ")) {
@@ -81,13 +61,13 @@ export function renderMarkdownBlocks(markdown: string): ReactNode[] {
           key={idx}
           className="font-title text-title-md text-on-surface mt-2"
         >
-          {renderInlineMarkdown(line.slice(4))}
+          {renderInlineTokens(line.slice(4))}
         </h4>,
       );
     } else {
       blocks.push(
         <p key={idx} className="font-body text-body-md text-on-surface">
-          {renderInlineMarkdown(line)}
+          {renderInlineTokens(line)}
         </p>,
       );
     }
