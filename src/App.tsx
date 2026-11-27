@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AppShell,
   WORKSPACES,
@@ -6,22 +6,36 @@ import {
 } from "./components/AppShell";
 import type { GuroMateSettings, SessionNumber } from "./engine/types";
 import { useClassroomTimer } from "./hooks/useClassroomTimer";
+import {
+  buildDeletedLessonNotice,
+  buildMissingLessonNotice,
+  parseHashRoute,
+  serializeHashRoute,
+  type AppRoute,
+  type LessonViewMode,
+} from "./utils/workspaceRouting";
 import { ClassroomWorkspace } from "./workspaces/ClassroomWorkspace";
 import { CurriculumWorkspace } from "./workspaces/CurriculumWorkspace";
 import { DllWorkspace, type DllLaunchTarget } from "./workspaces/DllWorkspace";
 import { DlpWorkspace, type DlpLaunchTarget } from "./workspaces/DlpWorkspace";
+import {
+  LessonLibraryWorkspace,
+  type LessonLibraryNotice,
+} from "./workspaces/LessonLibraryWorkspace";
 import { QuizWorkspace, type QuizLaunchTarget } from "./workspaces/QuizWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
-function parseWorkspaceFromHash(): WorkspaceId | null {
-  const raw = window.location.hash.replace(/^#/, "") as WorkspaceId;
-  return WORKSPACES.some((w) => w.id === raw) ? raw : null;
+interface NavigateOptions {
+  replace?: boolean;
+  notice?: LessonLibraryNotice | null;
 }
 
 export function App() {
-  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(
-    () => parseWorkspaceFromHash() ?? "settings",
+  const [route, setRoute] = useState<AppRoute>(() =>
+    parseHashRoute(window.location.hash),
   );
+  const [libraryNotice, setLibraryNotice] =
+    useState<LessonLibraryNotice | null>(null);
   const [dllTarget, setDllTarget] = useState<DllLaunchTarget | null>(null);
   const [dlpTarget, setDlpTarget] = useState<DlpLaunchTarget | null>(null);
   const [quizTarget, setQuizTarget] = useState<QuizLaunchTarget | null>(null);
@@ -29,11 +43,38 @@ export function App() {
   const [openTimerTabSignal, setOpenTimerTabSignal] = useState(0);
 
   const timer = useClassroomTimer();
+  const activeWorkspace = route.workspace;
+
+  const navigateToRoute = useCallback(
+    (nextRoute: AppRoute, options: NavigateOptions = {}) => {
+      setRoute(nextRoute);
+      if (options.notice !== undefined) {
+        setLibraryNotice(options.notice);
+      } else {
+        setLibraryNotice(null);
+      }
+      const nextHash = serializeHashRoute(nextRoute);
+      if (window.location.hash !== nextHash) {
+        if (options.replace) {
+          window.history.replaceState(null, "", nextHash);
+        } else {
+          window.location.hash = nextHash;
+        }
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
+    if (!window.location.hash) {
+      window.history.replaceState(null, "", "#library");
+    }
     const onHashChange = () => {
-      const next = parseWorkspaceFromHash();
-      if (next) setActiveWorkspace(next);
+      const next = parseHashRoute(window.location.hash);
+      setRoute(next);
+      if (next.workspace !== "library") {
+        setLibraryNotice(null);
+      }
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -61,37 +102,154 @@ export function App() {
     };
   }, []);
 
-  function handleNavClick(id: WorkspaceId) {
-    setActiveWorkspace(id);
-  }
+  const handleNavClick = useCallback(
+    (id: WorkspaceId) => {
+      navigateToRoute({ workspace: id });
+    },
+    [navigateToRoute],
+  );
 
-  function handleOpenTimerWorkspace() {
+  const handleOpenTimerWorkspace = useCallback(() => {
     setOpenTimerTabSignal((n) => n + 1);
-    setActiveWorkspace("classroom");
-    window.location.hash = "classroom";
-  }
+    navigateToRoute({ workspace: "classroom" });
+  }, [navigateToRoute]);
 
-  function handleLaunchDll(target: DllLaunchTarget) {
-    setDllTarget(target);
-    setActiveWorkspace("dll");
-    window.location.hash = "dll";
-  }
+  const handleBackToLibrary = useCallback(() => {
+    navigateToRoute({ workspace: "library" });
+  }, [navigateToRoute]);
 
-  function handleLaunchDlp(target: DlpLaunchTarget) {
-    setDlpTarget(target);
-    setActiveWorkspace("dlp");
-    window.location.hash = "dlp";
-  }
+  const handleOpenDll = useCallback(
+    (lessonId: string, viewMode: LessonViewMode = "edit") => {
+      navigateToRoute({ workspace: "dll", lessonId, viewMode });
+    },
+    [navigateToRoute],
+  );
 
-  function handleDeriveDlp(dllId: string, sessionNumber: SessionNumber) {
-    handleLaunchDlp({ mode: "derive", dllId, sessionNumber });
-  }
+  const handleOpenDlp = useCallback(
+    (lessonId: string, viewMode: LessonViewMode = "edit") => {
+      navigateToRoute({ workspace: "dlp", lessonId, viewMode });
+    },
+    [navigateToRoute],
+  );
 
-  function handleLaunchQuiz(target: QuizLaunchTarget) {
-    setQuizTarget(target);
-    setActiveWorkspace("quiz");
-    window.location.hash = "quiz";
-  }
+  const handleDllRouteChange = useCallback(
+    (lessonId?: string, viewMode?: LessonViewMode) => {
+      navigateToRoute(
+        lessonId
+          ? { workspace: "dll", lessonId, viewMode: viewMode ?? "edit" }
+          : { workspace: "dll" },
+      );
+    },
+    [navigateToRoute],
+  );
+
+  const handleDlpRouteChange = useCallback(
+    (lessonId?: string, viewMode?: LessonViewMode) => {
+      navigateToRoute(
+        lessonId
+          ? { workspace: "dlp", lessonId, viewMode: viewMode ?? "edit" }
+          : { workspace: "dlp" },
+      );
+    },
+    [navigateToRoute],
+  );
+
+  const handleMissingDll = useCallback(
+    (lessonId: string) => {
+      navigateToRoute(
+        { workspace: "library" },
+        {
+          replace: true,
+          notice: {
+            tone: "info",
+            text: buildMissingLessonNotice("dll", lessonId),
+          },
+        },
+      );
+    },
+    [navigateToRoute],
+  );
+
+  const handleMissingDlp = useCallback(
+    (lessonId: string) => {
+      navigateToRoute(
+        { workspace: "library" },
+        {
+          replace: true,
+          notice: {
+            tone: "info",
+            text: buildMissingLessonNotice("dlp", lessonId),
+          },
+        },
+      );
+    },
+    [navigateToRoute],
+  );
+
+  const handleDeletedDll = useCallback(
+    (lessonTitle: string) => {
+      navigateToRoute(
+        { workspace: "library" },
+        {
+          notice: {
+            tone: "success",
+            text: buildDeletedLessonNotice("dll", lessonTitle),
+          },
+        },
+      );
+    },
+    [navigateToRoute],
+  );
+
+  const handleDeletedDlp = useCallback(
+    (lessonTitle: string) => {
+      navigateToRoute(
+        { workspace: "library" },
+        {
+          notice: {
+            tone: "success",
+            text: buildDeletedLessonNotice("dlp", lessonTitle),
+          },
+        },
+      );
+    },
+    [navigateToRoute],
+  );
+
+  const handleLaunchDll = useCallback(
+    (target: DllLaunchTarget) => {
+      setDllTarget(target);
+      navigateToRoute({ workspace: "dll" });
+    },
+    [navigateToRoute],
+  );
+
+  const handleLaunchDlp = useCallback(
+    (target: DlpLaunchTarget) => {
+      setDlpTarget(target);
+      navigateToRoute({ workspace: "dlp" });
+    },
+    [navigateToRoute],
+  );
+
+  const handleDeriveDlp = useCallback(
+    (dllId: string, sessionNumber: SessionNumber) => {
+      handleLaunchDlp({ mode: "derive", dllId, sessionNumber });
+    },
+    [handleLaunchDlp],
+  );
+
+  const handleLaunchQuiz = useCallback(
+    (target: QuizLaunchTarget) => {
+      setQuizTarget(target);
+      navigateToRoute({ workspace: "quiz" });
+    },
+    [navigateToRoute],
+  );
+
+  const handleConsumeDllTarget = useCallback(() => setDllTarget(null), []);
+  const handleConsumeDlpTarget = useCallback(() => setDlpTarget(null), []);
+  const handleConsumeQuizTarget = useCallback(() => setQuizTarget(null), []);
 
   return (
     <AppShell
@@ -101,35 +259,56 @@ export function App() {
       timer={timer}
       teacherName={teacherName}
     >
-      {activeWorkspace === "dll" ? (
+      {route.workspace === "library" ? (
+        <LessonLibraryWorkspace
+          notice={libraryNotice}
+          onDismissNotice={() => setLibraryNotice(null)}
+          onNewDll={() => navigateToRoute({ workspace: "dll" })}
+          onNewDlp={() => navigateToRoute({ workspace: "dlp" })}
+          onOpenDll={handleOpenDll}
+          onOpenDlp={handleOpenDlp}
+        />
+      ) : route.workspace === "dll" ? (
         <DllWorkspace
           initialLaunchTarget={dllTarget}
-          onConsumeLaunchTarget={() => setDllTarget(null)}
+          onConsumeLaunchTarget={handleConsumeDllTarget}
+          routeLessonId={route.lessonId}
+          routeViewMode={route.viewMode}
+          onRouteChange={handleDllRouteChange}
+          onBackToLibrary={handleBackToLibrary}
+          onMissingLesson={handleMissingDll}
+          onDeletedLesson={handleDeletedDll}
           onDeriveDlp={handleDeriveDlp}
           onCreateQuiz={(dllId, sessionNumber) =>
             handleLaunchQuiz({ sourceKind: "dll", dllId, sessionNumber })
           }
         />
-      ) : activeWorkspace === "dlp" ? (
+      ) : route.workspace === "dlp" ? (
         <DlpWorkspace
           initialLaunchTarget={dlpTarget}
-          onConsumeLaunchTarget={() => setDlpTarget(null)}
+          onConsumeLaunchTarget={handleConsumeDlpTarget}
+          routeLessonId={route.lessonId}
+          routeViewMode={route.viewMode}
+          onRouteChange={handleDlpRouteChange}
+          onBackToLibrary={handleBackToLibrary}
+          onMissingLesson={handleMissingDlp}
+          onDeletedLesson={handleDeletedDlp}
           onCreateQuiz={(dlpId) =>
             handleLaunchQuiz({ sourceKind: "dlp", dlpId })
           }
         />
-      ) : activeWorkspace === "quiz" ? (
+      ) : route.workspace === "quiz" ? (
         <QuizWorkspace
           initialLaunchTarget={quizTarget}
-          onConsumeLaunchTarget={() => setQuizTarget(null)}
+          onConsumeLaunchTarget={handleConsumeQuizTarget}
         />
-      ) : activeWorkspace === "settings" ? (
+      ) : route.workspace === "settings" ? (
         <SettingsWorkspace
           onSettingsSaved={(saved) =>
             setTeacherName(saved.profile.studentTeacherName)
           }
         />
-      ) : activeWorkspace === "curriculum" ? (
+      ) : route.workspace === "curriculum" ? (
         <CurriculumWorkspace
           onUseInDll={(competencyId) => handleLaunchDll({ competencyId })}
           onUseInDlp={(competencyId) =>

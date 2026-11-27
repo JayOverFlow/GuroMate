@@ -7,6 +7,7 @@ import {
   DLP_INTENTIONS_LIST_FIELDS,
   useDlpWorkspace,
   type DlpLaunchTarget,
+  type ViewMode,
 } from "../hooks/useDlpWorkspace";
 import { buildDescribedBy } from "../utils/formValidation";
 import { CurriculumCompetencyPicker } from "./CurriculumCompetencyPicker";
@@ -17,6 +18,12 @@ export type { DlpLaunchTarget };
 interface DlpWorkspaceProps {
   initialLaunchTarget?: DlpLaunchTarget | null;
   onConsumeLaunchTarget?: () => void;
+  routeLessonId?: string;
+  routeViewMode?: ViewMode;
+  onRouteChange?: (lessonId?: string, viewMode?: ViewMode) => void;
+  onBackToLibrary?: () => void;
+  onMissingLesson?: (lessonId: string) => void;
+  onDeletedLesson?: (lessonTitle: string) => void;
   onCreateQuiz?: (dlpId: string) => void;
 }
 
@@ -28,20 +35,24 @@ const INPUT_CLASS = `${INPUT_BASE_CLASS} border-outline-variant focus:border-pri
 export function DlpWorkspace({
   initialLaunchTarget,
   onConsumeLaunchTarget,
+  routeLessonId,
+  routeViewMode,
+  onRouteChange,
+  onBackToLibrary,
+  onMissingLesson,
+  onDeletedLesson,
   onCreateQuiz,
 }: DlpWorkspaceProps) {
   const headingId = useId();
   const baseId = useId();
 
   const {
-    dlps,
     dlls,
     curriculum,
     sections,
     loading,
     status,
-    selectedDlpId,
-    setSelectedDlpId,
+    startNewDlp,
     draftDlp,
     viewMode,
     setViewMode,
@@ -80,7 +91,15 @@ export function DlpWorkspace({
     handleSaveEdits,
     requestDeleteDlp,
     confirmDialog,
-  } = useDlpWorkspace(initialLaunchTarget, onConsumeLaunchTarget);
+  } = useDlpWorkspace({
+    initialLaunchTarget,
+    onConsumeLaunchTarget,
+    routeLessonId,
+    routeViewMode,
+    onRouteChange,
+    onMissingLesson,
+    onDeletedLesson,
+  });
 
   const gradeSectionErrId = `${baseId}-grade-section-err`;
   const gradeSectionInvalid = Boolean(fieldErrors.gradeAndSection);
@@ -111,27 +130,25 @@ export function DlpWorkspace({
         </div>
 
         <div className="flex flex-wrap items-center gap-gutter-sm">
-          {dlps.length > 0 && (
-            <select
-              id={`${baseId}-saved-dlp`}
-              aria-label="Saved Daily Lesson Plans"
-              value={selectedDlpId}
-              onChange={(e) => setSelectedDlpId(e.target.value)}
-              className="max-w-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+          {onBackToLibrary && (
+            <button
+              type="button"
+              onClick={onBackToLibrary}
+              className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
             >
-              <option value="">Create a new Daily Lesson Plan...</option>
-              {dlps.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.lessonTitle} — {item.learningAreas} (
-                  {item.gradeAndSection})
-                </option>
-              ))}
-            </select>
+              <span
+                className="material-symbols-outlined text-title-md"
+                aria-hidden="true"
+              >
+                arrow_back
+              </span>
+              <span>Lesson Library</span>
+            </button>
           )}
 
           <button
             type="button"
-            onClick={() => setSelectedDlpId("")}
+            onClick={startNewDlp}
             className="inline-flex items-center justify-center gap-gutter-sm px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change"
           >
             <span

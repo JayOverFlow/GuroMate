@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCompetencyLines,
+  parseLearningAreaComponents,
   resolveLessonReferences,
 } from "./lessonHelpers";
 import type { CurriculumCompetency } from "./types";
@@ -99,5 +100,19 @@ describe("lessonHelpers BoW formatting and reference citations", () => {
         [comp1, comp2],
       ),
     ).toBe("Teacher Custom Module p. 12");
+  });
+
+  it("parses learningAreas strings into canonical deduped TleComponent values including SHS Core", () => {
+    expect(parseLearningAreaComponents("ICT, FCS")).toEqual(["ICT", "FCS"]);
+    expect(parseLearningAreaComponents("SHS Core, ICT, SHS_CORE")).toEqual([
+      "SHS_CORE",
+      "ICT",
+    ]);
+    expect(parseLearningAreaComponents("afa / ia; fcs")).toEqual([
+      "AFA",
+      "IA",
+      "FCS",
+    ]);
+    expect(parseLearningAreaComponents("")).toEqual([]);
   });
 });

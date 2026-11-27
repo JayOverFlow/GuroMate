@@ -4,6 +4,7 @@ import {
   applyDlpLaunchTarget,
   applyQuizLaunchTarget,
   createInitialDllSessionConfigs,
+  resolveLessonRouteSelection,
   type DlpLaunchState,
   type QuizLaunchState,
 } from "./workspaceLaunchHelpers";
@@ -208,5 +209,38 @@ describe("applyQuizLaunchTarget", () => {
     expect(fromDlp.selectedQuizId).toBe("");
     expect(fromDlp.sourceKind).toBe("dlp");
     expect(fromDlp.selectedDlpId).toBe("dlp-8");
+  });
+});
+
+describe("resolveLessonRouteSelection", () => {
+  it("starts a fresh creation form without auto-loading saved lessons when route has no lessonId", () => {
+    expect(
+      resolveLessonRouteSelection(undefined, undefined, ["dll-1", "dll-2"], false),
+    ).toEqual({ kind: "create" });
+    expect(
+      resolveLessonRouteSelection("   ", "markdown", ["dll-1"], false),
+    ).toEqual({ kind: "create" });
+  });
+
+  it("waits while loading when a deep-linked lesson ID has not been fetched yet", () => {
+    expect(
+      resolveLessonRouteSelection("dll-2", "markdown", [], true),
+    ).toEqual({ kind: "loading" });
+  });
+
+  it("opens an existing deep-linked lesson in edit or markdown view", () => {
+    expect(
+      resolveLessonRouteSelection("dll-2", undefined, ["dll-1", "dll-2"], false),
+    ).toEqual({ kind: "open", lessonId: "dll-2", viewMode: "edit" });
+
+    expect(
+      resolveLessonRouteSelection("dll-2", "markdown", ["dll-1", "dll-2"], false),
+    ).toEqual({ kind: "open", lessonId: "dll-2", viewMode: "markdown" });
+  });
+
+  it("reports missing when loading finishes and the deep-linked lesson ID does not exist", () => {
+    expect(
+      resolveLessonRouteSelection("dll-deleted", "edit", ["dll-1", "dll-2"], false),
+    ).toEqual({ kind: "missing", lessonId: "dll-deleted" });
   });
 });
