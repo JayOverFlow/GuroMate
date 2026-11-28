@@ -3,12 +3,16 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import rawCatalog from "./curriculumCatalog.json";
 import {
+  DLL_PLAN_SYSTEM_INSTRUCTION,
   DLL_SYSTEM_INSTRUCTION,
   DllNotFoundError,
   DllValidationError,
+  assembleDllBlueprint,
   assembleGeneratedSessions,
+  buildDllPlanPrompt,
   buildDllPrompt,
   normalizeEditedDll,
+  parseAiDllBlueprintPayload,
   parseAiDllPayload,
   renderDllMarkdown,
   resolveDllSessions,
@@ -76,6 +80,7 @@ import {
   type CustomCompetencyInput,
   type DailyLessonLog,
   type DailyLessonPlan,
+  type DllLessonBlueprint,
   type GenerateDllInput,
   type GenerateDlpInput,
   type GenerateQuizInput,
@@ -83,6 +88,7 @@ import {
   type GuroMateEngineOptions,
   type GuroMateSettings,
   type GradeLevel,
+  type PlanDllInput,
   type QuarterNumber,
   type Quiz,
   type QuizSyncResult,
@@ -806,6 +812,49 @@ export function createGuroMateEngine(
     (id) => new QuizNotFoundError(`Formative Quiz not found: ${id}`),
   );
 
+  async function planDll(input: PlanDllInput): Promise<DllLessonBlueprint> {
+    const catalog = await listCurriculum();
+    const competencyMap = new Map(catalog.map((c) => [c.id, c]));
+    const resolved = resolveDllSessions(input, competencyMap);
+    const learningAreas = formatLearningAreas(resolved.components);
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext,
+      (msg) => new DllValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(
+      input.referenceMaterial,
+    );
+
+    const prompt = buildDllPlanPrompt({
+      lessonTitle: input.lessonTitle,
+      gradeAndSection: resolved.gradeAndSection,
+      learningAreas,
+      references: input.references,
+      classroomContext,
+      referenceMaterial,
+      promptNotes: input.promptNotes,
+      orderedConfigs: resolved.orderedConfigs,
+      sessionCompetencies: resolved.sessionCompetencies,
+    });
+
+    const settings = await getSettings();
+    const aiResult = await aiAdapter.generateText({
+      systemInstruction: DLL_PLAN_SYSTEM_INSTRUCTION,
+      prompt,
+      settings: settings.ai,
+    });
+    const parsed = parseAiDllBlueprintPayload(aiResult.text);
+
+    return assembleDllBlueprint({
+      input,
+      learningAreas,
+      gradeAndSection: resolved.gradeAndSection,
+      orderedConfigs: resolved.orderedConfigs,
+      sessionCompetencies: resolved.sessionCompetencies,
+      aiPayload: parsed,
+    });
+  }
+
   async function generateDll(input: GenerateDllInput): Promise<DailyLessonLog> {
     const catalog = await listCurriculum();
     const competencyMap = new Map(catalog.map((c) => [c.id, c]));
@@ -827,6 +876,7 @@ export function createGuroMateEngine(
       promptNotes: input.promptNotes,
       orderedConfigs: resolved.orderedConfigs,
       sessionCompetencies: resolved.sessionCompetencies,
+      blueprint: input.blueprint,
     });
 
     const settings = await getSettings();
@@ -848,13 +898,14 @@ export function createGuroMateEngine(
       createdAt: now,
       updatedAt: now,
       lessonTitle:
+        input.blueprint?.lessonTitle.trim() ||
         input.lessonTitle?.trim() ||
         (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
         fallbackTitle,
       learningAreas,
       gradeAndSection: resolved.gradeAndSection,
       references: resolveLessonReferences(
-        input.references,
+        input.blueprint?.references.trim() || input.references?.trim(),
         parsed.references,
         selectedCompetencies,
       ),
@@ -876,6 +927,7 @@ export function createGuroMateEngine(
         resolved.orderedConfigs,
         resolved.sessionCompetencies,
         parsed.sessions,
+        input.blueprint,
       ),
     };
 
@@ -1190,6 +1242,7 @@ export function createGuroMateEngine(
     extractReferenceMaterial: extractReferenceMaterialFromInput,
     listDlls: dllStore.readAll,
     getDll: dllStore.getById,
+    planDll,
     generateDll,
     saveDll: (dll) => dllStore.update(dll.id, () => normalizeEditedDll(dll)),
     deleteDll: dllStore.remove,

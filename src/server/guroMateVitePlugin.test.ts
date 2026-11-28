@@ -1345,4 +1345,247 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     expect(legacyDlpTables[0]![7]![1]).toContain("OpenRouter (google/gemini-2.5-flash)");
     expect(legacyDlpTables[0]![7]![1]).not.toContain("{aiTool}");
   });
+
+  it("serves two-step DLL planning (POST /api/dlls/plan -> editable Lesson Blueprint -> POST /api/dlls/generate with locked teacher choices -> .docx export)", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-dll-plan-"));
+    tempDirs.push(dataDir);
+    const seenPrompts: string[] = [];
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          seenPrompts.push(req.prompt);
+          if (req.prompt.includes("Create an editable 5-Session Lesson Blueprint")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "HTTP Planned ICT Week",
+                references: "MATATAG TLE 7 ICT CG",
+                sessions: [1, 2, 3, 4].map((n) => ({
+                  sessionNumber: n,
+                  progressionFocus: `Session ${n} progressive focus`,
+                  learningObjectives: `• Explain ICT concept ${n}.\n• Perform ICT task ${n}.\n• Value safe ICT habits ${n}.`,
+                  activityOptions: [
+                    {
+                      id: `http-s${n}-a`,
+                      title: `BoW Activity ${n}`,
+                      summary: `Adapted BoW task ${n}.`,
+                      source: "bow",
+                      recommended: true,
+                    },
+                    {
+                      id: `http-s${n}-b`,
+                      title: `Hands-On Lab Relay ${n}`,
+                      summary: `Collaborative workstation relay ${n}.`,
+                      source: "authentic",
+                      recommended: false,
+                    },
+                  ],
+                  assessmentOptions: [
+                    {
+                      type: "exit-ticket",
+                      preview: `Exit slip for session ${n}.`,
+                      recommended: true,
+                    },
+                    {
+                      type: "checklist",
+                      preview: `Skill checklist for session ${n}.`,
+                      recommended: false,
+                    },
+                    {
+                      type: "demo-rubric",
+                      preview: `Demo rubric for session ${n}.`,
+                      recommended: false,
+                    },
+                    {
+                      type: "worksheet",
+                      preview: `Worksheet for session ${n}.`,
+                      recommended: false,
+                    },
+                    {
+                      type: "short-quiz",
+                      preview: `Short quiz for session ${n}.`,
+                      recommended: false,
+                    },
+                  ],
+                })),
+              }),
+              model: "mock-http-model",
+            };
+          }
+
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Ignored AI Title",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) => ({
+                sessionNumber: n,
+                learningObjectives: `• AI draft objective ${n}`,
+                preLesson: `Pre-lesson activity: “Ready ${n}” Check well-being and share objectives.`,
+                lessonFlow: `Hands-On Lab Relay ${n}: Modeled demo followed by collaborative lab stations.`,
+                learningResources: "• Lab PCs\n• Emergency/offline backup: Printed cue cards & whiteboard",
+                integrationAndContextualization: "Link to barangay digital services.",
+                formativeAssessment: `Observation / Skill Checklist: Monitor session ${n} with help cards and oral/visual accommodations.`,
+                extendedLearningOpportunities: `Community observation log ${n}.`,
+              })),
+            }),
+            model: "mock-http-model",
+          };
+        },
+      },
+    });
+
+    const middleware = createGuroMateMiddleware(engine);
+    const server = createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 404;
+        res.end("Not Found");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    // Invalid plan payload returns 400
+    const badPlanRes = await fetch(`${baseUrl}/api/dlls/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gradeAndSection: "", sessions: [] }),
+    });
+    expect(badPlanRes.status).toBe(400);
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const sessions = [
+      { sessionNumber: 1, mode: "instructional", competencyIds: [ict.id] },
+      { sessionNumber: 2, mode: "instructional", competencyIds: [ict.id] },
+      { sessionNumber: 3, mode: "instructional", competencyIds: [ict.id] },
+      { sessionNumber: 4, mode: "instructional", competencyIds: [ict.id] },
+      {
+        sessionNumber: 5,
+        mode: "non-instructional",
+        competencyIds: [],
+        nonInstructionalReason: "Division Seminar",
+      },
+    ];
+
+    // Step 1: Plan Lesson
+    const planRes = await fetch(`${baseUrl}/api/dlls/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "Grade 7 - Mabini",
+        classroomContext: {
+          periodMinutes: 60,
+          facility: "computer-lab",
+          modality: "face-to-face",
+        },
+        sessions,
+      }),
+    });
+    expect(planRes.status).toBe(200);
+    const blueprint = (await planRes.json()) as {
+      lessonTitle: string;
+      references: string;
+      sessions: Array<{
+        sessionNumber: number;
+        mode: string;
+        nonInstructionalReason?: string;
+        progressionFocus: string;
+        learningObjectives: string;
+        activityOptions: Array<{ id: string; title: string; summary: string; recommended: boolean }>;
+        selectedActivityId: string;
+        assessmentOptions: Array<{ type: string; label: string; preview: string; recommended: boolean }>;
+        selectedAssessmentType?: string;
+      }>;
+    };
+
+    expect(blueprint.lessonTitle).toBe("HTTP Planned ICT Week");
+    expect(blueprint.sessions).toHaveLength(5);
+    expect(blueprint.sessions[0]!.selectedActivityId).toBe("http-s1-a");
+    expect(blueprint.sessions[0]!.selectedAssessmentType).toBe("exit-ticket");
+    expect(blueprint.sessions[0]!.assessmentOptions).toHaveLength(5);
+    expect(blueprint.sessions[4]!.mode).toBe("non-instructional");
+    expect(blueprint.sessions[4]!.nonInstructionalReason).toBe("Division Seminar");
+
+    // Step 2: Teacher tweaks Session 1 objectives, switches activity & assessment, and Approves & Generates DLL
+    const teacherEditedObjectives = [
+      "• Classify three ICT productivity tools accurately.",
+      "• Execute workstation setup steps safely with a partner.",
+      "• Demonstrate cooperative problem-solving during lab work.",
+    ].join("\n");
+
+    const approvedBlueprint = {
+      ...blueprint,
+      lessonTitle: "Approved HTTP ICT DLL",
+      sessions: blueprint.sessions.map((s) =>
+        s.sessionNumber === 1
+          ? {
+              ...s,
+              learningObjectives: teacherEditedObjectives,
+              selectedActivityId: "http-s1-b",
+              selectedAssessmentType: "checklist",
+            }
+          : s,
+      ),
+    };
+
+    const genRes = await fetch(`${baseUrl}/api/dlls/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "Grade 7 - Mabini",
+        classroomContext: {
+          periodMinutes: 60,
+          facility: "computer-lab",
+          modality: "face-to-face",
+        },
+        sessions,
+        blueprint: approvedBlueprint,
+      }),
+    });
+    expect(genRes.status).toBe(201);
+    const created = (await genRes.json()) as {
+      id: string;
+      lessonTitle: string;
+      sessions: Array<{
+        sessionNumber: number;
+        learningObjectives: string;
+        selectedActivityTitle?: string;
+        selectedAssessmentType?: string;
+      }>;
+    };
+
+    expect(seenPrompts).toHaveLength(2);
+    expect(seenPrompts[1]).toContain("Approved Lesson Blueprint");
+    expect(seenPrompts[1]).toContain("Hands-On Lab Relay 1");
+    expect(seenPrompts[1]).toContain("Observation / Skill Checklist");
+
+    expect(created.lessonTitle).toBe("Approved HTTP ICT DLL");
+    expect(created.sessions[0]!.learningObjectives).toBe(teacherEditedObjectives);
+    expect(created.sessions[0]!.selectedActivityTitle).toBe("Hands-On Lab Relay 1");
+    expect(created.sessions[0]!.selectedAssessmentType).toBe("checklist");
+
+    // Verify persistence via GET /api/dlls/:id and valid .docx export
+    const fetchedRes = await fetch(`${baseUrl}/api/dlls/${encodeURIComponent(created.id)}`);
+    expect(fetchedRes.status).toBe(200);
+    const fetched = (await fetchedRes.json()) as typeof created;
+    expect(fetched.sessions[0]!.selectedActivityTitle).toBe("Hands-On Lab Relay 1");
+    expect(fetched.sessions[0]!.selectedAssessmentType).toBe("checklist");
+
+    const docxRes = await fetch(`${baseUrl}/api/dlls/${encodeURIComponent(created.id)}/docx`);
+    expect(docxRes.status).toBe(200);
+    const docXml = readZipEntry(
+      Buffer.from(await docxRes.arrayBuffer()),
+      "word/document.xml",
+    ).toString("utf8");
+    expect(docXml).toContain("Approved HTTP ICT DLL");
+    expect(docXml).toContain("Execute workstation setup steps safely with a partner.");
+    const tables = extractTableCellTexts(docXml);
+    expect(tables[1]![4]![1]).toBe("");
+    for (let col = 1; col <= 5; col++) {
+      expect(tables[4]![2]![col]).toBe("");
+    }
+  });
 });
