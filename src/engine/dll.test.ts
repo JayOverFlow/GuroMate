@@ -1299,4 +1299,184 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
       expect(tables[4]![2]![col]).toBe("");
     }
   });
+
+  it("runs deterministic DO 016 Alignment Check with zero extra AI calls on structurally valid output, at most 1 auto-repair retry on malformed or incomplete output, and live recomputation on saveDll", async () => {
+    const dataDir = await makeTempDir();
+    const ict = (
+      await createGuroMateEngine({
+        dataDir,
+        templatesDir: process.cwd(),
+      }).listCurriculum({ gradeLevel: 7, component: "ICT" })
+    )[0]!;
+
+    const sessionsInput = [1, 2, 3, 4, 5].map((n) => ({
+      sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+      mode: n === 5 ? ("non-instructional" as const) : ("instructional" as const),
+      competencyIds: n === 5 ? [] : [ict.id],
+      ...(n === 5 ? { nonInstructionalReason: "Holiday" } : {}),
+    }));
+
+    const buildValidSession = (n: number, opts?: { omitSoft?: boolean }) => ({
+      sessionNumber: n,
+      learningObjectives: [
+        `• Identify ICT sector principle ${n} accurately.`,
+        `• Demonstrate safe lab task ${n} following OHS rules.`,
+        `• Express responsible teamwork during session ${n}.`,
+      ].join("\n"),
+      preLesson: `Pre-lesson activity: “Warm-up ${n}” — Check well-being and share objectives.`,
+      lessonFlow: `Station Activity ${n}: Model steps and facilitate paired hands-on practice.`,
+      learningResources: opts?.omitSoft
+        ? "• Projector and slides"
+        : "• Projector and slides\n• Emergency/offline backup: Printed visual cards and chalkboard diagram",
+      integrationAndContextualization: `Philippine local workplace link ${n}.`,
+      formativeAssessment: opts?.omitSoft
+        ? `Short quiz for session ${n}.`
+        : `Observation / Skill Checklist for session ${n}. Learners raise help cards for guidance and teacher feedback. Accommodations: small-group option and visual cue cards.`,
+      extendedLearningOpportunities: `Practice task ${n} at home.`,
+    });
+
+    // 1. Structurally valid DLL with soft warnings makes ZERO extra AI calls
+    const softWarnCalls: AiGenerateRequest[] = [];
+    const softWarnEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          softWarnCalls.push(req);
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Soft Warning DLL",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) =>
+                buildValidSession(n, { omitSoft: n === 1 }),
+              ),
+            }),
+            model: "mock-model",
+          };
+        },
+      },
+    });
+
+    const softDll = await softWarnEngine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: sessionsInput,
+    });
+    expect(softWarnCalls).toHaveLength(1);
+    expect(softDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(softDll.alignmentCheck?.passed).toBe(false);
+    expect(softDll.alignmentCheck?.autoRepaired).toBe(false);
+    expect(
+      softDll.alignmentCheck?.items.some(
+        (i) => i.code === "emergency-resources" && i.severity === "warning",
+      ),
+    ).toBe(true);
+    expect(
+      softDll.alignmentCheck?.items.some(
+        (i) => i.code === "formative-support" && i.severity === "warning",
+      ),
+    ).toBe(true);
+
+    // 2. Editing and saving recomputes alignmentCheck deterministically without blocking export
+    const fixedDll = await softWarnEngine.saveDll({
+      ...softDll,
+      sessions: [
+        {
+          ...softDll.sessions[0],
+          learningResources:
+            "• Projector and slides\n• Emergency/offline backup: Printed handouts and chalkboard",
+          formativeAssessment:
+            "Exit Ticket measuring all 3 objectives. Learners raise help cards for teacher feedback. Accommodations: oral response and visual cues.",
+        },
+        softDll.sessions[1],
+        softDll.sessions[2],
+        softDll.sessions[3],
+        softDll.sessions[4],
+      ],
+    });
+    expect(fixedDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(fixedDll.alignmentCheck?.passed).toBe(true);
+    const exportedFixed = await softWarnEngine.exportDllDocx(fixedDll.id);
+    expect(exportedFixed.buffer.length).toBeGreaterThan(0);
+
+    // 3. Malformed JSON on initial generation triggers EXACTLY 1 repair retry
+    const malformedCalls: AiGenerateRequest[] = [];
+    const malformedEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          malformedCalls.push(req);
+          if (malformedCalls.length === 1) {
+            return { text: "NOT VALID JSON {{{", model: "mock-model" };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Repaired From Malformed JSON",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) => buildValidSession(n)),
+            }),
+            model: "mock-model",
+          };
+        },
+      },
+    });
+    const repairedJsonDll = await malformedEngine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: sessionsInput,
+    });
+    expect(malformedCalls).toHaveLength(2);
+    expect(repairedJsonDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(repairedJsonDll.alignmentCheck?.passed).toBe(true);
+    expect(repairedJsonDll.alignmentCheck?.autoRepaired).toBe(true);
+
+    // 4. Missing required structural fields triggers EXACTLY 1 repair retry and stops even if soft warnings remain
+    const incompleteCalls: AiGenerateRequest[] = [];
+    const incompleteEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          incompleteCalls.push(req);
+          if (incompleteCalls.length === 1) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "Incomplete Initial DLL",
+                references: "MATATAG TLE 7 ICT CG",
+                sessions: [1, 2, 3, 4].map((n) =>
+                  n === 2
+                    ? { ...buildValidSession(n), lessonFlow: "", formativeAssessment: "" }
+                    : buildValidSession(n),
+                ),
+              }),
+              model: "mock-model",
+            };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Incomplete Initial DLL",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) =>
+                buildValidSession(n, { omitSoft: n === 2 }),
+              ),
+            }),
+            model: "mock-model",
+          };
+        },
+      },
+    });
+    const repairedIncompleteDll = await incompleteEngine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: sessionsInput,
+    });
+    expect(incompleteCalls).toHaveLength(2);
+    expect(incompleteCalls[1]!.prompt).toMatch(/Session 2/i);
+    expect(repairedIncompleteDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(repairedIncompleteDll.alignmentCheck?.passed).toBe(false);
+    expect(repairedIncompleteDll.alignmentCheck?.autoRepaired).toBe(true);
+    expect(repairedIncompleteDll.sessions[1].lessonFlow).not.toBe("");
+    const exportedRepaired = await incompleteEngine.exportDllDocx(
+      repairedIncompleteDll.id,
+    );
+    expect(exportedRepaired.buffer.length).toBeGreaterThan(0);
+  });
 });

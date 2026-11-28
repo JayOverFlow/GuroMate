@@ -1,6 +1,7 @@
 import { useEffect, useId } from "react";
 import { ClassroomContextFieldset } from "../components/ClassroomContextFieldset";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Do016AlignmentBanner } from "../components/Do016AlignmentBanner";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
 import { ReferenceMaterialInput } from "../components/ReferenceMaterialInput";
@@ -81,6 +82,7 @@ export function DllWorkspace({
     status,
     startNewDll,
     draftDll,
+    alignmentCheck,
     isDirty,
     derivedDlpCount,
     viewMode,
@@ -888,6 +890,12 @@ export function DllWorkspace({
             </div>
 
             {/* 5-Session Quick Strip (hidden in Markdown Web View) */}
+            {alignmentCheck && (
+              <Do016AlignmentBanner
+                alignmentCheck={alignmentCheck}
+                hasUnsavedEdits={isDirty}
+              />
+            )}
             {viewMode === "edit" && (
               <div className="grid grid-cols-1 md:grid-cols-5 gap-gutter-md items-stretch">
                 {draftDll.sessions.map((session) => (

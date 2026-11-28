@@ -288,6 +288,32 @@ export interface DllIntentions {
   learnerContext: string;
 }
 
+export type AlignmentCheckSeverity = "pass" | "warning" | "error";
+
+export type AlignmentCheckCode =
+  | "structure"
+  | "objectives"
+  | "emergency-resources"
+  | "formative-support"
+  | "dlp-pacing"
+  | "dll-dlp-fidelity";
+
+export interface AlignmentCheckItem {
+  code: AlignmentCheckCode;
+  label: string;
+  severity: AlignmentCheckSeverity;
+  message: string;
+  sessionNumber?: SessionNumber;
+}
+
+export interface AlignmentCheckResult {
+  passed: boolean;
+  structuralValid: boolean;
+  autoRepaired: boolean;
+  checkedAt: string;
+  items: AlignmentCheckItem[];
+}
+
 export interface DailyLessonLog {
   id: string;
   createdAt: string;
@@ -299,6 +325,7 @@ export interface DailyLessonLog {
   classroomContext?: ClassroomContext;
   referenceMaterial?: ReferenceMaterial;
   aiDeclaration?: string;
+  alignmentCheck?: AlignmentCheckResult;
   promptNotes: string;
   intentions: DllIntentions;
   sessions: [
@@ -376,6 +403,7 @@ export interface DailyLessonPlan {
   classroomContext?: ClassroomContext;
   referenceMaterial?: ReferenceMaterial;
   aiDeclaration?: string;
+  alignmentCheck?: AlignmentCheckResult;
   selectedActivityTitle?: string;
   selectedActivitySummary?: string;
   selectedAssessmentType?: FormativeAssessmentType;
