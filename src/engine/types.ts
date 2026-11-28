@@ -195,6 +195,7 @@ export interface DailyLessonLog {
   learningAreas: string;
   gradeAndSection: string;
   references: string;
+  aiDeclaration?: string;
   promptNotes: string;
   intentions: DllIntentions;
   sessions: [
@@ -245,6 +246,7 @@ export interface DailyLessonPlan {
   learningAreas: string;
   gradeAndSection: string;
   references: string;
+  aiDeclaration?: string;
   promptNotes: string;
   intentions: DlpIntentions;
   preLesson: DlpActivityPair;

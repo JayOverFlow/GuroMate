@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -629,5 +629,108 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(standaloneMd).toContain(
       "### Reflections\n- **Teacher's Activity:** Pacing worked well.\n- **Student's Activity:** Requested extra practice.\n",
     );
+  });
+
+  it("auto-populates DO 003 Annex A Declaration of AI Use on generated DLPs, persists per-lesson edits across Markdown and .docx, and falls back cleanly for legacy saved DLPs", async () => {
+    const dataDir = await makeTempDir();
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText() {
+        return {
+          text: JSON.stringify({
+            lessonTitle: "DO 003 AI Declaration DLP",
+            references: "MATATAG TLE 7 CG",
+            learningObjectives: "• Identify safe ICT practices.",
+            preLesson: { teacherActivity: "Greet and hook.", studentActivity: "Respond." },
+            lessonFlow: { teacherActivity: "Model safe practices.", studentActivity: "Practice in pairs." },
+            learningResources: { teacherActivity: "• Slides", studentActivity: "• Checklist" },
+            integrationAndContextualization: { teacherActivity: "Local tech link.", studentActivity: "" },
+            formativeAssessment: { teacherActivity: "Check rubric.", studentActivity: "Demonstrate steps." },
+            extendedLearningOpportunities: { teacherActivity: "Home audit.", studentActivity: "" },
+          }),
+          model: "claude-sonnet-4-5",
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+    await engine.saveSettings({
+      ai: {
+        aiProvider: "anthropic",
+        apiKey: "ant-test-key",
+        baseUrl: "https://api.anthropic.com/v1",
+        modelId: "claude-sonnet-4-5",
+      },
+    });
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const created = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Rizal",
+      competencyIds: [ict.id],
+    });
+
+    expect(created.aiDeclaration).toBeDefined();
+    expect(created.aiDeclaration).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(created.aiDeclaration).toMatch(/Annex A/i);
+    expect(created.aiDeclaration).toContain("Anthropic (claude-sonnet-4-5)");
+    expect(created.aiDeclaration).toMatch(/auxiliary/i);
+    expect(created.aiDeclaration).toMatch(/review|validat/i);
+    expect(created.aiDeclaration).toMatch(/no confidential learner/i);
+    expect(created.aiDeclaration).not.toContain("{aiTool}");
+
+    const generatedMd = await readFile(
+      path.join(dataDir, "dlps", `${created.id}.md`),
+      "utf8",
+    );
+    expect(generatedMd).toContain(`- **Declaration of AI Use:** ${created.aiDeclaration}`);
+
+    const customDeclaration =
+      "Declaration of AI Use (DO 003, s. 2026 Annex A): Drafted with Anthropic (claude-sonnet-4-5), reviewed and adapted by teacher, with no confidential learner PII shared.";
+    const edited = await engine.saveDlp({
+      ...created,
+      aiDeclaration: `  ${customDeclaration}  `,
+    });
+    expect(edited.aiDeclaration).toBe(customDeclaration);
+
+    const editedMd = await readFile(
+      path.join(dataDir, "dlps", `${created.id}.md`),
+      "utf8",
+    );
+    expect(editedMd).toContain(`- **Declaration of AI Use:** ${customDeclaration}`);
+
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+
+    const editedDocx = await engine.exportDlpDocx(created.id);
+    const editedTables = extractTableCellTexts(
+      readZipEntry(editedDocx.buffer, "word/document.xml").toString("utf8"),
+    );
+    expect(editedTables[0]![7]![1]).toBe(customDeclaration);
+
+    // Legacy saved DLP lacking aiDeclaration falls back cleanly to DO 003 Annex A statement
+    const legacyDlp: Omit<DailyLessonPlan, "aiDeclaration"> = {
+      ...created,
+      id: "dlp-legacy-1",
+      lessonTitle: "Legacy Saved DLP",
+    };
+    delete (legacyDlp as Partial<DailyLessonPlan>).aiDeclaration;
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "dlps.json"),
+      JSON.stringify([legacyDlp], null, 2),
+      "utf8",
+    );
+
+    const legacyDocx = await engine.exportDlpDocx("dlp-legacy-1");
+    const legacyTables = extractTableCellTexts(
+      readZipEntry(legacyDocx.buffer, "word/document.xml").toString("utf8"),
+    );
+    expect(legacyTables[0]![7]![1]).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(legacyTables[0]![7]![1]).toContain("Anthropic (claude-sonnet-4-5)");
+    expect(legacyTables[0]![7]![1]).not.toContain("{aiTool}");
   });
 });

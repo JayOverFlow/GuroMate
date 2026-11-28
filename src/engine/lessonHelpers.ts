@@ -1,8 +1,65 @@
+import { AI_PROVIDER_MAP } from "./providers";
 import type {
+  AiProviderSettings,
   BudgetOfWorkInfo,
   CurriculumCompetency,
+  TeacherProfileSettings,
   TleComponent,
 } from "./types";
+
+const LEGACY_AI_DECLARATION =
+  "This lesson plan was developed using AI and subsequently reviewed for accuracy and alignment with curriculum standards.";
+
+export const DEFAULT_AI_DECLARATION_TEMPLATE =
+  "Declaration of AI Use (DepEd Order No. 003, s. 2026, Annex A): {aiTool} was used solely as an auxiliary drafting aid under teacher direction. All lesson content was critically reviewed, edited, and validated by the teacher against DepEd curriculum standards and learner needs, and no confidential learner information or personal data was shared with the AI platform.";
+
+/** Formats the active AI provider and model for DO 003, s. 2026 Annex A disclosure. */
+export function formatAiToolLabel(
+  aiSettings?: AiProviderSettings,
+  responseModel?: string,
+): string {
+  const model = responseModel?.trim() || aiSettings?.modelId.trim() || "";
+  const providerLabel = aiSettings
+    ? (AI_PROVIDER_MAP.get(aiSettings.aiProvider)?.label ?? aiSettings.aiProvider)
+    : "";
+
+  if (providerLabel && model) return `${providerLabel} (${model})`;
+  if (model) return model;
+  if (providerLabel) return `${providerLabel} AI`;
+  return "An AI drafting tool";
+}
+
+/** Composes a DO 003, s. 2026 Annex A Declaration of AI Use from a template and active AI configuration. */
+export function composeAiDeclaration(params: {
+  template?: string;
+  aiSettings?: AiProviderSettings;
+  responseModel?: string;
+}): string {
+  const rawTemplate = params.template?.trim() ?? "";
+  const baseTemplate =
+    !rawTemplate || rawTemplate === LEGACY_AI_DECLARATION
+      ? DEFAULT_AI_DECLARATION_TEMPLATE
+      : rawTemplate;
+
+  const toolLabel = formatAiToolLabel(params.aiSettings, params.responseModel);
+  return baseTemplate.replace(/\{aiTool\}/g, toolLabel);
+}
+
+/** Resolves the Declaration of AI Use injected into Table 0 Row 7 on .docx export. */
+export function resolveExportAiDeclaration(
+  lessonAiDeclaration: string | undefined,
+  profile: TeacherProfileSettings,
+  aiSettings?: AiProviderSettings,
+): string {
+  const perLesson = lessonAiDeclaration?.trim();
+  if (perLesson) {
+    return perLesson;
+  }
+  return composeAiDeclaration({
+    template: profile.aiDeclaration,
+    aiSettings,
+  });
+}
 
 export function formatComponentLabel(component: TleComponent): string {
   return component === "SHS_CORE" ? "SHS Core" : component;

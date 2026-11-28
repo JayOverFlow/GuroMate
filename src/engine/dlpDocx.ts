@@ -3,7 +3,9 @@ import {
   buildIntentionsStandardsCell,
   replaceCellText,
 } from "./dllDocx";
+import { resolveExportAiDeclaration } from "./lessonHelpers";
 import type {
+  AiProviderSettings,
   DailyLessonPlan,
   DlpActivityPair,
   TeacherProfileSettings,
@@ -24,7 +26,13 @@ export function injectDlpIntoDocumentXml(
   documentXml: string,
   dlp: DailyLessonPlan,
   profile: TeacherProfileSettings,
+  aiSettings?: AiProviderSettings,
 ): string {
+  const aiDeclaration = resolveExportAiDeclaration(
+    dlp.aiDeclaration,
+    profile,
+    aiSettings,
+  );
   const tableUpdates: Array<Map<string, (tc: string) => string>> = [
     // Table 0: Header metadata
     new Map([
@@ -35,7 +43,7 @@ export function injectDlpIntoDocumentXml(
       ["4:1", (tc) => replaceCellText(tc, dlp.gradeAndSection)],
       ["5:1", (tc) => replaceCellText(tc, "1")],
       ["6:1", (tc) => replaceCellText(tc, dlp.references)],
-      ["7:1", (tc) => replaceCellText(tc, profile.aiDeclaration)],
+      ["7:1", (tc) => replaceCellText(tc, aiDeclaration)],
     ]),
     // Table 1: Intentions (Standards, Learning Objectives, blank Learner Context)
     new Map([
