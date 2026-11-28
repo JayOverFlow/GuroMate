@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { evaluateDlpAlignment } from "../engine/alignmentCheck";
 import { DEFAULT_CLASSROOM_CONTEXT } from "../engine/lessonHelpers";
 import type {
   ClassSection,
@@ -369,6 +370,22 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     () => (draftDlp ? resolveDlpLineage(draftDlp, dlls) : null),
     [draftDlp, dlls],
   );
+
+  const alignmentCheck = useMemo(() => {
+    if (!savedDlp) return null;
+    if (savedDlp.alignmentCheck) return savedDlp.alignmentCheck;
+    const parentSession =
+      savedDlp.sourceDllId && savedDlp.sourceSessionNumber
+        ? dlls
+            .find((d) => d.id === savedDlp.sourceDllId)
+            ?.sessions.find(
+              (s) =>
+                s.sessionNumber === savedDlp.sourceSessionNumber &&
+                s.mode === "instructional",
+            )
+        : undefined;
+    return evaluateDlpAlignment(savedDlp, { parentSession });
+  }, [savedDlp, dlls]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty, draftDlp?.lessonTitle);
@@ -819,6 +836,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     setSelectedDlpId,
     startNewDlp,
     draftDlp,
+    alignmentCheck,
     isDirty,
     draftLineage,
     viewMode,

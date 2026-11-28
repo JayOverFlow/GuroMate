@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { evaluateDllAlignment } from "../engine/alignmentCheck";
 import { DEFAULT_CLASSROOM_CONTEXT } from "../engine/lessonHelpers";
 import {
   type ClassSection,
@@ -354,6 +355,11 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     () => (draftDll ? countDerivedDlps(draftDll.id, dlps) : 0),
     [draftDll, dlps],
   );
+
+  const alignmentCheck = useMemo(() => {
+    if (!savedDll) return null;
+    return savedDll.alignmentCheck ?? evaluateDllAlignment(savedDll);
+  }, [savedDll]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty, draftDll?.lessonTitle);
@@ -845,6 +851,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setSelectedDllId,
     startNewDll,
     draftDll,
+    alignmentCheck,
     isDirty,
     derivedDlpCount,
     viewMode,

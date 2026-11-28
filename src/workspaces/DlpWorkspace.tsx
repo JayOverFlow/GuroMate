@@ -2,6 +2,7 @@ import { useEffect, useId } from "react";
 import { ClassroomContextFieldset } from "../components/ClassroomContextFieldset";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DlpLineageBadge } from "../components/DlpLineageBadge";
+import { Do016AlignmentBanner } from "../components/Do016AlignmentBanner";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
 import { ReferenceMaterialInput } from "../components/ReferenceMaterialInput";
@@ -73,6 +74,7 @@ export function DlpWorkspace({
     status,
     startNewDlp,
     draftDlp,
+    alignmentCheck,
     isDirty,
     draftLineage,
     viewMode,
@@ -897,6 +899,14 @@ export function DlpWorkspace({
               </button>
             </div>
           </div>
+
+          {/* DO 016 Alignment Check */}
+          {alignmentCheck && (
+            <Do016AlignmentBanner
+              alignmentCheck={alignmentCheck}
+              hasUnsavedEdits={isDirty}
+            />
+          )}
 
           {/* View Mode Tabs */}
           <div className="flex flex-col gap-gutter-md">

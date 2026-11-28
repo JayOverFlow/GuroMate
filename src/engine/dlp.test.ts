@@ -1369,4 +1369,173 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(derivedDlp.selectedAssessmentType).toBe("demo-rubric");
     expect(derivedDlp.classroomContext?.periodMinutes).toBe(120);
   });
+
+  it("runs deterministic DO 016 Alignment Check for DLPs with zero extra AI calls on valid output, at most 1 repair retry on missing paired fields, and live recomputation on saveDlp", async () => {
+    const dataDir = await makeTempDir();
+    const ict = (
+      await createGuroMateEngine({
+        dataDir,
+        templatesDir: process.cwd(),
+      }).listCurriculum({ gradeLevel: 7, component: "ICT" })
+    )[0]!;
+
+    const makeDlpJson = (overrides: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        lessonTitle: "60-Min ICT Lab DLP",
+        references: "MATATAG TLE 7 ICT CG",
+        learningObjectives: [
+          "• Identify core ICT tools with 90% accuracy.",
+          "• Demonstrate safe workstation setup following OHS rules.",
+          "• Practice responsible lab collaboration.",
+        ].join("\n"),
+        preLesson: {
+          teacherActivity: "(10 min) Greeting, prayer, attendance, well-being check, hook, and verbatim objectives.",
+          studentActivity: "(10 min) Join opening routine, share well-being check-in, and read objectives.",
+        },
+        lessonFlow: {
+          teacherActivity: "(35 min) Present key points (10 min); guide questions and lab practice (20 min); synthesis (5 min).",
+          studentActivity: "(35 min) Answer guide questions, complete guided lab practice, and share takeaways.",
+        },
+        learningResources: {
+          teacherActivity: "• Slides, workstation\n• Emergency/offline backup: Printed visual cards and chalkboard",
+          studentActivity: "• Activity sheet\n• Emergency/offline backup: Paper task cards",
+        },
+        integrationAndContextualization: {
+          teacherActivity: "Connect to local barangay tech services.",
+          studentActivity: "",
+        },
+        formativeAssessment: {
+          teacherActivity: "(15 min) Observation checklist with rubric key. Learners raise help cards for feedback. Accommodations: oral option and visual cues.",
+          studentActivity: "(15 min) Complete checklist demonstration and use help cards when seeking guidance.",
+        },
+        extendedLearningOpportunities: {
+          teacherActivity: "List three safe device habits practiced at home.",
+          studentActivity: "",
+        },
+        ...overrides,
+      });
+
+    // 1. Compliant DLP makes ZERO extra AI calls and passes all DO 016 checks
+    const validCalls: AiGenerateRequest[] = [];
+    const validEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          validCalls.push(req);
+          return { text: makeDlpJson(), model: "mock-dlp-model" };
+        },
+      },
+    });
+    const compliantDlp = await validEngine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Rizal",
+      competencyIds: [ict.id],
+      classroomContext: {
+        periodMinutes: 60,
+        facility: "computer-lab",
+        modality: "face-to-face",
+      },
+    });
+    expect(validCalls).toHaveLength(1);
+    expect(compliantDlp.alignmentCheck?.structuralValid).toBe(true);
+    expect(compliantDlp.alignmentCheck?.passed).toBe(true);
+    expect(compliantDlp.alignmentCheck?.autoRepaired).toBe(false);
+
+    // 2. Missing paired Student's Activity triggers EXACTLY 1 repair retry; stops even when repair leaves period mismatch + missing emergency backup
+    const repairCalls: AiGenerateRequest[] = [];
+    const repairEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          repairCalls.push(req);
+          if (repairCalls.length === 1) {
+            return {
+              text: makeDlpJson({
+                lessonFlow: {
+                  teacherActivity: "(35 min) Demonstrate setup.",
+                  studentActivity: "",
+                },
+              }),
+              model: "mock-dlp-model",
+            };
+          }
+          return {
+            text: makeDlpJson({
+              preLesson: {
+                teacherActivity: "(10 min) Routine and hook.",
+                studentActivity: "(10 min) Join routine.",
+              },
+              lessonFlow: {
+                teacherActivity: "(25 min) Demonstrate setup and guide practice.",
+                studentActivity: "(25 min) Follow setup steps in pairs.",
+              },
+              learningResources: {
+                teacherActivity: "• Projector and slides",
+                studentActivity: "• Laptop",
+              },
+              formativeAssessment: {
+                teacherActivity: "(10 min) Short quiz without accommodations.",
+                studentActivity: "(10 min) Complete quiz.",
+              },
+            }),
+            model: "mock-dlp-model",
+          };
+        },
+      },
+    });
+
+    const repairedDlp = await repairEngine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Rizal",
+      competencyIds: [ict.id],
+      classroomContext: {
+        periodMinutes: 60,
+        facility: "computer-lab",
+        modality: "face-to-face",
+      },
+    });
+    expect(repairCalls).toHaveLength(2);
+    expect(repairCalls[1]!.prompt).toMatch(/Lesson Flow \(Student's Activity\)/i);
+    expect(repairedDlp.alignmentCheck?.structuralValid).toBe(true);
+    expect(repairedDlp.alignmentCheck?.passed).toBe(false);
+    expect(repairedDlp.alignmentCheck?.autoRepaired).toBe(true);
+    expect(
+      repairedDlp.alignmentCheck?.items.some(
+        (i) => i.code === "dlp-pacing" && i.severity === "warning" && i.message.includes("45"),
+      ),
+    ).toBe(true);
+    expect(
+      repairedDlp.alignmentCheck?.items.some(
+        (i) => i.code === "emergency-resources" && i.severity === "warning",
+      ),
+    ).toBe(true);
+    expect(
+      repairedDlp.alignmentCheck?.items.some(
+        (i) => i.code === "formative-support" && i.severity === "warning",
+      ),
+    ).toBe(true);
+
+    // 3. Inline edit + saveDlp refreshes alignmentCheck to green pass and never blocks .docx export
+    const savedFixed = await repairEngine.saveDlp({
+      ...repairedDlp,
+      lessonFlow: {
+        teacherActivity: "(40 min) Demonstrate setup and guide practice.",
+        studentActivity: "(40 min) Follow setup steps in pairs.",
+      },
+      learningResources: {
+        teacherActivity: "• Projector and slides\n• Emergency/offline backup: Printed visual cards",
+        studentActivity: "• Laptop\n• Emergency/offline backup: Paper task cards",
+      },
+      formativeAssessment: {
+        teacherActivity: "(10 min) Short quiz with Answer Key. Raise help cards for teacher feedback. Accommodations: oral option and visual cues.",
+        studentActivity: "(10 min) Complete quiz and raise help cards when needing guidance.",
+      },
+    });
+    expect(savedFixed.alignmentCheck?.structuralValid).toBe(true);
+    expect(savedFixed.alignmentCheck?.passed).toBe(true);
+    const exported = await repairEngine.exportDlpDocx(savedFixed.id);
+    expect(exported.buffer.length).toBeGreaterThan(0);
+  });
 });

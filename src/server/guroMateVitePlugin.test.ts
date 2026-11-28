@@ -1970,4 +1970,319 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     expect(seenPrompts.at(-1)).toContain("120 minutes");
     expect(seenPrompts.at(-1)).toContain("Multimeter and breadboard");
   });
+
+  it("enforces deterministic DO 016 Alignment Check, single auto-repair guardrail, non-blocking .docx export, and live refresh on PUT over HTTP", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-align-"));
+    tempDirs.push(dataDir);
+
+    let scenario: "dll-compliant" | "dll-repair-soft" | "dlp-malformed-mismatch" =
+      "dll-compliant";
+    let callCount = 0;
+
+    const compliantDllSession = (n: number, omitSoft = false) => ({
+      sessionNumber: n,
+      learningObjectives: [
+        `• Explain ICT safety standard ${n} accurately.`,
+        `• Perform guided tool setup ${n} observing OHS/PPE.`,
+        `• Practice respectful peer teamwork ${n}.`,
+      ].join("\n"),
+      preLesson: `Pre-lesson activity: “Safety Pulse ${n}” — Well-being check and objectives.`,
+      lessonFlow: `Shop Station ${n}: Teacher demo followed by collaborative hands-on practice.`,
+      learningResources: omitSoft
+        ? "• Projector and slides"
+        : "• Projector and slides\n• Emergency/offline backup: Printed visual cards and chalkboard",
+      integrationAndContextualization: `Barangay ICT shop link ${n}.`,
+      formativeAssessment: omitSoft
+        ? `Short quiz for session ${n}.`
+        : `Observation / Skill Checklist for session ${n}. Learners raise help cards for teacher feedback. Accommodations: oral explanation and small-group option.`,
+      extendedLearningOpportunities: `Inspect safe cables at home for session ${n}.`,
+    });
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText() {
+          callCount += 1;
+          if (scenario === "dll-compliant") {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "Compliant HTTP DLL",
+                references: "MATATAG TLE 7 ICT CG",
+                sessions: [1, 2, 3, 4, 5].map((n) => compliantDllSession(n)),
+              }),
+              model: "mock-align-model",
+            };
+          }
+          if (scenario === "dll-repair-soft") {
+            if (callCount === 1) {
+              // Missing required Lesson Flow on Session 2 -> triggers 1 repair retry
+              return {
+                text: JSON.stringify({
+                  lessonTitle: "Repaired HTTP DLL",
+                  references: "MATATAG TLE 7 ICT CG",
+                  sessions: [1, 2, 3, 4, 5].map((n) =>
+                    n === 2
+                      ? { ...compliantDllSession(n), lessonFlow: "" }
+                      : compliantDllSession(n),
+                  ),
+                }),
+                model: "mock-align-model",
+              };
+            }
+            // Repair fills Lesson Flow, but leaves soft warnings on Session 2 (no emergency backup, no accommodations)
+            return {
+              text: JSON.stringify({
+                lessonTitle: "Repaired HTTP DLL",
+                references: "MATATAG TLE 7 ICT CG",
+                sessions: [1, 2, 3, 4, 5].map((n) =>
+                  compliantDllSession(n, n === 2),
+                ),
+              }),
+              model: "mock-align-model",
+            };
+          }
+          // dlp-malformed-mismatch: 1st call malformed JSON -> 1 repair retry -> leaves period mismatch + missing emergency backup & accommodations
+          if (callCount === 1) {
+            return { text: "broken-json", model: "mock-align-model" };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Repaired HTTP DLP",
+              references: "MATATAG TLE 7 ICT CG",
+              learningObjectives: [
+                "• Explain ICT safety standard 1 accurately.",
+                "• Perform guided tool setup 1 observing OHS/PPE.",
+                "• Practice respectful peer teamwork 1.",
+              ].join("\n"),
+              preLesson: {
+                teacherActivity: "(10 min) Greeting, prayer, attendance, well-being check, hook, and objectives.",
+                studentActivity: "(10 min) Join opening routine and read objectives.",
+              },
+              lessonFlow: {
+                teacherActivity: "(30 min) Model tool setup and supervise paired station.",
+                studentActivity: "(30 min) Execute tool setup steps in pairs.",
+              },
+              learningResources: {
+                teacherActivity: "• Projector and slides",
+                studentActivity: "• Laptop",
+              },
+              integrationAndContextualization: {
+                teacherActivity: "Link to barangay repair technicians.",
+                studentActivity: "",
+              },
+              formativeAssessment: {
+                teacherActivity: "(10 min) Short quiz without accommodations.",
+                studentActivity: "(10 min) Answer quiz.",
+              },
+              extendedLearningOpportunities: {
+                teacherActivity: "Inspect home cords for safety.",
+                studentActivity: "",
+              },
+            }),
+            model: "mock-align-model",
+          };
+        },
+      },
+    });
+
+    const middleware = createGuroMateMiddleware(engine);
+    const server = createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 404;
+        res.end("Not Found");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const dllSessions = [1, 2, 3, 4, 5].map((n) => ({
+      sessionNumber: n,
+      mode: "instructional",
+      competencyIds: [ict.id],
+    }));
+
+    // 1. Compliant DLL -> zero extra AI calls (callCount === 1)
+    scenario = "dll-compliant";
+    callCount = 0;
+    const compliantRes = await fetch(`${baseUrl}/api/dlls/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "Grade 7 - Rizal",
+        sessions: dllSessions,
+      }),
+    });
+    expect(compliantRes.status).toBe(201);
+    const compliantDll = (await compliantRes.json()) as {
+      id: string;
+      alignmentCheck?: { passed: boolean; structuralValid: boolean; autoRepaired: boolean };
+    };
+    expect(callCount).toBe(1);
+    expect(compliantDll.alignmentCheck).toMatchObject({
+      passed: true,
+      structuralValid: true,
+      autoRepaired: false,
+    });
+
+    // 2. DLL missing required field -> exactly 1 repair retry -> soft warnings persisted -> PUT refreshes -> .docx exports cleanly
+    scenario = "dll-repair-soft";
+    callCount = 0;
+    const repairedDllRes = await fetch(`${baseUrl}/api/dlls/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "Grade 7 - Rizal",
+        sessions: dllSessions,
+      }),
+    });
+    expect(repairedDllRes.status).toBe(201);
+    const repairedDll = (await repairedDllRes.json()) as {
+      id: string;
+      sessions: Array<Record<string, unknown>>;
+      alignmentCheck?: {
+        passed: boolean;
+        structuralValid: boolean;
+        autoRepaired: boolean;
+        items: Array<{ code: string; severity: string; message: string }>;
+      };
+    };
+    expect(callCount).toBe(2);
+    expect(repairedDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(repairedDll.alignmentCheck?.passed).toBe(false);
+    expect(repairedDll.alignmentCheck?.autoRepaired).toBe(true);
+    expect(
+      repairedDll.alignmentCheck?.items.some(
+        (i) => i.code === "emergency-resources" && i.severity === "warning",
+      ),
+    ).toBe(true);
+    expect(
+      repairedDll.alignmentCheck?.items.some(
+        (i) => i.code === "formative-support" && i.severity === "warning",
+      ),
+    ).toBe(true);
+
+    // Export still works even with soft warnings
+    const dllDocxRes = await fetch(
+      `${baseUrl}/api/dlls/${encodeURIComponent(repairedDll.id)}/docx`,
+    );
+    expect(dllDocxRes.status).toBe(200);
+
+    // PUT /api/dlls/:id refreshes alignmentCheck live when teacher fixes warnings
+    const fixedSessions = repairedDll.sessions.map((s, idx) =>
+      idx === 1
+        ? {
+            ...s,
+            learningResources:
+              "• Projector\n• Emergency/offline backup: Printed visual cards",
+            formativeAssessment:
+              "Observation checklist with help cards for teacher feedback and visual/oral accommodations.",
+          }
+        : s,
+    );
+    const putDllRes = await fetch(
+      `${baseUrl}/api/dlls/${encodeURIComponent(repairedDll.id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...repairedDll, sessions: fixedSessions }),
+      },
+    );
+    expect(putDllRes.status).toBe(200);
+    const updatedDll = (await putDllRes.json()) as {
+      alignmentCheck?: { passed: boolean; structuralValid: boolean };
+    };
+    expect(updatedDll.alignmentCheck?.passed).toBe(true);
+    expect(updatedDll.alignmentCheck?.structuralValid).toBe(true);
+
+    // 3. DLP malformed JSON -> exactly 1 repair retry -> period mismatch (50 vs 60) + missing backup/accommodations -> PUT fixes all -> .docx exports
+    scenario = "dlp-malformed-mismatch";
+    callCount = 0;
+    const dlpGenRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "scratch",
+        gradeAndSection: "Grade 7 - Rizal",
+        classroomContext: {
+          periodMinutes: 60,
+          facility: "computer-lab",
+          modality: "face-to-face",
+        },
+        competencyIds: [ict.id],
+      }),
+    });
+    expect(dlpGenRes.status).toBe(201);
+    const createdDlp = (await dlpGenRes.json()) as {
+      id: string;
+      lessonFlow: { teacherActivity: string; studentActivity: string };
+      learningResources: { teacherActivity: string; studentActivity: string };
+      formativeAssessment: { teacherActivity: string; studentActivity: string };
+      alignmentCheck?: {
+        passed: boolean;
+        structuralValid: boolean;
+        autoRepaired: boolean;
+        items: Array<{ code: string; severity: string; message: string }>;
+      };
+    };
+    expect(callCount).toBe(2);
+    expect(createdDlp.alignmentCheck?.structuralValid).toBe(true);
+    expect(createdDlp.alignmentCheck?.passed).toBe(false);
+    expect(createdDlp.alignmentCheck?.autoRepaired).toBe(true);
+    expect(
+      createdDlp.alignmentCheck?.items.some(
+        (i) => i.code === "dlp-pacing" && i.severity === "warning" && i.message.includes("50"),
+      ),
+    ).toBe(true);
+    expect(
+      createdDlp.alignmentCheck?.items.some(
+        (i) => i.code === "emergency-resources" && i.severity === "warning",
+      ),
+    ).toBe(true);
+    expect(
+      createdDlp.alignmentCheck?.items.some(
+        (i) => i.code === "formative-support" && i.severity === "warning",
+      ),
+    ).toBe(true);
+
+    // .docx export is never blocked by soft warnings
+    const dlpDocxRes = await fetch(
+      `${baseUrl}/api/dlps/${encodeURIComponent(createdDlp.id)}/docx`,
+    );
+    expect(dlpDocxRes.status).toBe(200);
+
+    // PUT /api/dlps/:id resolves pacing, backup, and accommodation warnings live
+    const putDlpRes = await fetch(
+      `${baseUrl}/api/dlps/${encodeURIComponent(createdDlp.id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...createdDlp,
+          lessonFlow: {
+            teacherActivity: "(40 min) Model tool setup and supervise paired station.",
+            studentActivity: "(40 min) Execute tool setup steps in pairs.",
+          },
+          learningResources: {
+            teacherActivity: "• Projector\n• Emergency/offline backup: Printed visual cards",
+            studentActivity: "• Laptop\n• Emergency/offline backup: Paper cards",
+          },
+          formativeAssessment: {
+            teacherActivity:
+              "(10 min) Short quiz with Answer Key. Raise help cards for teacher feedback. Accommodations: oral option and visual cues.",
+            studentActivity: "(10 min) Complete quiz and raise help cards for guidance.",
+          },
+        }),
+      },
+    );
+    expect(putDlpRes.status).toBe(200);
+    const updatedDlp = (await putDlpRes.json()) as {
+      alignmentCheck?: { passed: boolean; structuralValid: boolean };
+    };
+    expect(updatedDlp.alignmentCheck?.passed).toBe(true);
+    expect(updatedDlp.alignmentCheck?.structuralValid).toBe(true);
+  });
 });
