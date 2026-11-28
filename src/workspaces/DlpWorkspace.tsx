@@ -5,6 +5,7 @@ import { DlpLineageBadge } from "../components/DlpLineageBadge";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
 import { ReferenceMaterialInput } from "../components/ReferenceMaterialInput";
+import { SessionBlueprintCard } from "../components/SessionBlueprintCard";
 import {
   formatClassroomContextSummary,
   formatLearningAreas,
@@ -103,6 +104,8 @@ export function DlpWorkspace({
     promptNotes,
     setPromptNotes,
     selectedCompetencyIds,
+    blueprint,
+    planning,
     generating,
     pickedCompetencyId,
     setPickedCompetencyId,
@@ -115,7 +118,12 @@ export function DlpWorkspace({
     validateField,
     addScratchCompetency,
     requestRemoveScratchCompetency,
-    handleGenerate,
+    handlePlanLesson,
+    updateBlueprintTitle,
+    updateBlueprintObjectives,
+    selectBlueprintActivity,
+    selectBlueprintAssessment,
+    handleApproveAndGenerate,
     updateDraftHeader,
     updateDraftIntentions,
     updateDraftActivity,
@@ -259,11 +267,12 @@ export function DlpWorkspace({
           Loading Daily Lesson Plans and Curriculum Catalog...
         </div>
       ) : !draftDlp ? (
-        /* Create New DLP Form */
+        /* Create New DLP: Step 1 Plan Lesson -> Step 2 Review Blueprint & Approve */
+        <div className="flex flex-col gap-gutter-lg">
         <form
           ref={formRef}
           noValidate
-          onSubmit={(e) => void handleGenerate(e)}
+          onSubmit={(e) => void handlePlanLesson(e)}
           className="flex flex-col gap-gutter-lg"
         >
           <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
@@ -620,32 +629,211 @@ export function DlpWorkspace({
             </fieldset>
           )}
 
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-end gap-gutter-sm">
             <button
               type="submit"
               disabled={
+                planning ||
                 generating ||
                 (builderMode === "derive" &&
                   (!deriveDllId || !selectedSourceSession))
               }
-              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              className={`inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded font-label text-label-lg focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60 ${
+                blueprint
+                  ? "bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low"
+                  : "bg-primary text-on-primary hover:bg-primary-container"
+              }`}
             >
               <span
                 className="material-symbols-outlined text-title-md"
                 aria-hidden="true"
               >
-                auto_awesome
+                {blueprint ? "refresh" : "edit_note"}
               </span>
               <span>
-                {generating
-                  ? "Generating DLP..."
-                  : builderMode === "derive"
-                    ? "Generate DLP from Session"
-                    : "Generate Standalone DLP"}
+                {planning
+                  ? "Planning Lesson..."
+                  : blueprint
+                    ? "Re-plan"
+                    : "Plan Lesson"}
               </span>
             </button>
           </div>
         </form>
+
+        {blueprint && (
+          <section
+            aria-labelledby={`${baseId}-blueprint-heading`}
+            className="bg-surface-container-lowest border-2 border-primary/40 rounded-md p-gutter-lg flex flex-col gap-gutter-md"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-gutter-md pb-gutter-sm border-b border-outline-variant">
+              <div className="flex flex-col gap-gutter-xs">
+                <h2
+                  id={`${baseId}-blueprint-heading`}
+                  className="font-title text-title-lg text-on-surface"
+                >
+                  {builderMode === "derive" ? "2." : "3."} Lesson Blueprint —
+                  Review &amp; Approve
+                </h2>
+                <p className="font-body text-body-sm text-on-surface-variant">
+                  {blueprint.lockedToParentSession ? (
+                    <>
+                      Inherited from parent DLL Session{" "}
+                      <strong className="text-on-surface">
+                        {blueprint.sourceSessionNumber}
+                      </strong>{" "}
+                      and strictly locked to prevent drift. Review the blueprint
+                      and click{" "}
+                      <strong className="text-on-surface">
+                        Approve &amp; Generate DLP
+                      </strong>{" "}
+                      to expand it into a classroom-ready paired plan.
+                    </>
+                  ) : (
+                    <>
+                      Best-fit{" "}
+                      <strong className="text-on-surface">(Recommended)</strong>{" "}
+                      activity and DO 8 Formative Assessment are pre-selected.
+                      Edit objectives, swap choices in one click, or click{" "}
+                      <strong className="text-on-surface">
+                        Approve &amp; Generate DLP
+                      </strong>{" "}
+                      to lock your plan.
+                    </>
+                  )}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-gutter-sm">
+                <button
+                  type="button"
+                  disabled={planning || generating}
+                  onClick={() => void handlePlanLesson()}
+                  className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    refresh
+                  </span>
+                  <span>{planning ? "Re-planning..." : "Re-plan"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={planning || generating}
+                  onClick={() => void handleApproveAndGenerate()}
+                  className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    auto_awesome
+                  </span>
+                  <span>
+                    {generating
+                      ? "Generating DLP..."
+                      : "Approve & Generate DLP"}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-bp-title`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Proposed Lesson Title
+              </label>
+              <input
+                id={`${baseId}-bp-title`}
+                type="text"
+                disabled={planning || generating}
+                value={blueprint.lessonTitle}
+                onChange={(e) => updateBlueprintTitle(e.target.value)}
+                className={INPUT_CLASS}
+              />
+            </div>
+
+            {blueprint.inheritedLearningResources && (
+              <div className="rounded border border-outline-variant bg-surface-container-low p-gutter-sm flex flex-col gap-gutter-xs">
+                <span className="font-label text-label-sm text-on-surface">
+                  Inherited Parent DLL Key Learning Resources (preserved in DLP
+                  with emergency/offline backup)
+                </span>
+                <p className="font-body text-body-sm text-on-surface-variant whitespace-pre-line">
+                  {blueprint.inheritedLearningResources}
+                </p>
+              </div>
+            )}
+
+            <SessionBlueprintCard
+              baseId={`${baseId}-bp-dlp`}
+              heading={
+                blueprint.sourceSessionNumber
+                  ? `Session ${blueprint.sourceSessionNumber} (Derived DLP)`
+                  : "Single-Session DLP"
+              }
+              components={blueprint.components}
+              progressionFocus={blueprint.progressionFocus}
+              learningObjectives={blueprint.learningObjectives}
+              activityOptions={blueprint.activityOptions}
+              selectedActivityId={blueprint.selectedActivityId}
+              assessmentOptions={blueprint.assessmentOptions}
+              selectedAssessmentType={blueprint.selectedAssessmentType}
+              disabled={planning || generating}
+              locked={Boolean(blueprint.lockedToParentSession)}
+              lockNotice={
+                blueprint.lockedToParentSession
+                  ? `Strictly locked to parent DLL Session ${blueprint.sourceSessionNumber}: Learning Objectives, chosen Learning Experience Activity, and Formative Assessment Type are inherited verbatim so your derived DLP stays aligned with your weekly DLL.`
+                  : undefined
+              }
+              onChangeObjectives={updateBlueprintObjectives}
+              onSelectActivity={selectBlueprintActivity}
+              onSelectAssessment={selectBlueprintAssessment}
+            />
+
+            <div className="flex flex-wrap items-center justify-end gap-gutter-sm pt-gutter-sm border-t border-outline-variant">
+              <button
+                type="button"
+                disabled={planning || generating}
+                onClick={() => void handlePlanLesson()}
+                className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  refresh
+                </span>
+                <span>{planning ? "Re-planning..." : "Re-plan"}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={planning || generating}
+                onClick={() => void handleApproveAndGenerate()}
+                className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  auto_awesome
+                </span>
+                <span>
+                  {generating
+                    ? "Generating DLP..."
+                    : "Approve & Generate DLP"}
+                </span>
+              </button>
+            </div>
+          </section>
+        )}
+        </div>
       ) : (
         /* Editing Saved DLP */
         <div className="flex flex-col gap-gutter-lg">

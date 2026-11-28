@@ -17,6 +17,8 @@ export interface SessionBlueprintCardProps {
   assessmentOptions: BlueprintAssessmentOption[];
   selectedAssessmentType?: FormativeAssessmentType;
   disabled?: boolean;
+  locked?: boolean;
+  lockNotice?: string;
   onChangeObjectives: (value: string) => void;
   onSelectActivity: (activityId: string) => void;
   onSelectAssessment: (assessmentType: FormativeAssessmentType) => void;
@@ -34,11 +36,14 @@ export function SessionBlueprintCard({
   assessmentOptions,
   selectedAssessmentType,
   disabled = false,
+  locked = false,
+  lockNotice,
   onChangeObjectives,
   onSelectActivity,
   onSelectAssessment,
 }: SessionBlueprintCardProps) {
   const objectivesId = `${baseId}-objectives`;
+  const controlsDisabled = disabled || locked;
 
   return (
     <article className="rounded-md border border-outline-variant bg-surface-container-lowest p-gutter-md flex flex-col gap-gutter-md">
@@ -52,6 +57,17 @@ export function SessionBlueprintCard({
               {formatLearningAreas(components)}
             </span>
           )}
+          {locked && (
+            <span className="inline-flex items-center gap-1 px-gutter-sm py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-label text-label-sm">
+              <span
+                className="material-symbols-outlined text-body-sm"
+                aria-hidden="true"
+              >
+                lock
+              </span>
+              <span>Locked to Parent DLL Session</span>
+            </span>
+          )}
         </div>
         {progressionFocus.trim() && (
           <span className="font-body text-body-sm text-on-surface-variant">
@@ -60,6 +76,18 @@ export function SessionBlueprintCard({
         )}
       </header>
 
+      {lockNotice && (
+        <div className="rounded border border-outline-variant bg-surface-container-low px-gutter-sm py-gutter-xs flex items-start gap-gutter-xs font-body text-body-sm text-on-surface-variant">
+          <span
+            className="material-symbols-outlined text-title-md text-primary shrink-0"
+            aria-hidden="true"
+          >
+            lock
+          </span>
+          <span>{lockNotice}</span>
+        </div>
+      )}
+
       {/* Inline Editable Learning Objectives */}
       <div className="flex flex-col gap-gutter-xs">
         <div className="flex flex-wrap items-center justify-between gap-gutter-xs">
@@ -67,7 +95,9 @@ export function SessionBlueprintCard({
             htmlFor={objectivesId}
             className="font-label text-label-md text-on-surface"
           >
-            Learning Objectives (3 SMART bullets, editable)
+            {locked
+              ? "Learning Objectives (locked to parent DLL Session)"
+              : "Learning Objectives (3 SMART bullets, editable)"}
           </label>
           <span className="font-body text-body-sm text-on-surface-variant">
             Cognitive → Psychomotor → Affective (no domain prefixes)
@@ -77,16 +107,22 @@ export function SessionBlueprintCard({
           id={objectivesId}
           rows={3}
           disabled={disabled}
+          readOnly={locked}
+          aria-readonly={locked || undefined}
           value={learningObjectives}
-          onChange={(e) => onChangeObjectives(e.target.value)}
-          className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+          onChange={(e) => {
+            if (!locked) onChangeObjectives(e.target.value);
+          }}
+          className="w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-low border border-outline-variant text-body-sm text-on-surface focus:border-primary focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60 read-only:opacity-85"
         />
       </div>
 
       {/* Learning Experience Activity Options */}
       <div className="flex flex-col gap-gutter-xs">
         <span className="font-label text-label-md text-on-surface">
-          Learning Experience Activity (choose one)
+          {locked
+            ? "Learning Experience Activity (locked to parent DLL Session)"
+            : "Learning Experience Activity (choose one)"}
         </span>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter-sm">
           {activityOptions.map((option) => {
@@ -95,10 +131,10 @@ export function SessionBlueprintCard({
               <button
                 key={option.id}
                 type="button"
-                disabled={disabled}
+                disabled={controlsDisabled}
                 aria-pressed={active}
                 onClick={() => onSelectActivity(option.id)}
-                className={`text-left rounded-md border p-gutter-sm flex flex-col gap-gutter-xs transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60 ${
+                className={`text-left rounded-md border p-gutter-sm flex flex-col gap-gutter-xs transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-75 ${
                   active
                     ? "bg-primary-container/25 border-primary text-on-surface"
                     : "bg-surface-container-low border-outline-variant text-on-surface hover:bg-surface-container"
@@ -131,7 +167,9 @@ export function SessionBlueprintCard({
       {/* Formative Assessment Type Selector (5 DO 8, s. 2015 types) */}
       <div className="flex flex-col gap-gutter-xs">
         <span className="font-label text-label-md text-on-surface">
-          Formative Assessment Type (choose one)
+          {locked
+            ? "Formative Assessment Type (locked to parent DLL Session)"
+            : "Formative Assessment Type (choose one)"}
         </span>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-gutter-xs">
           {assessmentOptions.map((option) => {
@@ -140,10 +178,10 @@ export function SessionBlueprintCard({
               <button
                 key={option.type}
                 type="button"
-                disabled={disabled}
+                disabled={controlsDisabled}
                 aria-pressed={active}
                 onClick={() => onSelectAssessment(option.type)}
-                className={`text-left rounded-md border p-gutter-sm flex flex-col gap-1 transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60 ${
+                className={`text-left rounded-md border p-gutter-sm flex flex-col gap-1 transition-colors duration-state-change focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-75 ${
                   active
                     ? "bg-primary-container/25 border-primary text-on-surface"
                     : "bg-surface-container-low border-outline-variant text-on-surface hover:bg-surface-container"

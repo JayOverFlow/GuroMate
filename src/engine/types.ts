@@ -344,6 +344,24 @@ export interface DlpIntentions {
   learnerContext: string;
 }
 
+export interface DlpLessonBlueprint {
+  mode: "scratch" | "derive";
+  sourceDllId?: string;
+  sourceSessionNumber?: SessionNumber;
+  lessonTitle: string;
+  references: string;
+  competencyIds: string[];
+  components: TleComponent[];
+  progressionFocus: string;
+  learningObjectives: string;
+  activityOptions: BlueprintActivityOption[];
+  selectedActivityId: string;
+  assessmentOptions: BlueprintAssessmentOption[];
+  selectedAssessmentType: FormativeAssessmentType;
+  inheritedLearningResources?: string;
+  lockedToParentSession?: boolean;
+}
+
 export interface DailyLessonPlan {
   id: string;
   createdAt: string;
@@ -358,6 +376,10 @@ export interface DailyLessonPlan {
   classroomContext?: ClassroomContext;
   referenceMaterial?: ReferenceMaterial;
   aiDeclaration?: string;
+  selectedActivityTitle?: string;
+  selectedActivitySummary?: string;
+  selectedAssessmentType?: FormativeAssessmentType;
+  selectedAssessmentPreview?: string;
   promptNotes: string;
   intentions: DlpIntentions;
   preLesson: DlpActivityPair;
@@ -369,7 +391,7 @@ export interface DailyLessonPlan {
   reflections: DlpActivityPair;
 }
 
-export type GenerateDlpInput =
+export type PlanDlpInput =
   | {
       mode: "derive";
       dllId: string;
@@ -389,6 +411,30 @@ export type GenerateDlpInput =
       referenceMaterial?: ReferenceMaterial;
       promptNotes?: string;
       competencyIds: string[];
+    };
+
+export type GenerateDlpInput =
+  | {
+      mode: "derive";
+      dllId: string;
+      sessionNumber: SessionNumber;
+      lessonTitle?: string;
+      references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
+      promptNotes?: string;
+      blueprint?: DlpLessonBlueprint;
+    }
+  | {
+      mode: "scratch";
+      lessonTitle?: string;
+      gradeAndSection: string;
+      references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
+      promptNotes?: string;
+      competencyIds: string[];
+      blueprint?: DlpLessonBlueprint;
     };
 
 export const QUIZ_QUESTION_TYPES = [
@@ -500,6 +546,7 @@ export interface GuroMateEngine {
   exportDllDocx(id: string): Promise<DocxExport>;
   listDlps(): Promise<DailyLessonPlan[]>;
   getDlp(id: string): Promise<DailyLessonPlan>;
+  planDlp(input: PlanDlpInput): Promise<DlpLessonBlueprint>;
   generateDlp(input: GenerateDlpInput): Promise<DailyLessonPlan>;
   saveDlp(dlp: DailyLessonPlan): Promise<DailyLessonPlan>;
   deleteDlp(id: string): Promise<void>;

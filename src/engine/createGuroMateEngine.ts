@@ -18,15 +18,20 @@ import {
   resolveDllSessions,
 } from "./dll";
 import {
+  DLP_PLAN_SYSTEM_INSTRUCTION,
   DLP_SYSTEM_INSTRUCTION,
   DlpNotFoundError,
   DlpValidationError,
+  assembleDlpBlueprint,
+  buildDlpPlanPrompt,
   buildDlpPrompt,
   normalizeActivityPair,
   normalizeEditedDlp,
+  parseAiDlpBlueprintPayload,
   parseAiDlpPayload,
   renderDlpMarkdown,
   resolveDerivedDlpContext,
+  resolveDlpGenerationLocks,
   resolveScratchDlpContext,
 } from "./dlp";
 import {
@@ -81,6 +86,7 @@ import {
   type DailyLessonLog,
   type DailyLessonPlan,
   type DllLessonBlueprint,
+  type DlpLessonBlueprint,
   type GenerateDllInput,
   type GenerateDlpInput,
   type GenerateQuizInput,
@@ -89,6 +95,7 @@ import {
   type GuroMateSettings,
   type GradeLevel,
   type PlanDllInput,
+  type PlanDlpInput,
   type QuarterNumber,
   type Quiz,
   type QuizSyncResult,
@@ -987,6 +994,65 @@ export function createGuroMateEngine(
     );
   }
 
+  async function planDlp(input: PlanDlpInput): Promise<DlpLessonBlueprint> {
+    const catalog = await listCurriculum();
+    const competencyMap = new Map(catalog.map((c) => [c.id, c]));
+
+    const resolved =
+      input.mode === "derive"
+        ? resolveDerivedDlpContext(
+            await dllStore.getById(input.dllId),
+            input.sessionNumber,
+            input.references,
+            competencyMap,
+          )
+        : resolveScratchDlpContext(
+            input.competencyIds,
+            input.gradeAndSection,
+            input.references,
+            competencyMap,
+          );
+
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext !== undefined
+        ? input.classroomContext
+        : resolved.inheritedClassroomContext,
+      (msg) => new DlpValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(
+      input.referenceMaterial !== undefined
+        ? input.referenceMaterial
+        : resolved.inheritedReferenceMaterial,
+    );
+
+    const prompt = buildDlpPlanPrompt({
+      lessonTitle: input.lessonTitle,
+      gradeAndSection: resolved.gradeAndSection,
+      learningAreas: resolved.learningAreas,
+      references: resolved.references,
+      classroomContext,
+      referenceMaterial,
+      promptNotes: input.promptNotes,
+      competencies: resolved.competencies,
+      learningCompetencies: resolved.learningCompetencies,
+      derivedSession: resolved.derivedSession,
+    });
+
+    const settings = await getSettings();
+    const aiResult = await aiAdapter.generateText({
+      systemInstruction: DLP_PLAN_SYSTEM_INSTRUCTION,
+      prompt,
+      settings: settings.ai,
+    });
+    const parsed = parseAiDlpBlueprintPayload(aiResult.text);
+
+    return assembleDlpBlueprint({
+      input,
+      resolved,
+      aiPayload: parsed,
+    });
+  }
+
   async function generateDlp(input: GenerateDlpInput): Promise<DailyLessonPlan> {
     const catalog = await listCurriculum();
     const competencyMap = new Map(catalog.map((c) => [c.id, c]));
@@ -1018,6 +1084,11 @@ export function createGuroMateEngine(
         : resolved.inheritedReferenceMaterial,
     );
 
+    const locks = resolveDlpGenerationLocks({
+      resolved,
+      blueprint: input.blueprint,
+    });
+
     const prompt = buildDlpPrompt({
       lessonTitle: input.lessonTitle,
       gradeAndSection: resolved.gradeAndSection,
@@ -1029,6 +1100,8 @@ export function createGuroMateEngine(
       competencies: resolved.competencies,
       learningCompetencies: resolved.learningCompetencies,
       derivedSession: resolved.derivedSession,
+      blueprint: input.blueprint,
+      locks,
     });
     const settings = await getSettings();
     const aiResult = await aiAdapter.generateText({
@@ -1054,13 +1127,14 @@ export function createGuroMateEngine(
         : {}),
       competencyIds: resolved.competencyIds,
       lessonTitle:
+        input.blueprint?.lessonTitle.trim() ||
         input.lessonTitle?.trim() ||
         (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
         fallbackTitle,
       learningAreas: resolved.learningAreas,
       gradeAndSection: resolved.gradeAndSection,
       references: resolveLessonReferences(
-        resolved.references,
+        input.blueprint?.references.trim() || resolved.references,
         parsed.references,
         resolved.competencies,
       ),
@@ -1071,12 +1145,25 @@ export function createGuroMateEngine(
         aiSettings: settings.ai,
         responseModel: aiResult.model,
       }),
+      ...(locks.selectedActivityTitle
+        ? { selectedActivityTitle: locks.selectedActivityTitle }
+        : {}),
+      ...(locks.selectedActivitySummary
+        ? { selectedActivitySummary: locks.selectedActivitySummary }
+        : {}),
+      ...(locks.selectedAssessmentType
+        ? { selectedAssessmentType: locks.selectedAssessmentType }
+        : {}),
+      ...(locks.selectedAssessmentPreview
+        ? { selectedAssessmentPreview: locks.selectedAssessmentPreview }
+        : {}),
       promptNotes: input.promptNotes?.trim() ?? "",
       intentions: {
         learningCompetencies: resolved.learningCompetencies,
         contentStandards: resolved.contentStandards,
         performanceStandards: resolved.performanceStandards,
         learningObjectives:
+          locks.learningObjectives ||
           resolved.inheritedObjectives ||
           (typeof parsed.learningObjectives === "string"
             ? parsed.learningObjectives.trim()
@@ -1250,6 +1337,7 @@ export function createGuroMateEngine(
     exportDllDocx,
     listDlps: dlpStore.readAll,
     getDlp: dlpStore.getById,
+    planDlp,
     generateDlp,
     saveDlp: (dlp) => dlpStore.update(dlp.id, () => normalizeEditedDlp(dlp)),
     deleteDlp: dlpStore.remove,
