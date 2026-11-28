@@ -1,11 +1,132 @@
 import { AI_PROVIDER_MAP } from "./providers";
-import type {
-  AiProviderSettings,
-  BudgetOfWorkInfo,
-  CurriculumCompetency,
-  TeacherProfileSettings,
-  TleComponent,
+import {
+  CLASSROOM_FACILITIES,
+  DELIVERY_MODALITIES,
+  MAX_PERIOD_MINUTES,
+  MIN_PERIOD_MINUTES,
+  type AiProviderSettings,
+  type BudgetOfWorkInfo,
+  type ClassroomContext,
+  type ClassroomFacility,
+  type CurriculumCompetency,
+  type DeliveryModality,
+  type ReferenceMaterial,
+  type TeacherProfileSettings,
+  type TleComponent,
 } from "./types";
+
+export const MAX_REFERENCE_MATERIAL_CHARS = 10_000;
+
+export const DEFAULT_CLASSROOM_CONTEXT: ClassroomContext = {
+  periodMinutes: 60,
+  facility: "standard-classroom",
+  modality: "face-to-face",
+};
+
+export const CLASSROOM_FACILITY_LABELS: Record<ClassroomFacility, string> = {
+  "standard-classroom": "Standard Classroom (no lab/shop)",
+  "computer-lab": "Computer Lab (PCs / workstations)",
+  "shop-workshop": "Shop / Workshop (tools & workbenches)",
+  "kitchen-home-economics": "Home Economics / Kitchen Lab",
+  "agri-farm-site": "Agri-Fishery / Farm / Garden Site",
+  "limited-resources": "Limited / Offline Classroom (no projector/power)",
+};
+
+export const DELIVERY_MODALITY_LABELS: Record<DeliveryModality, string> = {
+  "face-to-face": "Face-to-Face",
+  blended: "Blended",
+  "modular-offline": "Modular / Offline",
+};
+
+export function formatPeriodDuration(minutes: number): string {
+  if (minutes === 120) return "120 minutes (2 hrs)";
+  if (minutes > 60 && minutes % 60 === 0) {
+    return `${minutes} minutes (${minutes / 60} hrs)`;
+  }
+  return `${minutes} minutes`;
+}
+
+export function formatPeriodPresetLabel(minutes: number): string {
+  return minutes === 120 ? "2 hrs (120 min)" : `${minutes} min`;
+}
+
+export function formatClassroomContextSummary(ctx: ClassroomContext): string {
+  const duration = ctx.periodMinutes === 120 ? "2 hrs (120 min)" : `${ctx.periodMinutes} min`;
+  return [
+    duration,
+    CLASSROOM_FACILITY_LABELS[ctx.facility],
+    DELIVERY_MODALITY_LABELS[ctx.modality],
+  ].join(" · ");
+}
+
+export function normalizeClassroomContext(
+  ctx: ClassroomContext | undefined,
+  createError: (message: string) => Error,
+): ClassroomContext | undefined {
+  if (ctx === undefined) return undefined;
+  const periodMinutes = Number(ctx.periodMinutes);
+  if (
+    !Number.isInteger(periodMinutes) ||
+    periodMinutes < MIN_PERIOD_MINUTES ||
+    periodMinutes > MAX_PERIOD_MINUTES
+  ) {
+    throw createError(
+      `Classroom Context period length must be a whole number between ${MIN_PERIOD_MINUTES} and ${MAX_PERIOD_MINUTES} minutes.`,
+    );
+  }
+  if (!CLASSROOM_FACILITIES.includes(ctx.facility)) {
+    throw createError(
+      `Invalid Classroom Context facility: ${String(ctx.facility)}.`,
+    );
+  }
+  if (!DELIVERY_MODALITIES.includes(ctx.modality)) {
+    throw createError(
+      `Invalid Classroom Context delivery modality: ${String(ctx.modality)}.`,
+    );
+  }
+  return {
+    periodMinutes,
+    facility: ctx.facility,
+    modality: ctx.modality,
+  };
+}
+
+export function normalizeReferenceMaterial(
+  ref: ReferenceMaterial | undefined,
+): ReferenceMaterial | undefined {
+  if (!ref) return undefined;
+  const trimmedText = ref.text.replace(/\r\n?/g, "\n").trim();
+  if (!trimmedText) return undefined;
+  const boundedText =
+    trimmedText.length > MAX_REFERENCE_MATERIAL_CHARS
+      ? trimmedText.slice(0, MAX_REFERENCE_MATERIAL_CHARS).trimEnd()
+      : trimmedText;
+  const sourceLabel = ref.sourceLabel?.trim();
+  return sourceLabel ? { sourceLabel, text: boundedText } : { text: boundedText };
+}
+
+export function formatClassroomContextPromptBlock(
+  ctx: ClassroomContext | undefined,
+): string {
+  if (!ctx) return "";
+  return [
+    "Classroom Context (use to pace activities and choose realistic tools/facilities; never copy into Learner Context):",
+    `- Period Length: ${formatPeriodDuration(ctx.periodMinutes)}`,
+    `- Facility / Equipment: ${CLASSROOM_FACILITY_LABELS[ctx.facility]}`,
+    `- Delivery Modality: ${DELIVERY_MODALITY_LABELS[ctx.modality]}`,
+  ].join("\n");
+}
+
+export function formatReferenceMaterialPromptBlock(
+  ref: ReferenceMaterial | undefined,
+): string {
+  if (!ref || !ref.text.trim()) return "";
+  const label = ref.sourceLabel?.trim() ? ` (${ref.sourceLabel.trim()})` : "";
+  return [
+    `Reference Material${label} (ground technical facts, procedures, tools, and safety practices in this excerpt; never copy into Learner Context):`,
+    ref.text.trim(),
+  ].join("\n");
+}
 
 const LEGACY_AI_DECLARATION =
   "This lesson plan was developed using AI and subsequently reviewed for accuracy and alignment with curriculum standards.";

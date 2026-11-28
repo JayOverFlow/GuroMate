@@ -1,9 +1,14 @@
 import { useEffect, useId } from "react";
+import { ClassroomContextFieldset } from "../components/ClassroomContextFieldset";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DlpLineageBadge } from "../components/DlpLineageBadge";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
-import { formatLearningAreas } from "../engine/lessonHelpers";
+import { ReferenceMaterialInput } from "../components/ReferenceMaterialInput";
+import {
+  formatClassroomContextSummary,
+  formatLearningAreas,
+} from "../engine/lessonHelpers";
 import type { SessionNumber } from "../engine/types";
 import {
   DLP_ACTIVITY_ROWS,
@@ -84,6 +89,17 @@ export function DlpWorkspace({
     handleGradeAndSectionChange,
     references,
     setReferences,
+    classroomContext,
+    periodDraft,
+    selectPeriodPreset,
+    handlePeriodDraftChange,
+    updateFacility,
+    updateModality,
+    referenceSourceLabel,
+    setReferenceSourceLabel,
+    referenceText,
+    setReferenceText,
+    clearReferenceMaterial,
     promptNotes,
     setPromptNotes,
     selectedCompetencyIds,
@@ -252,7 +268,7 @@ export function DlpWorkspace({
         >
           <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
             <legend className="font-title text-title-lg text-on-surface px-1">
-              1. Creation Source &amp; Metadata
+              1. Creation Source, Classroom Context &amp; Reference Material
             </legend>
 
             <div
@@ -463,17 +479,48 @@ export function DlpWorkspace({
               />
             </div>
 
+            <ClassroomContextFieldset
+              baseId={baseId}
+              value={classroomContext}
+              periodDraft={periodDraft}
+              periodError={fieldErrors.periodMinutes}
+              inheritedNote={
+                builderMode === "derive" && selectedSourceDll?.classroomContext
+                  ? "Pre-filled from parent DLL — adjust if needed. Never written into Learner Context."
+                  : undefined
+              }
+              onSelectPresetMinutes={selectPeriodPreset}
+              onChangePeriodDraft={handlePeriodDraftChange}
+              onBlurPeriodDraft={() => validateField("periodMinutes")}
+              onChangeFacility={updateFacility}
+              onChangeModality={updateModality}
+            />
+
+            <ReferenceMaterialInput
+              baseId={baseId}
+              sourceLabel={referenceSourceLabel}
+              text={referenceText}
+              inheritedNote={
+                builderMode === "derive" && selectedSourceDll?.referenceMaterial
+                  ? "Pre-filled from parent DLL Reference Material — edit, replace, or clear before generating. Never written into Learner Context."
+                  : undefined
+              }
+              onChangeSourceLabel={setReferenceSourceLabel}
+              onChangeText={setReferenceText}
+              onClear={clearReferenceMaterial}
+            />
+
             <div className="flex flex-col gap-gutter-xs">
               <div className="flex flex-wrap items-center justify-between gap-gutter-xs">
                 <label
                   htmlFor={`${baseId}-prompt-notes`}
                   className="font-label text-label-md text-on-surface"
                 >
-                  Prompt Notes (optional)
+                  Optional Prompt Notes
                 </label>
                 <span className="font-body text-body-sm text-on-surface-variant">
-                  Included in the AI prompt only — never written into Learner
-                  Context.
+                  Extra instructions beyond Classroom Context — never written
+                  into Learner Context.
                 </span>
               </div>
               <textarea
@@ -481,7 +528,7 @@ export function DlpWorkspace({
                 rows={2}
                 value={promptNotes}
                 onChange={(e) => setPromptNotes(e.target.value)}
-                placeholder="e.g. 45-minute period, 40 learners in pairs, limited tools..."
+                placeholder="e.g. Use local barangay examples, 40 learners in pairs, emphasize OHS check..."
                 className={INPUT_CLASS}
               />
             </div>
@@ -614,6 +661,11 @@ export function DlpWorkspace({
               <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                 1 Session
               </span>
+              {draftDlp.classroomContext && (
+                <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label text-label-sm">
+                  {formatClassroomContextSummary(draftDlp.classroomContext)}
+                </span>
+              )}
               <DlpLineageBadge
                 lineage={draftLineage}
                 onOpenParentDll={onOpenParentDll}

@@ -6,11 +6,15 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { DEFAULT_CLASSROOM_CONTEXT } from "../engine/lessonHelpers";
 import type {
   ClassSection,
+  ClassroomContext,
+  ClassroomFacility,
   CurriculumCompetency,
   DailyLessonLog,
   DailyLessonPlan,
+  DeliveryModality,
   DlpActivityPair,
   DlpIntentions,
   SessionNumber,
@@ -21,6 +25,7 @@ import {
 } from "../utils/confirmAction";
 import {
   DLP_BUILDER_FIELDS,
+  parsePeriodMinutes,
   updateFieldError,
   validateDlpBuilderField,
   validateDlpBuilderForm,
@@ -159,6 +164,14 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   const [lessonTitle, setLessonTitle] = useState("");
   const [gradeAndSection, setGradeAndSection] = useState("");
   const [references, setReferences] = useState("");
+  const [classroomContext, setClassroomContext] = useState<ClassroomContext>(
+    () => ({ ...DEFAULT_CLASSROOM_CONTEXT }),
+  );
+  const [periodDraft, setPeriodDraft] = useState<string>(
+    String(DEFAULT_CLASSROOM_CONTEXT.periodMinutes),
+  );
+  const [referenceSourceLabel, setReferenceSourceLabel] = useState("");
+  const [referenceText, setReferenceText] = useState("");
   const [promptNotes, setPromptNotes] = useState("");
   const [selectedCompetencyIds, setSelectedCompetencyIds] = useState<string[]>(
     [],
@@ -173,6 +186,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   const recentlyDeletedIdRef = useRef<string | null>(null);
   const reportedMissingIdRef = useRef<string | null>(null);
   const prevRouteLessonIdRef = useRef<string | undefined>(routeLessonId);
+  const syncedDeriveDllIdRef = useRef<string>("");
   const sectionsRef = useRef<ClassSection[]>(sections);
   sectionsRef.current = sections;
   const dllsRef = useRef<DailyLessonLog[]>(dlls);
@@ -191,9 +205,14 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     setLessonTitle(fresh.lessonTitle);
     setGradeAndSection(fresh.gradeAndSection);
     setReferences(fresh.references);
+    setClassroomContext(fresh.classroomContext);
+    setPeriodDraft(String(fresh.classroomContext.periodMinutes));
+    setReferenceSourceLabel(fresh.referenceSourceLabel);
+    setReferenceText(fresh.referenceText);
     setPromptNotes(fresh.promptNotes);
     setSelectedCompetencyIds(fresh.selectedCompetencyIds);
     setPickedCompetencyId(fresh.pickedCompetencyId);
+    syncedDeriveDllIdRef.current = "";
     interactedFieldsRef.current.clear();
     setFieldErrors({});
   }, []);
@@ -389,6 +408,28 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     [activeSourceSessions, deriveSessionNumber],
   );
 
+  useEffect(() => {
+    if (builderMode !== "derive") {
+      syncedDeriveDllIdRef.current = "";
+      return;
+    }
+    if (!selectedSourceDll || syncedDeriveDllIdRef.current === selectedSourceDll.id) {
+      return;
+    }
+    syncedDeriveDllIdRef.current = selectedSourceDll.id;
+    if (selectedSourceDll.classroomContext) {
+      setClassroomContext({ ...selectedSourceDll.classroomContext });
+      setPeriodDraft(String(selectedSourceDll.classroomContext.periodMinutes));
+      setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
+    }
+    if (selectedSourceDll.referenceMaterial) {
+      setReferenceSourceLabel(
+        selectedSourceDll.referenceMaterial.sourceLabel ?? "",
+      );
+      setReferenceText(selectedSourceDll.referenceMaterial.text);
+    }
+  }, [builderMode, selectedSourceDll]);
+
   function selectBuilderMode(mode: BuilderMode) {
     setBuilderMode(mode);
     interactedFieldsRef.current.clear();
@@ -400,6 +441,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     overrides?: Partial<{
       mode: BuilderMode;
       gradeAndSection: string;
+      periodMinutes: string;
       selectedCompetencyIds: readonly string[];
     }>,
   ) {
@@ -409,10 +451,42 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     const message = validateDlpBuilderField(field, {
       mode: overrides?.mode ?? builderMode,
       gradeAndSection: overrides?.gradeAndSection ?? gradeAndSection,
+      periodMinutes: overrides?.periodMinutes ?? periodDraft,
       selectedCompetencyIds:
         overrides?.selectedCompetencyIds ?? selectedCompetencyIds,
     });
     setFieldErrors((prev) => updateFieldError(prev, field, message));
+  }
+
+  function selectPeriodPreset(minutes: number) {
+    setPeriodDraft(String(minutes));
+    setClassroomContext((prev) => ({ ...prev, periodMinutes: minutes }));
+    setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
+  }
+
+  function handlePeriodDraftChange(value: string) {
+    interactedFieldsRef.current.add("periodMinutes");
+    setPeriodDraft(value);
+    const parsed = parsePeriodMinutes(value);
+    if (parsed !== null) {
+      setClassroomContext((prev) => ({ ...prev, periodMinutes: parsed }));
+    }
+    if (fieldErrors.periodMinutes) {
+      validateField("periodMinutes", { periodMinutes: value });
+    }
+  }
+
+  function updateFacility(facility: ClassroomFacility) {
+    setClassroomContext((prev) => ({ ...prev, facility }));
+  }
+
+  function updateModality(modality: DeliveryModality) {
+    setClassroomContext((prev) => ({ ...prev, modality }));
+  }
+
+  function clearReferenceMaterial() {
+    setReferenceSourceLabel("");
+    setReferenceText("");
   }
 
   function handleGradeAndSectionChange(value: string) {
@@ -458,6 +532,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     const errors = validateDlpBuilderForm({
       mode: builderMode,
       gradeAndSection,
+      periodMinutes: periodDraft,
       selectedCompetencyIds,
     });
     if (Object.keys(errors).length > 0) {
@@ -476,6 +551,22 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     setFieldErrors({});
     setGenerating(true);
     try {
+      const resolvedPeriod =
+        parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
+      const nextContext: ClassroomContext = {
+        ...classroomContext,
+        periodMinutes: resolvedPeriod,
+      };
+      const referenceMaterial = referenceText.trim()
+        ? {
+            ...(referenceSourceLabel.trim()
+              ? { sourceLabel: referenceSourceLabel.trim() }
+              : {}),
+            text: referenceText,
+          }
+        : builderMode === "derive"
+          ? { text: "" }
+          : undefined;
       const payload =
         builderMode === "derive"
           ? {
@@ -484,6 +575,8 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
               sessionNumber: deriveSessionNumber,
               lessonTitle,
               references,
+              classroomContext: nextContext,
+              referenceMaterial,
               promptNotes,
             }
           : {
@@ -491,6 +584,8 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
               lessonTitle,
               gradeAndSection,
               references,
+              classroomContext: nextContext,
+              ...(referenceMaterial ? { referenceMaterial } : {}),
               promptNotes,
               competencyIds: selectedCompetencyIds,
             };
@@ -651,6 +746,17 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     handleGradeAndSectionChange,
     references,
     setReferences,
+    classroomContext,
+    periodDraft,
+    selectPeriodPreset,
+    handlePeriodDraftChange,
+    updateFacility,
+    updateModality,
+    referenceSourceLabel,
+    setReferenceSourceLabel,
+    referenceText,
+    setReferenceText,
+    clearReferenceMaterial,
     promptNotes,
     setPromptNotes,
     selectedCompetencyIds,

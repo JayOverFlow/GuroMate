@@ -157,6 +157,51 @@ export interface ClassSectionInput {
 export const SESSION_NUMBERS = [1, 2, 3, 4, 5] as const;
 export type SessionNumber = (typeof SESSION_NUMBERS)[number];
 
+export const PERIOD_LENGTH_PRESETS = [45, 60, 90, 120] as const;
+export const MIN_PERIOD_MINUTES = 10;
+export const MAX_PERIOD_MINUTES = 360;
+
+export const CLASSROOM_FACILITIES = [
+  "standard-classroom",
+  "computer-lab",
+  "shop-workshop",
+  "kitchen-home-economics",
+  "agri-farm-site",
+  "limited-resources",
+] as const;
+export type ClassroomFacility = (typeof CLASSROOM_FACILITIES)[number];
+
+export const DELIVERY_MODALITIES = [
+  "face-to-face",
+  "blended",
+  "modular-offline",
+] as const;
+export type DeliveryModality = (typeof DELIVERY_MODALITIES)[number];
+
+export interface ClassroomContext {
+  periodMinutes: number;
+  facility: ClassroomFacility;
+  modality: DeliveryModality;
+}
+
+export interface ReferenceMaterial {
+  sourceLabel?: string;
+  text: string;
+}
+
+export interface ReferenceMaterialExtractInput {
+  filename: string;
+  dataBase64: string;
+}
+
+export interface ReferenceMaterialExtractResult {
+  sourceLabel: string;
+  text: string;
+  truncated: boolean;
+  originalLength: number;
+  maxLength: number;
+}
+
 export interface DllSessionConfig {
   sessionNumber: SessionNumber;
   mode: "instructional" | "non-instructional";
@@ -195,6 +240,8 @@ export interface DailyLessonLog {
   learningAreas: string;
   gradeAndSection: string;
   references: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
   aiDeclaration?: string;
   promptNotes: string;
   intentions: DllIntentions;
@@ -211,6 +258,8 @@ export interface GenerateDllInput {
   lessonTitle?: string;
   gradeAndSection: string;
   references?: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
   promptNotes?: string;
   sessions: DllSessionConfig[];
 }
@@ -246,6 +295,8 @@ export interface DailyLessonPlan {
   learningAreas: string;
   gradeAndSection: string;
   references: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
   aiDeclaration?: string;
   promptNotes: string;
   intentions: DlpIntentions;
@@ -265,6 +316,8 @@ export type GenerateDlpInput =
       sessionNumber: SessionNumber;
       lessonTitle?: string;
       references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
       promptNotes?: string;
     }
   | {
@@ -272,6 +325,8 @@ export type GenerateDlpInput =
       lessonTitle?: string;
       gradeAndSection: string;
       references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
       promptNotes?: string;
       competencyIds: string[];
     };
@@ -372,6 +427,9 @@ export interface GuroMateEngine {
   listClassSections(): Promise<ClassSection[]>;
   saveClassSection(input: ClassSectionInput): Promise<ClassSection>;
   deleteClassSection(id: string): Promise<void>;
+  extractReferenceMaterial(
+    input: ReferenceMaterialExtractInput,
+  ): Promise<ReferenceMaterialExtractResult>;
   listDlls(): Promise<DailyLessonLog[]>;
   getDll(id: string): Promise<DailyLessonLog>;
   generateDll(input: GenerateDllInput): Promise<DailyLessonLog>;

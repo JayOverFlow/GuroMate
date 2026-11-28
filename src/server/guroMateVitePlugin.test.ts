@@ -824,6 +824,282 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     expect(missingRes.status).toBe(404);
   });
 
+  it("extracts .txt, .docx, and .pdf Reference Material over POST /api/reference-material/extract with higher body limit, truncation, and clear error messages", async () => {
+    const baseUrl = await startTestServer();
+    const { createZip } = await import("../engine/zip");
+
+    // 1. Plain text (.txt) with BOM and CRLF
+    const txtRes = await fetch(`${baseUrl}/api/reference-material/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "TESDA-Safety-Notes.txt",
+        dataBase64: Buffer.from("\uFEFFRule 1: Wear safety goggles.\r\nRule 2: Inspect cords.", "utf8").toString("base64"),
+      }),
+    });
+    expect(txtRes.status).toBe(200);
+    const txtJson = (await txtRes.json()) as {
+      sourceLabel: string;
+      text: string;
+      truncated: boolean;
+      originalLength: number;
+      maxLength: number;
+    };
+    expect(txtJson.sourceLabel).toBe("TESDA-Safety-Notes.txt");
+    expect(txtJson.text).toBe("Rule 1: Wear safety goggles.\nRule 2: Inspect cords.");
+    expect(txtJson.truncated).toBe(false);
+
+    // 2. Word document (.docx) built in-memory via createZip
+    const docXml =
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      "<w:p><w:r><w:t>DepEd Lesson Exemplar: Bread &amp; Pastry</w:t></w:r></w:p>" +
+      "<w:p><w:r><w:t>Preheat oven to 180 C before baking.</w:t></w:r></w:p>" +
+      "</w:body></w:document>";
+    const docxBuf = createZip([
+      { name: "word/document.xml", data: Buffer.from(docXml, "utf8") },
+    ]);
+    const docxRes = await fetch(`${baseUrl}/api/reference-material/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "Lesson-Exemplar-FCS.docx",
+        dataBase64: docxBuf.toString("base64"),
+      }),
+    });
+    expect(docxRes.status).toBe(200);
+    const docxJson = (await docxRes.json()) as { sourceLabel: string; text: string; truncated: boolean };
+    expect(docxJson.sourceLabel).toBe("Lesson-Exemplar-FCS.docx");
+    expect(docxJson.text).toContain("DepEd Lesson Exemplar: Bread & Pastry");
+    expect(docxJson.text).toContain("Preheat oven to 180 C before baking.");
+    expect(docxJson.truncated).toBe(false);
+
+    // 3. Minimal valid PDF (.pdf) extracted via pdftotext
+    const buildMinimalPdf = (text: string): Buffer => {
+      const escaped = text.replace(/([()\\])/g, "\\$1");
+      const stream = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+      const objects = [
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj",
+        `4 0 obj << /Length ${Buffer.byteLength(stream, "ascii")} >> stream\n${stream}\nendstream endobj`,
+        "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+      ];
+      let body = "%PDF-1.4\n";
+      const offsets: number[] = [];
+      for (const obj of objects) {
+        offsets.push(Buffer.byteLength(body, "ascii"));
+        body += `${obj}\n`;
+      }
+      const xrefOffset = Buffer.byteLength(body, "ascii");
+      body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+      for (const off of offsets) {
+        body += `${String(off).padStart(10, "0")} 00000 n \n`;
+      }
+      body += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+      return Buffer.from(body, "ascii");
+    };
+    const pdfBuf = buildMinimalPdf("DepEd Learning Activity Sheet: Ohms Law V = I x R");
+    const pdfRes = await fetch(`${baseUrl}/api/reference-material/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "LAS-Ohms-Law.pdf",
+        dataBase64: pdfBuf.toString("base64"),
+      }),
+    });
+    expect(pdfRes.status).toBe(200);
+    const pdfJson = (await pdfRes.json()) as { sourceLabel: string; text: string; truncated: boolean };
+    expect(pdfJson.sourceLabel).toBe("LAS-Ohms-Law.pdf");
+    expect(pdfJson.text).toContain("DepEd Learning Activity Sheet: Ohms Law V = I x R");
+    expect(pdfJson.truncated).toBe(false);
+
+    // 4. Payload larger than default 1 MB JSON body cap succeeds and truncates to maxLength
+    const largeText = "Electrical safety check line.\n".repeat(45_000); // ~1.35 MB raw -> ~1.8 MB base64 JSON
+    const largeRes = await fetch(`${baseUrl}/api/reference-material/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "Long-Manual.txt",
+        dataBase64: Buffer.from(largeText, "utf8").toString("base64"),
+      }),
+    });
+    expect(largeRes.status).toBe(200);
+    const largeJson = (await largeRes.json()) as {
+      text: string;
+      truncated: boolean;
+      originalLength: number;
+      maxLength: number;
+    };
+    expect(largeJson.truncated).toBe(true);
+    expect(largeJson.text.length).toBeLessThanOrEqual(largeJson.maxLength);
+    expect(largeJson.originalLength).toBeGreaterThan(largeJson.maxLength);
+
+    // 5. Clear HTTP 400 errors for unsupported / unreadable files
+    const unsupportedRes = await fetch(`${baseUrl}/api/reference-material/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "diagram.png",
+        dataBase64: Buffer.from("not-an-image").toString("base64"),
+      }),
+    });
+    expect(unsupportedRes.status).toBe(400);
+    expect(((await unsupportedRes.json()) as { error: string }).error).toMatch(/\.txt.*\.docx.*\.pdf/i);
+
+    const corruptDocxRes = await fetch(`${baseUrl}/api/reference-material/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "broken.docx",
+        dataBase64: Buffer.from("not a zip archive").toString("base64"),
+      }),
+    });
+    expect(corruptDocxRes.status).toBe(400);
+    expect(((await corruptDocxRes.json()) as { error: string }).error).toMatch(/\.docx/i);
+
+    const corruptPdfRes = await fetch(`${baseUrl}/api/reference-material/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "corrupt.pdf",
+        dataBase64: Buffer.from("not a pdf").toString("base64"),
+      }),
+    });
+    expect(corruptPdfRes.status).toBe(400);
+    expect(((await corruptPdfRes.json()) as { error: string }).error).toMatch(/pdf/i);
+  });
+
+  it("grounds HTTP DLL and DLP generation in Classroom Context (2 hrs) and Reference Material while keeping exported .docx Learner Context and Reflections blank", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-ctx-"));
+    tempDirs.push(dataDir);
+    const capturedPrompts: string[] = [];
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          capturedPrompts.push(req.prompt);
+          if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "2-Hour Shop Practicum DLL",
+                references: "CG",
+                sessions: [1, 2, 3, 4, 5].map((n) => ({
+                  sessionNumber: n,
+                  learningObjectives: `• Obj ${n}`,
+                  preLesson: `Pre ${n}`,
+                  lessonFlow: `Flow ${n}`,
+                  learningResources: `Res ${n}`,
+                  integrationAndContextualization: `Int ${n}`,
+                  formativeAssessment: `Ass ${n}`,
+                  extendedLearningOpportunities: `Ext ${n}`,
+                })),
+              }),
+            };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "2-Hour Shop Practicum DLP",
+              references: "CG",
+              learningObjectives: "• DLP Obj",
+              preLesson: { teacherActivity: "T Pre", studentActivity: "S Pre" },
+              lessonFlow: { teacherActivity: "T Flow", studentActivity: "S Flow" },
+              learningResources: { teacherActivity: "T Res", studentActivity: "S Res" },
+              integrationAndContextualization: { teacherActivity: "T Int", studentActivity: "" },
+              formativeAssessment: { teacherActivity: "T Ass", studentActivity: "S Ass" },
+              extendedLearningOpportunities: { teacherActivity: "T Ext", studentActivity: "" },
+            }),
+          };
+        },
+      },
+    });
+    const middleware = createGuroMateMiddleware(engine);
+    const server = createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 404;
+        res.end("Not Found");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const classroomContext = {
+      periodMinutes: 120,
+      facility: "computer-lab",
+      modality: "face-to-face",
+    };
+    const referenceMaterial = {
+      sourceLabel: "DepEd Exemplar.txt",
+      text: "Check grounding wrist strap before handling RAM modules.",
+    };
+
+    const dllRes = await fetch(`${baseUrl}/api/dlls/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "7-Rizal",
+        classroomContext,
+        referenceMaterial,
+        promptNotes: "Use 2 learners per workstation.",
+        sessions: [1, 2, 3, 4, 5].map((n) => ({
+          sessionNumber: n,
+          mode: "instructional",
+          competencyIds: [ict.id],
+        })),
+      }),
+    });
+    expect(dllRes.status).toBe(201);
+    const createdDll = (await dllRes.json()) as {
+      id: string;
+      classroomContext?: typeof classroomContext;
+    };
+    expect(createdDll.classroomContext).toEqual(classroomContext);
+    expect(capturedPrompts[0]).toContain("120 minutes (2 hrs)");
+    expect(capturedPrompts[0]).toContain("Check grounding wrist strap");
+
+    const dlpRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "derive",
+        dllId: createdDll.id,
+        sessionNumber: 1,
+        promptNotes: "Extra troubleshooting cue.",
+      }),
+    });
+    expect(dlpRes.status).toBe(201);
+    const createdDlp = (await dlpRes.json()) as {
+      id: string;
+      classroomContext?: typeof classroomContext;
+    };
+    expect(createdDlp.classroomContext).toEqual(classroomContext);
+    expect(capturedPrompts[1]).toContain("120 minutes (2 hrs)");
+    expect(capturedPrompts[1]).toContain("Check grounding wrist strap");
+
+    const dllDocxRes = await fetch(`${baseUrl}/api/dlls/${encodeURIComponent(createdDll.id)}/docx`);
+    const dllDocXml = readZipEntry(Buffer.from(await dllDocxRes.arrayBuffer()), "word/document.xml").toString("utf8");
+    const dllTables = extractTableCellTexts(dllDocXml);
+    expect(dllTables[1]![4]![1]).toBe("");
+    for (let col = 1; col <= 5; col++) {
+      expect(dllTables[4]![2]![col]).toBe("");
+    }
+    expect(dllDocXml).not.toContain("Check grounding wrist strap");
+    expect(dllDocXml).not.toContain("Use 2 learners per workstation.");
+
+    const dlpDocxRes = await fetch(`${baseUrl}/api/dlps/${encodeURIComponent(createdDlp.id)}/docx`);
+    const dlpDocXml = readZipEntry(Buffer.from(await dlpDocxRes.arrayBuffer()), "word/document.xml").toString("utf8");
+    const dlpTables = extractTableCellTexts(dlpDocXml);
+    expect(dlpTables[1]![3]![1]).toBe("");
+    expect(dlpTables[4]![3]![1]).toBe("");
+    expect(dlpTables[4]![3]![2]).toBe("");
+    expect(dlpDocXml).not.toContain("Check grounding wrist strap");
+    expect(dlpDocXml).not.toContain("Extra troubleshooting cue.");
+  });
+
   it("auto-populates DO 003 Annex A Declaration of AI Use with active AI model info, persists per-lesson edits, preserves legacy compatibility, and injects exact Table 0 Row 7 Col 1 XML cells over HTTP", async () => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-do003-"));
     tempDirs.push(dataDir);

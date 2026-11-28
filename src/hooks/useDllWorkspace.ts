@@ -6,11 +6,15 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { DEFAULT_CLASSROOM_CONTEXT } from "../engine/lessonHelpers";
 import {
   type ClassSection,
+  type ClassroomContext,
+  type ClassroomFacility,
   type CurriculumCompetency,
   type DailyLessonLog,
   type DailyLessonPlan,
+  type DeliveryModality,
   type DllIntentions,
   type DllSessionConfig,
   type SessionNumber,
@@ -19,6 +23,7 @@ import {
 import {
   DLL_BUILDER_FIELDS,
   parseDllSessionFieldKey,
+  parsePeriodMinutes,
   updateFieldError,
   validateDllBuilderField,
   validateDllBuilderForm,
@@ -159,6 +164,14 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
   const [lessonTitle, setLessonTitle] = useState("");
   const [gradeAndSection, setGradeAndSection] = useState("");
   const [references, setReferences] = useState("");
+  const [classroomContext, setClassroomContext] = useState<ClassroomContext>(
+    () => ({ ...DEFAULT_CLASSROOM_CONTEXT }),
+  );
+  const [periodDraft, setPeriodDraft] = useState<string>(
+    String(DEFAULT_CLASSROOM_CONTEXT.periodMinutes),
+  );
+  const [referenceSourceLabel, setReferenceSourceLabel] = useState("");
+  const [referenceText, setReferenceText] = useState("");
   const [promptNotes, setPromptNotes] = useState("");
   const [sessionConfigs, setSessionConfigs] = useState<DllSessionConfig[]>(
     createInitialDllSessionConfigs,
@@ -173,6 +186,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     seq: number;
   } | null>(null);
   const gradeSectionRef = useRef<HTMLInputElement>(null);
+  const periodMinutesRef = useRef<HTMLInputElement>(null);
   const sessionCardRefs = useRef<
     Partial<Record<SessionNumber, HTMLElement | null>>
   >({});
@@ -192,6 +206,10 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setLessonTitle(fresh.lessonTitle);
     setGradeAndSection(fresh.gradeAndSection);
     setReferences(fresh.references);
+    setClassroomContext(fresh.classroomContext);
+    setPeriodDraft(String(fresh.classroomContext.periodMinutes));
+    setReferenceSourceLabel(fresh.referenceSourceLabel);
+    setReferenceText(fresh.referenceText);
     setPromptNotes(fresh.promptNotes);
     setSessionConfigs(fresh.sessionConfigs);
     setPickedCompetencyId(fresh.pickedCompetencyId);
@@ -346,6 +364,8 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     const { field } = focusRequest;
     if (field === "gradeAndSection") {
       gradeSectionRef.current?.focus();
+    } else if (field === "periodMinutes") {
+      periodMinutesRef.current?.focus();
     } else if (field === "sessions") {
       sessionsGroupRef.current?.focus();
     } else {
@@ -402,13 +422,70 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     );
   }
 
+  function selectPeriodPreset(minutes: number) {
+    setPeriodDraft(String(minutes));
+    setClassroomContext((prev) => ({ ...prev, periodMinutes: minutes }));
+    setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
+  }
+
+  function updatePeriodDraft(value: string) {
+    interactedFieldsRef.current.add("periodMinutes");
+    setPeriodDraft(value);
+    const parsed = parsePeriodMinutes(value);
+    if (parsed !== null) {
+      setClassroomContext((prev) => ({ ...prev, periodMinutes: parsed }));
+    }
+    setFieldErrors((prev) => {
+      if (!prev.periodMinutes) return prev;
+      const nextMsg = validateDllBuilderField("periodMinutes", {
+        gradeAndSection,
+        periodMinutes: value,
+        sessions: sessionConfigs,
+      });
+      return updateFieldError(prev, "periodMinutes", nextMsg);
+    });
+  }
+
+  function validatePeriodDraftOnBlur() {
+    if (
+      !interactedFieldsRef.current.has("periodMinutes") &&
+      !fieldErrors.periodMinutes
+    ) {
+      return;
+    }
+    const nextMsg = validateDllBuilderField("periodMinutes", {
+      gradeAndSection,
+      periodMinutes: periodDraft,
+      sessions: sessionConfigs,
+    });
+    setFieldErrors((prev) =>
+      updateFieldError(prev, "periodMinutes", nextMsg),
+    );
+  }
+
+  function updateFacility(facility: ClassroomFacility) {
+    setClassroomContext((prev) => ({ ...prev, facility }));
+  }
+
+  function updateModality(modality: DeliveryModality) {
+    setClassroomContext((prev) => ({ ...prev, modality }));
+  }
+
+  function clearReferenceMaterial() {
+    setReferenceSourceLabel("");
+    setReferenceText("");
+  }
+
   function syncActiveSessionErrors(nextSessions: DllSessionConfig[]) {
     setFieldErrors((prev) => {
       let next = prev;
       for (const field of DLL_BUILDER_FIELDS) {
-        if (field === "gradeAndSection" || !next[field]) continue;
+        if (field === "gradeAndSection" || field === "periodMinutes" || !next[field]) {
+          continue;
+        }
         const nextMsg = validateDllBuilderField(field, {
           gradeAndSection,
+          periodMinutes: periodDraft,
           sessions: nextSessions,
         });
         next = updateFieldError(next, field, nextMsg);
@@ -494,6 +571,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     }
     const errors = validateDllBuilderForm({
       gradeAndSection,
+      periodMinutes: periodDraft,
       sessions: sessionConfigs,
     });
     if (Object.keys(errors).length > 0) {
@@ -516,6 +594,8 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setStatus(null);
     setGenerating(true);
     try {
+      const resolvedPeriod =
+        parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
       const res = await fetch("/api/dlls/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -523,6 +603,20 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
           lessonTitle,
           gradeAndSection,
           references,
+          classroomContext: {
+            ...classroomContext,
+            periodMinutes: resolvedPeriod,
+          },
+          ...(referenceText.trim()
+            ? {
+                referenceMaterial: {
+                  ...(referenceSourceLabel.trim()
+                    ? { sourceLabel: referenceSourceLabel.trim() }
+                    : {}),
+                  text: referenceText,
+                },
+              }
+            : {}),
           promptNotes,
           sessions: sessionConfigs,
         }),
@@ -666,10 +760,23 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     validateGradeAndSectionOnBlur,
     fieldErrors,
     gradeSectionRef,
+    periodMinutesRef,
     sessionCardRefs,
     sessionsGroupRef,
     references,
     setReferences,
+    classroomContext,
+    periodDraft,
+    selectPeriodPreset,
+    updatePeriodDraft,
+    validatePeriodDraftOnBlur,
+    updateFacility,
+    updateModality,
+    referenceSourceLabel,
+    setReferenceSourceLabel,
+    referenceText,
+    setReferenceText,
+    clearReferenceMaterial,
     promptNotes,
     setPromptNotes,
     sessionConfigs,

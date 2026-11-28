@@ -45,6 +45,8 @@ import {
   composeAiDeclaration,
   DEFAULT_AI_DECLARATION_TEMPLATE,
   formatLearningAreas,
+  normalizeClassroomContext,
+  normalizeReferenceMaterial,
   resolveLessonReferences,
 } from "./lessonHelpers";
 import { createLiveAiAdapter } from "./liveAiAdapter";
@@ -54,6 +56,10 @@ import {
   sortModelsFreeFirst,
 } from "./providers";
 import { buildQuizDocxBuffer } from "./quizDocx";
+import {
+  ReferenceMaterialError,
+  extractReferenceMaterialFromInput,
+} from "./referenceMaterial";
 import { readZipEntry, replaceZipEntry } from "./zip";
 import {
   GRADE_LEVELS,
@@ -303,6 +309,7 @@ export {
   DlpValidationError,
   QuizNotFoundError,
   QuizValidationError,
+  ReferenceMaterialError,
 };
 
 function validateAndBuildClassSection(
@@ -804,12 +811,19 @@ export function createGuroMateEngine(
     const competencyMap = new Map(catalog.map((c) => [c.id, c]));
     const resolved = resolveDllSessions(input, competencyMap);
     const learningAreas = formatLearningAreas(resolved.components);
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext,
+      (msg) => new DllValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(input.referenceMaterial);
 
     const prompt = buildDllPrompt({
       lessonTitle: input.lessonTitle,
       gradeAndSection: resolved.gradeAndSection,
       learningAreas,
       references: input.references,
+      classroomContext,
+      referenceMaterial,
       promptNotes: input.promptNotes,
       orderedConfigs: resolved.orderedConfigs,
       sessionCompetencies: resolved.sessionCompetencies,
@@ -844,6 +858,8 @@ export function createGuroMateEngine(
         parsed.references,
         selectedCompetencies,
       ),
+      ...(classroomContext ? { classroomContext } : {}),
+      ...(referenceMaterial ? { referenceMaterial } : {}),
       aiDeclaration: composeAiDeclaration({
         template: settings.profile.aiDeclaration,
         aiSettings: settings.ai,
@@ -938,11 +954,25 @@ export function createGuroMateEngine(
             competencyMap,
           );
 
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext !== undefined
+        ? input.classroomContext
+        : resolved.inheritedClassroomContext,
+      (msg) => new DlpValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(
+      input.referenceMaterial !== undefined
+        ? input.referenceMaterial
+        : resolved.inheritedReferenceMaterial,
+    );
+
     const prompt = buildDlpPrompt({
       lessonTitle: input.lessonTitle,
       gradeAndSection: resolved.gradeAndSection,
       learningAreas: resolved.learningAreas,
       references: resolved.references,
+      classroomContext,
+      referenceMaterial,
       promptNotes: input.promptNotes,
       competencies: resolved.competencies,
       learningCompetencies: resolved.learningCompetencies,
@@ -982,6 +1012,8 @@ export function createGuroMateEngine(
         parsed.references,
         resolved.competencies,
       ),
+      ...(classroomContext ? { classroomContext } : {}),
+      ...(referenceMaterial ? { referenceMaterial } : {}),
       aiDeclaration: composeAiDeclaration({
         template: settings.profile.aiDeclaration,
         aiSettings: settings.ai,
@@ -1155,6 +1187,7 @@ export function createGuroMateEngine(
     listClassSections: readClassSections,
     saveClassSection,
     deleteClassSection,
+    extractReferenceMaterial: extractReferenceMaterialFromInput,
     listDlls: dllStore.readAll,
     getDll: dllStore.getById,
     generateDll,

@@ -606,6 +606,132 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(md).not.toContain("Private prompt note");
   });
 
+  it("grounds DLL generation in Classroom Context (including 2-hour periods), Reference Material, and competency customNotes, persists cleanly with backward compatibility, and keeps exported Learner Context and Reflections blank", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Electrical Wiring Safety & Splicing",
+            references: "MATATAG TLE IA CG",
+            sessions: [1, 2, 3, 4, 5].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: `• Objective ${n}`,
+              preLesson: `Pre-lesson activity: “Hook ${n}”`,
+              lessonFlow: `Shop Lab Activity ${n}`,
+              learningResources: "• Insulated pliers\n• Offline wiring board",
+              integrationAndContextualization: "Barangay electrical safety.",
+              formativeAssessment: `Skill checklist ${n}`,
+              extendedLearningOpportunities: `Home safety audit ${n}`,
+            })),
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const iaComp = (await engine.listCurriculum({ gradeLevel: 7, component: "IA" }))[0]!;
+    await engine.saveCompetencyNotes(
+      iaComp.id,
+      "Emphasize PPE gloves and dry-hand inspection before touching conductors.",
+    );
+
+    const classroomContext = {
+      periodMinutes: 120,
+      facility: "shop-workshop" as const,
+      modality: "face-to-face" as const,
+    };
+    const referenceMaterial = {
+      sourceLabel: "TESDA EIM NC II Safety Excerpt.txt",
+      text: "Always verify circuit de-energization with a tester before stripping AWG 14 solid wire.",
+    };
+    const promptNotes = "Pair taller learners with shorter learners at bench stations.";
+
+    const created = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Bonifacio",
+      classroomContext,
+      referenceMaterial,
+      promptNotes,
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [iaComp.id],
+      })),
+    });
+
+    expect(requests).toHaveLength(1);
+    const prompt = requests[0]!.prompt;
+    expect(prompt).toContain("120 minutes");
+    expect(prompt).toContain("2 hrs");
+    expect(prompt).toMatch(/Shop\s*\/\s*Workshop/i);
+    expect(prompt).toMatch(/Face-to-Face/i);
+    expect(prompt).toContain("TESDA EIM NC II Safety Excerpt.txt");
+    expect(prompt).toContain("Always verify circuit de-energization with a tester");
+    expect(prompt).toContain("Emphasize PPE gloves and dry-hand inspection");
+    expect(prompt).toContain(promptNotes);
+
+    expect(created.classroomContext).toEqual(classroomContext);
+    expect(created.intentions.learnerContext).toBe("");
+    expect(created.sessions.every((s) => s.reflections === "")).toBe(true);
+
+    // Reload from disk with a fresh engine instance and verify persistence
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+    const reloaded = await engine2.getDll(created.id);
+    expect(reloaded.classroomContext).toEqual(classroomContext);
+
+    // Inline edits preserve Classroom Context
+    const edited = await engine2.saveDll({
+      ...reloaded,
+      lessonTitle: "Updated Shop Safety DLL",
+    });
+    expect(edited.classroomContext).toEqual(classroomContext);
+
+    // Exported .docx must keep Learner Context and Reflections strictly blank and never leak context/reference/promptNotes
+    const exported = await engine2.exportDllDocx(edited.id);
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+    const docXml = readZipEntry(exported.buffer, "word/document.xml").toString("utf8");
+    const tables = extractTableCellTexts(docXml);
+    expect(tables[1]![4]![1]).toBe("");
+    for (let col = 1; col <= 5; col++) {
+      expect(tables[4]![2]![col]).toBe("");
+    }
+    expect(docXml).not.toContain("Always verify circuit de-energization");
+    expect(docXml).not.toContain("Pair taller learners");
+    expect(docXml).not.toContain("Shop / Workshop");
+
+    // Backward compatibility: legacy saved DLL record lacking classroomContext still loads, saves, and exports cleanly
+    const legacyRecord = { ...edited };
+    delete legacyRecord.classroomContext;
+    delete legacyRecord.referenceMaterial;
+    await writeFile(
+      path.join(dataDir, "dlls.json"),
+      JSON.stringify([legacyRecord], null, 2),
+      "utf8",
+    );
+    const loadedLegacy = await engine2.getDll(legacyRecord.id);
+    expect(loadedLegacy.classroomContext).toBeUndefined();
+    const savedLegacy = await engine2.saveDll({
+      ...loadedLegacy,
+      lessonTitle: "Legacy Record Resaved",
+    });
+    expect(savedLegacy.classroomContext).toBeUndefined();
+    const legacyDocx = await engine2.exportDllDocx(savedLegacy.id);
+    expect(legacyDocx.buffer.subarray(0, 2).toString("ascii")).toBe("PK");
+  });
+
   it("auto-populates DO 003 Annex A Declaration of AI Use on generated DLLs, persists per-lesson edits across Markdown and .docx, and falls back cleanly for legacy saved DLLs", async () => {
     const dataDir = await makeTempDir();
     const fakeAdapter: AiProviderAdapter = {
@@ -635,6 +761,7 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
       templatesDir: process.cwd(),
       aiAdapter: fakeAdapter,
     });
+
     await engine.saveSettings({
       ai: {
         aiProvider: "gemini",
