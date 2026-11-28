@@ -6,13 +6,20 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { evaluateDlpAlignment } from "../engine/alignmentCheck";
+import { DEFAULT_CLASSROOM_CONTEXT } from "../engine/lessonHelpers";
 import type {
   ClassSection,
+  ClassroomContext,
+  ClassroomFacility,
   CurriculumCompetency,
   DailyLessonLog,
   DailyLessonPlan,
+  DeliveryModality,
   DlpActivityPair,
   DlpIntentions,
+  DlpLessonBlueprint,
+  FormativeAssessmentType,
   SessionNumber,
 } from "../engine/types";
 import {
@@ -21,6 +28,7 @@ import {
 } from "../utils/confirmAction";
 import {
   DLP_BUILDER_FIELDS,
+  parsePeriodMinutes,
   updateFieldError,
   validateDlpBuilderField,
   validateDlpBuilderForm,
@@ -159,10 +167,20 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   const [lessonTitle, setLessonTitle] = useState("");
   const [gradeAndSection, setGradeAndSection] = useState("");
   const [references, setReferences] = useState("");
+  const [classroomContext, setClassroomContext] = useState<ClassroomContext>(
+    () => ({ ...DEFAULT_CLASSROOM_CONTEXT }),
+  );
+  const [periodDraft, setPeriodDraft] = useState<string>(
+    String(DEFAULT_CLASSROOM_CONTEXT.periodMinutes),
+  );
+  const [referenceSourceLabel, setReferenceSourceLabel] = useState("");
+  const [referenceText, setReferenceText] = useState("");
   const [promptNotes, setPromptNotes] = useState("");
   const [selectedCompetencyIds, setSelectedCompetencyIds] = useState<string[]>(
     [],
   );
+  const [blueprint, setBlueprint] = useState<DlpLessonBlueprint | null>(null);
+  const [planning, setPlanning] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
   const [fieldErrors, setFieldErrors] = useState<
@@ -173,6 +191,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   const recentlyDeletedIdRef = useRef<string | null>(null);
   const reportedMissingIdRef = useRef<string | null>(null);
   const prevRouteLessonIdRef = useRef<string | undefined>(routeLessonId);
+  const syncedDeriveDllIdRef = useRef<string>("");
   const sectionsRef = useRef<ClassSection[]>(sections);
   sectionsRef.current = sections;
   const dllsRef = useRef<DailyLessonLog[]>(dlls);
@@ -191,9 +210,15 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     setLessonTitle(fresh.lessonTitle);
     setGradeAndSection(fresh.gradeAndSection);
     setReferences(fresh.references);
+    setClassroomContext(fresh.classroomContext);
+    setPeriodDraft(String(fresh.classroomContext.periodMinutes));
+    setReferenceSourceLabel(fresh.referenceSourceLabel);
+    setReferenceText(fresh.referenceText);
     setPromptNotes(fresh.promptNotes);
     setSelectedCompetencyIds(fresh.selectedCompetencyIds);
+    setBlueprint(null);
     setPickedCompetencyId(fresh.pickedCompetencyId);
+    syncedDeriveDllIdRef.current = "";
     interactedFieldsRef.current.clear();
     setFieldErrors({});
   }, []);
@@ -253,6 +278,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     if (!initialLaunchTarget) return;
     setSelectedDlpId("");
     setViewMode("edit");
+    setBlueprint(null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
     if (initialLaunchTarget.mode === "derive") {
@@ -345,6 +371,22 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     [draftDlp, dlls],
   );
 
+  const alignmentCheck = useMemo(() => {
+    if (!savedDlp) return null;
+    if (savedDlp.alignmentCheck) return savedDlp.alignmentCheck;
+    const parentSession =
+      savedDlp.sourceDllId && savedDlp.sourceSessionNumber
+        ? dlls
+            .find((d) => d.id === savedDlp.sourceDllId)
+            ?.sessions.find(
+              (s) =>
+                s.sessionNumber === savedDlp.sourceSessionNumber &&
+                s.mode === "instructional",
+            )
+        : undefined;
+    return evaluateDlpAlignment(savedDlp, { parentSession });
+  }, [savedDlp, dlls]);
+
   useEffect(() => {
     onDirtyChange?.(isDirty, draftDlp?.lessonTitle);
   }, [isDirty, draftDlp?.lessonTitle, onDirtyChange]);
@@ -389,10 +431,52 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     [activeSourceSessions, deriveSessionNumber],
   );
 
+  useEffect(() => {
+    if (builderMode !== "derive") {
+      syncedDeriveDllIdRef.current = "";
+      return;
+    }
+    if (!selectedSourceDll || syncedDeriveDllIdRef.current === selectedSourceDll.id) {
+      return;
+    }
+    syncedDeriveDllIdRef.current = selectedSourceDll.id;
+    // Always overwrite so a previous DLL's context/reference never leaks into this one.
+    applyLessonContext(
+      selectedSourceDll.classroomContext,
+      selectedSourceDll.referenceMaterial,
+    );
+  }, [builderMode, selectedSourceDll]);
+
+  function applyLessonContext(
+    context: ClassroomContext | undefined,
+    reference: { sourceLabel?: string; text: string } | undefined,
+  ) {
+    const next = context ?? DEFAULT_CLASSROOM_CONTEXT;
+    setClassroomContext({ ...next });
+    setPeriodDraft(String(next.periodMinutes));
+    setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
+    setReferenceSourceLabel(reference?.sourceLabel ?? "");
+    setReferenceText(reference?.text ?? "");
+  }
+
   function selectBuilderMode(mode: BuilderMode) {
+    if (builderMode === "derive" && mode !== "derive") {
+      applyLessonContext(undefined, undefined);
+    }
     setBuilderMode(mode);
+    setBlueprint(null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
+  }
+
+  function selectDeriveDllId(id: string) {
+    setDeriveDllId(id);
+    setBlueprint(null);
+  }
+
+  function selectDeriveSessionNumber(sessionNumber: SessionNumber) {
+    setDeriveSessionNumber(sessionNumber);
+    setBlueprint(null);
   }
 
   function validateField(
@@ -400,6 +484,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     overrides?: Partial<{
       mode: BuilderMode;
       gradeAndSection: string;
+      periodMinutes: string;
       selectedCompetencyIds: readonly string[];
     }>,
   ) {
@@ -409,10 +494,42 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     const message = validateDlpBuilderField(field, {
       mode: overrides?.mode ?? builderMode,
       gradeAndSection: overrides?.gradeAndSection ?? gradeAndSection,
+      periodMinutes: overrides?.periodMinutes ?? periodDraft,
       selectedCompetencyIds:
         overrides?.selectedCompetencyIds ?? selectedCompetencyIds,
     });
     setFieldErrors((prev) => updateFieldError(prev, field, message));
+  }
+
+  function selectPeriodPreset(minutes: number) {
+    setPeriodDraft(String(minutes));
+    setClassroomContext((prev) => ({ ...prev, periodMinutes: minutes }));
+    setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
+  }
+
+  function handlePeriodDraftChange(value: string) {
+    interactedFieldsRef.current.add("periodMinutes");
+    setPeriodDraft(value);
+    const parsed = parsePeriodMinutes(value);
+    if (parsed !== null) {
+      setClassroomContext((prev) => ({ ...prev, periodMinutes: parsed }));
+    }
+    if (fieldErrors.periodMinutes) {
+      validateField("periodMinutes", { periodMinutes: value });
+    }
+  }
+
+  function updateFacility(facility: ClassroomFacility) {
+    setClassroomContext((prev) => ({ ...prev, facility }));
+  }
+
+  function updateModality(modality: DeliveryModality) {
+    setClassroomContext((prev) => ({ ...prev, modality }));
+  }
+
+  function clearReferenceMaterial() {
+    setReferenceSourceLabel("");
+    setReferenceText("");
   }
 
   function handleGradeAndSectionChange(value: string) {
@@ -430,6 +547,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
       ? selectedCompetencyIds
       : [...selectedCompetencyIds, pickedCompetencyId];
     setSelectedCompetencyIds(nextIds);
+    setBlueprint(null);
     if (fieldErrors.selectedCompetencyIds) {
       validateField("selectedCompetencyIds", {
         selectedCompetencyIds: nextIds,
@@ -440,6 +558,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   function removeScratchCompetency(id: string) {
     interactedFieldsRef.current.add("selectedCompetencyIds");
     setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
+    setBlueprint(null);
   }
 
   function requestRemoveScratchCompetency(id: string) {
@@ -449,19 +568,19 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     });
   }
 
-  async function handleGenerate(event: FormEvent) {
-    event.preventDefault();
-    setStatus(null);
+  function validateBuilderBeforeRequest(): boolean {
     for (const field of DLP_BUILDER_FIELDS) {
       interactedFieldsRef.current.add(field);
     }
     const errors = validateDlpBuilderForm({
       mode: builderMode,
       gradeAndSection,
+      periodMinutes: periodDraft,
       selectedCompetencyIds,
     });
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
+      setStatus(null);
       const firstInvalid = DLP_BUILDER_FIELDS.find((field) =>
         Boolean(errors[field]),
       );
@@ -470,37 +589,131 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
           ?.querySelector<HTMLElement>(`[data-field="${firstInvalid}"]`)
           ?.focus();
       }
-      return;
+      return false;
     }
     interactedFieldsRef.current.clear();
     setFieldErrors({});
+    return true;
+  }
+
+  function buildDlpRequestPayload() {
+    const resolvedPeriod =
+      parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
+    const nextContext: ClassroomContext = {
+      ...classroomContext,
+      periodMinutes: resolvedPeriod,
+    };
+    const referenceMaterial = referenceText.trim()
+      ? {
+          ...(referenceSourceLabel.trim()
+            ? { sourceLabel: referenceSourceLabel.trim() }
+            : {}),
+          text: referenceText,
+        }
+      : builderMode === "derive"
+        ? { text: "" }
+        : undefined;
+
+    return builderMode === "derive"
+      ? {
+          mode: "derive" as const,
+          dllId: deriveDllId,
+          sessionNumber: deriveSessionNumber,
+          lessonTitle,
+          references,
+          classroomContext: nextContext,
+          referenceMaterial,
+          promptNotes,
+        }
+      : {
+          mode: "scratch" as const,
+          lessonTitle,
+          gradeAndSection,
+          references,
+          classroomContext: nextContext,
+          ...(referenceMaterial ? { referenceMaterial } : {}),
+          promptNotes,
+          competencyIds: selectedCompetencyIds,
+        };
+  }
+
+  async function handlePlanLesson(event?: FormEvent) {
+    event?.preventDefault();
+    if (!validateBuilderBeforeRequest()) return;
+
+    setStatus(null);
+    setPlanning(true);
+    try {
+      const res = await fetch("/api/dlps/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildDlpRequestPayload()),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const planned = (await res.json()) as DlpLessonBlueprint;
+      setBlueprint(planned);
+      setStatus({
+        tone: "success",
+        text: planned.lockedToParentSession
+          ? `Lesson Blueprint locked to parent DLL Session ${planned.sourceSessionNumber}. Review the inherited plan, then click Approve & Generate DLP.`
+          : "Lesson Blueprint ready. Review or tweak objectives, activity, and formative assessment, then click Approve & Generate DLP.",
+      });
+    } catch (err) {
+      setStatus({
+        tone: "error",
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  function updateBlueprintTitle(title: string) {
+    setBlueprint((prev) => (prev ? { ...prev, lessonTitle: title } : prev));
+  }
+
+  function updateBlueprintObjectives(learningObjectives: string) {
+    setBlueprint((prev) =>
+      prev && !prev.lockedToParentSession
+        ? { ...prev, learningObjectives }
+        : prev,
+    );
+  }
+
+  function selectBlueprintActivity(activityId: string) {
+    setBlueprint((prev) =>
+      prev && !prev.lockedToParentSession
+        ? { ...prev, selectedActivityId: activityId }
+        : prev,
+    );
+  }
+
+  function selectBlueprintAssessment(assessmentType: FormativeAssessmentType) {
+    setBlueprint((prev) =>
+      prev && !prev.lockedToParentSession
+        ? { ...prev, selectedAssessmentType: assessmentType }
+        : prev,
+    );
+  }
+
+  async function handleApproveAndGenerate() {
+    if (!validateBuilderBeforeRequest()) return;
+
+    setStatus(null);
     setGenerating(true);
     try {
-      const payload =
-        builderMode === "derive"
-          ? {
-              mode: "derive" as const,
-              dllId: deriveDllId,
-              sessionNumber: deriveSessionNumber,
-              lessonTitle,
-              references,
-              promptNotes,
-            }
-          : {
-              mode: "scratch" as const,
-              lessonTitle,
-              gradeAndSection,
-              references,
-              promptNotes,
-              competencyIds: selectedCompetencyIds,
-            };
+      const payload = buildDlpRequestPayload();
       const res = await fetch("/api/dlps/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          ...(blueprint ? { blueprint } : {}),
+        }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const created = (await res.json()) as DailyLessonPlan;
+      setBlueprint(null);
       setDlps((prev) => [created, ...prev]);
       setSelectedDlpId(created.id);
       setViewMode("edit");
@@ -634,6 +847,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     setSelectedDlpId,
     startNewDlp,
     draftDlp,
+    alignmentCheck,
     isDirty,
     draftLineage,
     viewMode,
@@ -642,18 +856,31 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     builderMode,
     selectBuilderMode,
     deriveDllId,
-    setDeriveDllId,
+    setDeriveDllId: selectDeriveDllId,
     deriveSessionNumber,
-    setDeriveSessionNumber,
+    setDeriveSessionNumber: selectDeriveSessionNumber,
     lessonTitle,
     setLessonTitle,
     gradeAndSection,
     handleGradeAndSectionChange,
     references,
     setReferences,
+    classroomContext,
+    periodDraft,
+    selectPeriodPreset,
+    handlePeriodDraftChange,
+    updateFacility,
+    updateModality,
+    referenceSourceLabel,
+    setReferenceSourceLabel,
+    referenceText,
+    setReferenceText,
+    clearReferenceMaterial,
     promptNotes,
     setPromptNotes,
     selectedCompetencyIds,
+    blueprint,
+    planning,
     generating,
     pickedCompetencyId,
     setPickedCompetencyId,
@@ -666,7 +893,12 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     validateField,
     addScratchCompetency,
     requestRemoveScratchCompetency,
-    handleGenerate,
+    handlePlanLesson,
+    updateBlueprintTitle,
+    updateBlueprintObjectives,
+    selectBlueprintActivity,
+    selectBlueprintAssessment,
+    handleApproveAndGenerate,
     updateDraftHeader,
     updateDraftIntentions,
     updateDraftActivity,

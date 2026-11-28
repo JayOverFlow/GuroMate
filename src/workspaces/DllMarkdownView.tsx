@@ -225,6 +225,14 @@ export function DllMarkdownView({
                 ? renderInlineTokens(dll.references)
                 : "—"}
             </p>
+            {dll.aiDeclaration?.trim() && (
+              <p className="font-body text-body-sm text-on-surface-variant">
+                <strong className="font-semibold text-on-surface">
+                  Declaration of AI Use (DO 003, s. 2026 Annex A):
+                </strong>{" "}
+                {renderInlineTokens(dll.aiDeclaration.trim())}
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-gutter-xs shrink-0">

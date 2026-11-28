@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
+  computeCatalogHealthReport,
+  formatCatalogHealthReport,
   mergeBowIntoCatalog,
   parseBowDocument,
   type ParsedBowRow,
@@ -108,6 +110,9 @@ function main(): void {
   for (const row of coverage.byComponent) {
     console.log(`  ${row.component}: ${row.total} total (${row.bowCount} with BoW)`);
   }
+
+  const health = computeCatalogHealthReport(merged.catalog);
+  console.log(formatCatalogHealthReport(health));
 }
 
 main();

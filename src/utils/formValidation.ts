@@ -1,5 +1,7 @@
 import { AI_PROVIDER_MAP } from "../engine/providers";
 import {
+  MAX_PERIOD_MINUTES,
+  MIN_PERIOD_MINUTES,
   QUIZ_QUESTION_TYPES,
   type DllSessionConfig,
   type GuroMateSettings,
@@ -345,20 +347,36 @@ export function validateCustomTimerForm(
   );
 }
 
+export function parsePeriodMinutes(value: string | number): number | null {
+  return parseIntegerInRange(value, MIN_PERIOD_MINUTES, MAX_PERIOD_MINUTES);
+}
+
+export function validatePeriodMinutes(
+  value: string | number | undefined,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return parsePeriodMinutes(value) !== null
+    ? undefined
+    : `Enter a whole number from ${MIN_PERIOD_MINUTES} to ${MAX_PERIOD_MINUTES} minutes.`;
+}
+
 export type DllSessionFieldKey = `session-${SessionNumber}`;
 
 export type DllBuilderFieldKey =
   | "gradeAndSection"
+  | "periodMinutes"
   | DllSessionFieldKey
   | "sessions";
 
 export interface DllBuilderFormInput {
   gradeAndSection: string;
+  periodMinutes?: string | number;
   sessions: readonly DllSessionConfig[];
 }
 
 export const DLL_BUILDER_FIELDS: readonly DllBuilderFieldKey[] = [
   "gradeAndSection",
+  "periodMinutes",
   "session-1",
   "session-2",
   "session-3",
@@ -389,6 +407,10 @@ export function validateDllBuilderField(
     return isNonEmptyText(input.gradeAndSection)
       ? undefined
       : "Enter a Grade Level and Section.";
+  }
+
+  if (field === "periodMinutes") {
+    return validatePeriodMinutes(input.periodMinutes);
   }
 
   if (field === "sessions") {
@@ -422,16 +444,21 @@ export function validateDllBuilderForm(
   );
 }
 
-export type DlpBuilderFieldKey = "gradeAndSection" | "selectedCompetencyIds";
+export type DlpBuilderFieldKey =
+  | "gradeAndSection"
+  | "periodMinutes"
+  | "selectedCompetencyIds";
 
 export interface DlpBuilderFormInput {
   mode: "scratch" | "derive";
   gradeAndSection: string;
+  periodMinutes?: string | number;
   selectedCompetencyIds: readonly string[];
 }
 
 export const DLP_BUILDER_FIELDS: readonly DlpBuilderFieldKey[] = [
   "gradeAndSection",
+  "periodMinutes",
   "selectedCompetencyIds",
 ];
 
@@ -439,6 +466,9 @@ export function validateDlpBuilderField(
   field: DlpBuilderFieldKey,
   input: DlpBuilderFormInput,
 ): string | undefined {
+  if (field === "periodMinutes") {
+    return validatePeriodMinutes(input.periodMinutes);
+  }
   if (input.mode !== "scratch") return undefined;
   switch (field) {
     case "gradeAndSection":

@@ -1,8 +1,16 @@
 import { useEffect, useId } from "react";
+import { ClassroomContextFieldset } from "../components/ClassroomContextFieldset";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Do016AlignmentBanner } from "../components/Do016AlignmentBanner";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
-import { formatLearningAreas } from "../engine/lessonHelpers";
+import { ReferenceMaterialInput } from "../components/ReferenceMaterialInput";
+import { SessionBlueprintCard } from "../components/SessionBlueprintCard";
+import {
+  FORMATIVE_ASSESSMENT_LABELS,
+  formatClassroomContextSummary,
+  formatLearningAreas,
+} from "../engine/lessonHelpers";
 import { type SessionNumber } from "../engine/types";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import {
@@ -74,6 +82,7 @@ export function DllWorkspace({
     status,
     startNewDll,
     draftDll,
+    alignmentCheck,
     isDirty,
     derivedDlpCount,
     viewMode,
@@ -86,13 +95,28 @@ export function DllWorkspace({
     validateGradeAndSectionOnBlur,
     fieldErrors,
     gradeSectionRef,
+    periodMinutesRef,
     sessionCardRefs,
     sessionsGroupRef,
     references,
     setReferences,
+    classroomContext,
+    periodDraft,
+    selectPeriodPreset,
+    updatePeriodDraft,
+    validatePeriodDraftOnBlur,
+    updateFacility,
+    updateModality,
+    referenceSourceLabel,
+    setReferenceSourceLabel,
+    referenceText,
+    setReferenceText,
+    clearReferenceMaterial,
     promptNotes,
     setPromptNotes,
     sessionConfigs,
+    blueprint,
+    planning,
     generating,
     pickedCompetencyId,
     setPickedCompetencyId,
@@ -102,7 +126,12 @@ export function DllWorkspace({
     removeCompetencyFromSession,
     updateSessionMode,
     updateNonInstructionalReason,
-    handleGenerate,
+    handlePlanLesson,
+    updateBlueprintTitle,
+    updateBlueprintSessionObjectives,
+    selectBlueprintActivity,
+    selectBlueprintAssessment,
+    handleApproveAndGenerate,
     updateDraftHeader,
     updateDraftSessionField,
     handleSaveEdits,
@@ -241,15 +270,16 @@ export function DllWorkspace({
           Loading Daily Lesson Logs and Curriculum Catalog...
         </div>
       ) : !draftDll ? (
-        /* Create New 5-Session DLL Form */
-        <form
-          noValidate
-          onSubmit={(e) => void handleGenerate(e)}
-          className="flex flex-col gap-gutter-lg"
-        >
+        /* Create New 5-Session DLL Form (Step 1: Plan Lesson -> Step 2: Lesson Blueprint -> Approve & Generate DLL) */
+        <div className="flex flex-col gap-gutter-lg">
+          <form
+            noValidate
+            onSubmit={(e) => void handlePlanLesson(e)}
+            className="flex flex-col gap-gutter-lg"
+          >
           <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
             <legend className="font-title text-title-lg text-on-surface px-1">
-              1. Header &amp; Prompt Notes
+              1. Header, Classroom Context &amp; Reference Material
             </legend>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
@@ -338,17 +368,39 @@ export function DllWorkspace({
               />
             </div>
 
+            <ClassroomContextFieldset
+              baseId={baseId}
+              value={classroomContext}
+              periodDraft={periodDraft}
+              periodInputRef={periodMinutesRef}
+              periodError={fieldErrors.periodMinutes}
+              onSelectPresetMinutes={selectPeriodPreset}
+              onChangePeriodDraft={updatePeriodDraft}
+              onBlurPeriodDraft={validatePeriodDraftOnBlur}
+              onChangeFacility={updateFacility}
+              onChangeModality={updateModality}
+            />
+
+            <ReferenceMaterialInput
+              baseId={baseId}
+              sourceLabel={referenceSourceLabel}
+              text={referenceText}
+              onChangeSourceLabel={setReferenceSourceLabel}
+              onChangeText={setReferenceText}
+              onClear={clearReferenceMaterial}
+            />
+
             <div className="flex flex-col gap-gutter-xs">
               <div className="flex flex-wrap items-center justify-between gap-gutter-xs">
                 <label
                   htmlFor={`${baseId}-prompt-notes`}
                   className="font-label text-label-md text-on-surface"
                 >
-                  Optional Prompt Notes (AI Steering)
+                  Optional Prompt Notes
                 </label>
                 <span className="font-body text-body-sm text-on-surface-variant">
-                  Included in AI prompt only — never written into Learner
-                  Context
+                  Extra instructions beyond Classroom Context — never written
+                  into Learner Context
                 </span>
               </div>
               <textarea
@@ -356,7 +408,7 @@ export function DllWorkspace({
                 rows={2}
                 value={promptNotes}
                 onChange={(e) => setPromptNotes(e.target.value)}
-                placeholder="e.g. 45-minute periods, limited tools in lab, group rotation..."
+                placeholder="e.g. Use local barangay examples, rotate pairs across limited toolkits, emphasize OHS..."
                 className={INPUT_CLASS}
               />
             </div>
@@ -594,24 +646,201 @@ export function DllWorkspace({
             </div>
           </fieldset>
 
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-end gap-gutter-sm">
             <button
               type="submit"
-              disabled={generating}
-              className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              disabled={planning || generating}
+              className={`inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded font-label text-label-lg focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60 ${
+                blueprint
+                  ? "bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low"
+                  : "bg-primary text-on-primary hover:bg-primary-container"
+              }`}
             >
               <span
                 className="material-symbols-outlined text-title-md"
                 aria-hidden="true"
               >
-                auto_awesome
+                {blueprint ? "refresh" : "edit_note"}
               </span>
               <span>
-                {generating ? "Generating DLL..." : "Generate 5-Session DLL"}
+                {planning
+                  ? "Planning Lesson..."
+                  : blueprint
+                    ? "Re-plan"
+                    : "Plan Lesson"}
               </span>
             </button>
           </div>
         </form>
+
+        {blueprint && (
+          <section
+            aria-labelledby={`${baseId}-blueprint-heading`}
+            className="bg-surface-container-lowest border-2 border-primary/40 rounded-md p-gutter-lg flex flex-col gap-gutter-md"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-gutter-md pb-gutter-sm border-b border-outline-variant">
+              <div className="flex flex-col gap-gutter-xs">
+                <h2
+                  id={`${baseId}-blueprint-heading`}
+                  className="font-title text-title-lg text-on-surface"
+                >
+                  3. Lesson Blueprint — Review &amp; Approve
+                </h2>
+                <p className="font-body text-body-sm text-on-surface-variant">
+                  Best-fit{" "}
+                  <strong className="text-on-surface">(Recommended)</strong>{" "}
+                  activities and DO 8 Formative Assessments are pre-selected.
+                  Edit any objective, swap choices in one click, or click{" "}
+                  <strong className="text-on-surface">
+                    Approve &amp; Generate DLL
+                  </strong>{" "}
+                  to lock your plan.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-gutter-sm">
+                <button
+                  type="button"
+                  disabled={planning || generating}
+                  onClick={() => void handlePlanLesson()}
+                  className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    refresh
+                  </span>
+                  <span>{planning ? "Re-planning..." : "Re-plan"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={planning || generating}
+                  onClick={() => void handleApproveAndGenerate()}
+                  className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+                >
+                  <span
+                    className="material-symbols-outlined text-title-md"
+                    aria-hidden="true"
+                  >
+                    auto_awesome
+                  </span>
+                  <span>
+                    {generating
+                      ? "Generating DLL..."
+                      : "Approve & Generate DLL"}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-bp-title`}
+                className="font-label text-label-md text-on-surface"
+              >
+                Proposed Lesson Title
+              </label>
+              <input
+                id={`${baseId}-bp-title`}
+                type="text"
+                disabled={planning || generating}
+                value={blueprint.lessonTitle}
+                onChange={(e) => updateBlueprintTitle(e.target.value)}
+                className={INPUT_CLASS}
+              />
+            </div>
+
+            <div className="flex flex-col gap-gutter-md">
+              {blueprint.sessions.map((session) =>
+                session.mode === "non-instructional" ? (
+                  <article
+                    key={session.sessionNumber}
+                    className="rounded-md border border-outline-variant bg-surface-container-low p-gutter-md flex flex-wrap items-center justify-between gap-gutter-xs"
+                  >
+                    <div className="flex items-center gap-gutter-sm">
+                      <h3 className="font-mono text-mono-md font-semibold text-on-surface">
+                        Session {session.sessionNumber}
+                      </h3>
+                      <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
+                        Non-Instructional
+                      </span>
+                    </div>
+                    <span className="font-body text-body-sm text-on-surface-variant">
+                      {session.nonInstructionalReason ||
+                        "Non-instructional / Holiday"}
+                    </span>
+                  </article>
+                ) : (
+                  <SessionBlueprintCard
+                    key={session.sessionNumber}
+                    baseId={`${baseId}-bp-s${session.sessionNumber}`}
+                    heading={`Session ${session.sessionNumber}`}
+                    components={session.components}
+                    progressionFocus={session.progressionFocus}
+                    learningObjectives={session.learningObjectives}
+                    activityOptions={session.activityOptions}
+                    selectedActivityId={session.selectedActivityId}
+                    assessmentOptions={session.assessmentOptions}
+                    selectedAssessmentType={session.selectedAssessmentType}
+                    disabled={planning || generating}
+                    onChangeObjectives={(value) =>
+                      updateBlueprintSessionObjectives(
+                        session.sessionNumber,
+                        value,
+                      )
+                    }
+                    onSelectActivity={(activityId) =>
+                      selectBlueprintActivity(session.sessionNumber, activityId)
+                    }
+                    onSelectAssessment={(assessmentType) =>
+                      selectBlueprintAssessment(
+                        session.sessionNumber,
+                        assessmentType,
+                      )
+                    }
+                  />
+                ),
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-gutter-sm pt-gutter-sm border-t border-outline-variant">
+              <button
+                type="button"
+                disabled={planning || generating}
+                onClick={() => void handlePlanLesson()}
+                className="inline-flex items-center justify-center gap-gutter-xs px-gutter-md py-gutter-sm rounded bg-surface-container-lowest text-on-surface border border-outline-variant font-label text-label-lg hover:bg-surface-container-low focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  refresh
+                </span>
+                <span>{planning ? "Re-planning..." : "Re-plan"}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={planning || generating}
+                onClick={() => void handleApproveAndGenerate()}
+                className="inline-flex items-center justify-center gap-gutter-sm px-gutter-lg py-gutter-sm rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-state-change disabled:opacity-60"
+              >
+                <span
+                  className="material-symbols-outlined text-title-md"
+                  aria-hidden="true"
+                >
+                  auto_awesome
+                </span>
+                <span>
+                  {generating ? "Generating DLL..." : "Approve & Generate DLL"}
+                </span>
+              </button>
+            </div>
+          </section>
+        )}
+        </div>
       ) : (
         /* Editing / Inspecting Saved 5-Session DLL */
         <div className="flex flex-col gap-gutter-lg">
@@ -628,6 +857,11 @@ export function DllWorkspace({
                 <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                   5 Sessions
                 </span>
+                {draftDll.classroomContext && (
+                  <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label text-label-sm">
+                    {formatClassroomContextSummary(draftDll.classroomContext)}
+                  </span>
+                )}
                 {isDirty && (
                   <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
                     Unsaved edits
@@ -656,6 +890,12 @@ export function DllWorkspace({
             </div>
 
             {/* 5-Session Quick Strip (hidden in Markdown Web View) */}
+            {alignmentCheck && (
+              <Do016AlignmentBanner
+                alignmentCheck={alignmentCheck}
+                hasUnsavedEdits={isDirty}
+              />
+            )}
             {viewMode === "edit" && (
               <div className="grid grid-cols-1 md:grid-cols-5 gap-gutter-md items-stretch">
                 {draftDll.sessions.map((session) => (
@@ -687,6 +927,16 @@ export function DllWorkspace({
                           ? session.nonInstructionalReason || "Non-instructional"
                           : session.learningObjectives || "Instructional session"}
                       </p>
+                      {session.mode === "instructional" &&
+                        session.selectedAssessmentType && (
+                          <span className="self-start px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant font-label text-label-sm">
+                            {
+                              FORMATIVE_ASSESSMENT_LABELS[
+                                session.selectedAssessmentType
+                              ]
+                            }
+                          </span>
+                        )}
                     </div>
 
                     {session.mode === "instructional" &&
@@ -891,6 +1141,33 @@ export function DllWorkspace({
                         className={INPUT_CLASS}
                       />
                     </div>
+                  </div>
+
+                  <div className="flex flex-col gap-gutter-xs">
+                    <label
+                      htmlFor={`${baseId}-edit-ai-declaration`}
+                      className="font-label text-label-md text-on-surface"
+                    >
+                      Declaration of AI Use (DO 003, s. 2026 Annex A)
+                    </label>
+                    <span
+                      id={`${baseId}-edit-ai-declaration-hint`}
+                      className="font-body text-body-sm text-on-surface-variant"
+                    >
+                      Injected into the official ILAW header on .docx export.
+                      Leave blank to fall back to your Settings default.
+                    </span>
+                    <textarea
+                      id={`${baseId}-edit-ai-declaration`}
+                      rows={2}
+                      value={draftDll.aiDeclaration ?? ""}
+                      placeholder="Auto-populated on generation; leave blank to use your Settings DO 003, s. 2026 Annex A default."
+                      aria-describedby={`${baseId}-edit-ai-declaration-hint`}
+                      onChange={(e) =>
+                        updateDraftHeader("aiDeclaration", e.target.value)
+                      }
+                      className={INPUT_CLASS}
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter-md">

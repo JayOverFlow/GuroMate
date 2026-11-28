@@ -3,26 +3,41 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import rawCatalog from "./curriculumCatalog.json";
 import {
+  evaluateDllAlignment,
+  evaluateDlpAlignment,
+  summarizeStructuralErrors,
+} from "./alignmentCheck";
+import {
+  DLL_PLAN_SYSTEM_INSTRUCTION,
   DLL_SYSTEM_INSTRUCTION,
   DllNotFoundError,
   DllValidationError,
+  assembleDllBlueprint,
   assembleGeneratedSessions,
+  buildDllPlanPrompt,
   buildDllPrompt,
   normalizeEditedDll,
+  parseAiDllBlueprintPayload,
   parseAiDllPayload,
   renderDllMarkdown,
   resolveDllSessions,
 } from "./dll";
 import {
+  DLP_PLAN_SYSTEM_INSTRUCTION,
   DLP_SYSTEM_INSTRUCTION,
   DlpNotFoundError,
   DlpValidationError,
+  assembleDlpBlueprint,
+  buildDlpPlanPrompt,
   buildDlpPrompt,
+  isMatchingDlpBlueprint,
   normalizeActivityPair,
   normalizeEditedDlp,
+  parseAiDlpBlueprintPayload,
   parseAiDlpPayload,
   renderDlpMarkdown,
   resolveDerivedDlpContext,
+  resolveDlpGenerationLocks,
   resolveScratchDlpContext,
 } from "./dlp";
 import {
@@ -41,7 +56,14 @@ import {
 } from "./quiz";
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
-import { formatLearningAreas, resolveLessonReferences } from "./lessonHelpers";
+import {
+  composeAiDeclaration,
+  DEFAULT_AI_DECLARATION_TEMPLATE,
+  formatLearningAreas,
+  normalizeClassroomContext,
+  normalizeReferenceMaterial,
+  resolveLessonReferences,
+} from "./lessonHelpers";
 import { createLiveAiAdapter } from "./liveAiAdapter";
 import {
   AI_PROVIDER_MAP,
@@ -49,6 +71,10 @@ import {
   sortModelsFreeFirst,
 } from "./providers";
 import { buildQuizDocxBuffer } from "./quizDocx";
+import {
+  ReferenceMaterialError,
+  extractReferenceMaterialFromInput,
+} from "./referenceMaterial";
 import { readZipEntry, replaceZipEntry } from "./zip";
 import {
   GRADE_LEVELS,
@@ -57,6 +83,7 @@ import {
   type AiConnectionCheckResult,
   type AiModelListResult,
   type AiProviderSettings,
+  type AlignmentCheckResult,
   type BudgetOfWorkInfo,
   type ClassSection,
   type ClassSectionInput,
@@ -65,6 +92,10 @@ import {
   type CustomCompetencyInput,
   type DailyLessonLog,
   type DailyLessonPlan,
+  type DllLessonBlueprint,
+  type DllSessionPlan,
+  type DlpActivityPair,
+  type DlpLessonBlueprint,
   type GenerateDllInput,
   type GenerateDlpInput,
   type GenerateQuizInput,
@@ -72,6 +103,8 @@ import {
   type GuroMateEngineOptions,
   type GuroMateSettings,
   type GradeLevel,
+  type PlanDllInput,
+  type PlanDlpInput,
   type QuarterNumber,
   type Quiz,
   type QuizSyncResult,
@@ -276,8 +309,7 @@ export const DEFAULT_SETTINGS: GuroMateSettings = {
     cooperatingTeacherName: "FERDINAND S. BALTAZAR",
     tleCoordinatorName: "LEA S. RESTA",
     academicHeadName: "NARIZA JANE M. TUMUNDONG",
-    aiDeclaration:
-      "This lesson plan was developed using AI and subsequently reviewed for accuracy and alignment with curriculum standards.",
+    aiDeclaration: DEFAULT_AI_DECLARATION_TEMPLATE,
   },
   ai: {
     aiProvider: "openai-compatible",
@@ -299,6 +331,7 @@ export {
   DlpValidationError,
   QuizNotFoundError,
   QuizValidationError,
+  ReferenceMaterialError,
 };
 
 function validateAndBuildClassSection(
@@ -795,17 +828,26 @@ export function createGuroMateEngine(
     (id) => new QuizNotFoundError(`Formative Quiz not found: ${id}`),
   );
 
-  async function generateDll(input: GenerateDllInput): Promise<DailyLessonLog> {
+  async function planDll(input: PlanDllInput): Promise<DllLessonBlueprint> {
     const catalog = await listCurriculum();
     const competencyMap = new Map(catalog.map((c) => [c.id, c]));
     const resolved = resolveDllSessions(input, competencyMap);
     const learningAreas = formatLearningAreas(resolved.components);
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext,
+      (msg) => new DllValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(
+      input.referenceMaterial,
+    );
 
-    const prompt = buildDllPrompt({
+    const prompt = buildDllPlanPrompt({
       lessonTitle: input.lessonTitle,
       gradeAndSection: resolved.gradeAndSection,
       learningAreas,
       references: input.references,
+      classroomContext,
+      referenceMaterial,
       promptNotes: input.promptNotes,
       orderedConfigs: resolved.orderedConfigs,
       sessionCompetencies: resolved.sessionCompetencies,
@@ -813,47 +855,251 @@ export function createGuroMateEngine(
 
     const settings = await getSettings();
     const aiResult = await aiAdapter.generateText({
-      systemInstruction: DLL_SYSTEM_INSTRUCTION,
+      systemInstruction: DLL_PLAN_SYSTEM_INSTRUCTION,
       prompt,
       settings: settings.ai,
     });
-    const parsed = parseAiDllPayload(aiResult.text);
+    const parsed = parseAiDllBlueprintPayload(aiResult.text);
+
+    return assembleDllBlueprint({
+      input,
+      learningAreas,
+      gradeAndSection: resolved.gradeAndSection,
+      orderedConfigs: resolved.orderedConfigs,
+      sessionCompetencies: resolved.sessionCompetencies,
+      aiPayload: parsed,
+    });
+  }
+
+  function buildStructuralRepairPrompt(
+    originalPrompt: string,
+    issues: string[],
+  ): string {
+    return [
+      originalPrompt,
+      "",
+      "REPAIR REQUIRED (single automatic retry):",
+      "Your previous response was malformed or missing required ILAW structural fields:",
+      ...issues.map((issue) => `- ${issue}`),
+      "Return ONLY one complete, valid JSON object matching the exact schema above with every required field populated. Do not wrap in explanations.",
+    ].join("\n");
+  }
+
+  /**
+   * Generates a lesson, then runs at most one targeted repair call, and only when the
+   * first response is unparseable or fails hard structural checks.
+   */
+  async function generateWithSingleRepair<P, L>(params: {
+    systemInstruction: string;
+    prompt: string;
+    aiSettings: AiProviderSettings;
+    parse: (text: string) => P;
+    build: (parsed: P, responseModel: string | undefined, previous?: L) => L;
+    evaluate: (lesson: L, autoRepaired: boolean) => AlignmentCheckResult;
+  }): Promise<L & { alignmentCheck: AlignmentCheckResult }> {
+    const { systemInstruction, prompt, aiSettings, parse, build, evaluate } = params;
+    const initialAiResult = await aiAdapter.generateText({
+      systemInstruction,
+      prompt,
+      settings: aiSettings,
+    });
+
+    let initialParsed: P | null = null;
+    let initialParseError: unknown = null;
+    try {
+      initialParsed = parse(initialAiResult.text);
+    } catch (err) {
+      initialParseError = err;
+    }
+
+    if (initialParsed === null) {
+      const parseReason =
+        initialParseError instanceof Error
+          ? initialParseError.message
+          : "AI response was not valid JSON.";
+      const repairAiResult = await aiAdapter.generateText({
+        systemInstruction,
+        prompt: buildStructuralRepairPrompt(prompt, [parseReason]),
+        settings: aiSettings,
+      });
+      const repaired = build(
+        parse(repairAiResult.text),
+        repairAiResult.model ?? initialAiResult.model,
+      );
+      return { ...repaired, alignmentCheck: evaluate(repaired, true) };
+    }
+
+    const initial = build(initialParsed, initialAiResult.model);
+    const initialCheck = evaluate(initial, false);
+    if (initialCheck.structuralValid) {
+      return { ...initial, alignmentCheck: initialCheck };
+    }
+
+    const repairAiResult = await aiAdapter.generateText({
+      systemInstruction,
+      prompt: buildStructuralRepairPrompt(
+        prompt,
+        summarizeStructuralErrors(initialCheck),
+      ),
+      settings: aiSettings,
+    });
+
+    let repairedParsed: P | null = null;
+    try {
+      repairedParsed = parse(repairAiResult.text);
+    } catch {
+      repairedParsed = null;
+    }
+    if (repairedParsed === null) {
+      return { ...initial, alignmentCheck: { ...initialCheck, autoRepaired: true } };
+    }
+
+    const repaired = build(
+      repairedParsed,
+      repairAiResult.model ?? initialAiResult.model,
+      initial,
+    );
+    return { ...repaired, alignmentCheck: evaluate(repaired, true) };
+  }
+
+  function mergeRepairedDllSessions(
+    initial: DailyLessonLog["sessions"],
+    repaired: DailyLessonLog["sessions"],
+  ): DailyLessonLog["sessions"] {
+    return repaired.map((rep, idx) => {
+      const prev = initial[idx]!;
+      if (rep.mode !== "instructional" || prev.mode !== "instructional") {
+        return rep;
+      }
+      return {
+        ...rep,
+        learningObjectives: rep.learningObjectives || prev.learningObjectives,
+        preLesson: rep.preLesson || prev.preLesson,
+        lessonFlow: rep.lessonFlow || prev.lessonFlow,
+        learningResources: rep.learningResources || prev.learningResources,
+        integrationAndContextualization:
+          rep.integrationAndContextualization || prev.integrationAndContextualization,
+        formativeAssessment: rep.formativeAssessment || prev.formativeAssessment,
+        extendedLearningOpportunities:
+          rep.extendedLearningOpportunities || prev.extendedLearningOpportunities,
+      };
+    }) as DailyLessonLog["sessions"];
+  }
+
+  function mergeRepairedDlpPair(
+    initial: DlpActivityPair,
+    repaired: DlpActivityPair,
+  ): DlpActivityPair {
+    return {
+      teacherActivity: repaired.teacherActivity || initial.teacherActivity,
+      studentActivity: repaired.studentActivity || initial.studentActivity,
+    };
+  }
+
+  async function resolveParentDllSession(
+    sourceDllId: string | undefined,
+    sourceSessionNumber: number | undefined,
+  ): Promise<DllSessionPlan | undefined> {
+    if (!sourceDllId || !sourceSessionNumber) return undefined;
+    try {
+      const parentDll = await dllStore.getById(sourceDllId);
+      return parentDll.sessions.find(
+        (s) => s.sessionNumber === sourceSessionNumber && s.mode === "instructional",
+      );
+    } catch (err) {
+      if (err instanceof DllNotFoundError) return undefined;
+      throw err;
+    }
+  }
+
+  async function generateDll(input: GenerateDllInput): Promise<DailyLessonLog> {
+    const catalog = await listCurriculum();
+    const competencyMap = new Map(catalog.map((c) => [c.id, c]));
+    const resolved = resolveDllSessions(input, competencyMap);
+    const learningAreas = formatLearningAreas(resolved.components);
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext,
+      (msg) => new DllValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(input.referenceMaterial);
+
+    const prompt = buildDllPrompt({
+      lessonTitle: input.lessonTitle,
+      gradeAndSection: resolved.gradeAndSection,
+      learningAreas,
+      references: input.references,
+      classroomContext,
+      referenceMaterial,
+      promptNotes: input.promptNotes,
+      orderedConfigs: resolved.orderedConfigs,
+      sessionCompetencies: resolved.sessionCompetencies,
+      blueprint: input.blueprint,
+    });
+
+    const settings = await getSettings();
     const now = new Date().toISOString();
     const fallbackTitle = `${learningAreas} (${resolved.gradeAndSection})`;
-
     const selectedCompetencies = resolved.orderedConfigs.flatMap(
       (cfg) => resolved.sessionCompetencies.get(cfg.sessionNumber) ?? [],
     );
 
-    const dll: DailyLessonLog = {
-      id: `dll-${randomUUID().slice(0, 8)}`,
-      createdAt: now,
-      updatedAt: now,
-      lessonTitle:
-        input.lessonTitle?.trim() ||
-        (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
-        fallbackTitle,
-      learningAreas,
-      gradeAndSection: resolved.gradeAndSection,
-      references: resolveLessonReferences(
-        input.references,
-        parsed.references,
-        selectedCompetencies,
-      ),
-      promptNotes: input.promptNotes?.trim() ?? "",
-      intentions: {
-        learningCompetencies: resolved.learningCompetencies,
-        contentStandards: resolved.contentStandards,
-        performanceStandards: resolved.performanceStandards,
-        learnerContext: "",
-      },
-      sessions: assembleGeneratedSessions(
+    const buildCandidateDll = (
+      parsed: ReturnType<typeof parseAiDllPayload>,
+      responseModel: string | undefined,
+      previousSessions?: DailyLessonLog["sessions"],
+    ): DailyLessonLog => {
+      const assembledSessions = assembleGeneratedSessions(
         resolved.orderedConfigs,
         resolved.sessionCompetencies,
         parsed.sessions,
-      ),
+        input.blueprint,
+      );
+      return {
+        id: `dll-${randomUUID().slice(0, 8)}`,
+        createdAt: now,
+        updatedAt: now,
+        lessonTitle:
+          input.blueprint?.lessonTitle.trim() ||
+          input.lessonTitle?.trim() ||
+          (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
+          fallbackTitle,
+        learningAreas,
+        gradeAndSection: resolved.gradeAndSection,
+        references: resolveLessonReferences(
+          input.blueprint?.references.trim() || input.references?.trim(),
+          parsed.references,
+          selectedCompetencies,
+        ),
+        ...(classroomContext ? { classroomContext } : {}),
+        ...(referenceMaterial ? { referenceMaterial } : {}),
+        aiDeclaration: composeAiDeclaration({
+          template: settings.profile.aiDeclaration,
+          aiSettings: settings.ai,
+          responseModel,
+        }),
+        promptNotes: input.promptNotes?.trim() ?? "",
+        intentions: {
+          learningCompetencies: resolved.learningCompetencies,
+          contentStandards: resolved.contentStandards,
+          performanceStandards: resolved.performanceStandards,
+          learnerContext: "",
+        },
+        sessions: previousSessions
+          ? mergeRepairedDllSessions(previousSessions, assembledSessions)
+          : assembledSessions,
+      };
     };
 
+    const dll = await generateWithSingleRepair({
+      systemInstruction: DLL_SYSTEM_INSTRUCTION,
+      prompt,
+      aiSettings: settings.ai,
+      parse: parseAiDllPayload,
+      build: (parsed, model, previous?: DailyLessonLog) =>
+        buildCandidateDll(parsed, model, previous?.sessions),
+      evaluate: (lesson, autoRepaired) =>
+        evaluateDllAlignment(lesson, { blueprint: input.blueprint, autoRepaired }),
+    });
     return dllStore.prepend(dll);
   }
 
@@ -875,14 +1121,18 @@ export function createGuroMateEngine(
     prefix: "DLL" | "DLP",
     id: string,
     lessonTitle: string,
-    inject: (docXml: string, profile: TeacherProfileSettings) => string,
+    inject: (
+      docXml: string,
+      profile: TeacherProfileSettings,
+      aiSettings: AiProviderSettings,
+    ) => string,
   ) {
     const settings = await getSettings();
     const templateBuf = await readFile(
       path.join(options.templatesDir, templateFilename),
     );
     const docXml = readZipEntry(templateBuf, "word/document.xml").toString("utf8");
-    const updatedXml = inject(docXml, settings.profile);
+    const updatedXml = inject(docXml, settings.profile, settings.ai);
     const buffer = replaceZipEntry(
       templateBuf,
       "word/document.xml",
@@ -901,8 +1151,68 @@ export function createGuroMateEngine(
       "DLL",
       dll.id,
       dll.lessonTitle,
-      (docXml, profile) => injectDllIntoDocumentXml(docXml, dll, profile),
+      (docXml, profile, aiSettings) =>
+        injectDllIntoDocumentXml(docXml, dll, profile, aiSettings),
     );
+  }
+
+  async function planDlp(input: PlanDlpInput): Promise<DlpLessonBlueprint> {
+    const catalog = await listCurriculum();
+    const competencyMap = new Map(catalog.map((c) => [c.id, c]));
+
+    const resolved =
+      input.mode === "derive"
+        ? resolveDerivedDlpContext(
+            await dllStore.getById(input.dllId),
+            input.sessionNumber,
+            input.references,
+            competencyMap,
+          )
+        : resolveScratchDlpContext(
+            input.competencyIds,
+            input.gradeAndSection,
+            input.references,
+            competencyMap,
+          );
+
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext !== undefined
+        ? input.classroomContext
+        : resolved.inheritedClassroomContext,
+      (msg) => new DlpValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(
+      input.referenceMaterial !== undefined
+        ? input.referenceMaterial
+        : resolved.inheritedReferenceMaterial,
+    );
+
+    const prompt = buildDlpPlanPrompt({
+      lessonTitle: input.lessonTitle,
+      gradeAndSection: resolved.gradeAndSection,
+      learningAreas: resolved.learningAreas,
+      references: resolved.references,
+      classroomContext,
+      referenceMaterial,
+      promptNotes: input.promptNotes,
+      competencies: resolved.competencies,
+      learningCompetencies: resolved.learningCompetencies,
+      derivedSession: resolved.derivedSession,
+    });
+
+    const settings = await getSettings();
+    const aiResult = await aiAdapter.generateText({
+      systemInstruction: DLP_PLAN_SYSTEM_INSTRUCTION,
+      prompt,
+      settings: settings.ai,
+    });
+    const parsed = parseAiDlpBlueprintPayload(aiResult.text);
+
+    return assembleDlpBlueprint({
+      input,
+      resolved,
+      aiPayload: parsed,
+    });
   }
 
   async function generateDlp(input: GenerateDlpInput): Promise<DailyLessonPlan> {
@@ -924,75 +1234,164 @@ export function createGuroMateEngine(
             competencyMap,
           );
 
+    const classroomContext = normalizeClassroomContext(
+      input.classroomContext !== undefined
+        ? input.classroomContext
+        : resolved.inheritedClassroomContext,
+      (msg) => new DlpValidationError(msg),
+    );
+    const referenceMaterial = normalizeReferenceMaterial(
+      input.referenceMaterial !== undefined
+        ? input.referenceMaterial
+        : resolved.inheritedReferenceMaterial,
+    );
+
+    const effectiveBlueprint = isMatchingDlpBlueprint(input.blueprint, resolved)
+      ? input.blueprint
+      : undefined;
+
+    const locks = resolveDlpGenerationLocks({
+      resolved,
+      blueprint: effectiveBlueprint,
+    });
+
     const prompt = buildDlpPrompt({
       lessonTitle: input.lessonTitle,
       gradeAndSection: resolved.gradeAndSection,
       learningAreas: resolved.learningAreas,
       references: resolved.references,
+      classroomContext,
+      referenceMaterial,
       promptNotes: input.promptNotes,
       competencies: resolved.competencies,
       learningCompetencies: resolved.learningCompetencies,
       derivedSession: resolved.derivedSession,
+      blueprint: effectiveBlueprint,
+      locks,
     });
     const settings = await getSettings();
-    const aiResult = await aiAdapter.generateText({
-      systemInstruction: DLP_SYSTEM_INSTRUCTION,
-      prompt,
-      settings: settings.ai,
-    });
-    const parsed = parseAiDlpPayload(aiResult.text);
     const now = new Date().toISOString();
     const fallbackTitle = resolved.derivedSession
       ? `${resolved.learningAreas} — Session ${resolved.derivedSession.sessionNumber} (${resolved.gradeAndSection})`
       : `${resolved.learningAreas} (${resolved.gradeAndSection})`;
 
-    const dlp: DailyLessonPlan = {
-      id: `dlp-${randomUUID().slice(0, 8)}`,
-      createdAt: now,
-      updatedAt: now,
-      ...(resolved.sourceDllId
-        ? {
-            sourceDllId: resolved.sourceDllId,
-            sourceSessionNumber: resolved.sourceSessionNumber,
-          }
-        : {}),
-      competencyIds: resolved.competencyIds,
-      lessonTitle:
-        input.lessonTitle?.trim() ||
-        (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
-        fallbackTitle,
-      learningAreas: resolved.learningAreas,
-      gradeAndSection: resolved.gradeAndSection,
-      references: resolveLessonReferences(
-        resolved.references,
-        parsed.references,
-        resolved.competencies,
-      ),
-      promptNotes: input.promptNotes?.trim() ?? "",
-      intentions: {
-        learningCompetencies: resolved.learningCompetencies,
-        contentStandards: resolved.contentStandards,
-        performanceStandards: resolved.performanceStandards,
-        learningObjectives:
-          resolved.inheritedObjectives ||
-          (typeof parsed.learningObjectives === "string"
-            ? parsed.learningObjectives.trim()
-            : ""),
-        learnerContext: "",
-      },
-      preLesson: normalizeActivityPair(parsed.preLesson),
-      lessonFlow: normalizeActivityPair(parsed.lessonFlow),
-      learningResources: normalizeActivityPair(parsed.learningResources),
-      integrationAndContextualization: normalizeActivityPair(
+    const buildCandidateDlp = (
+      parsed: ReturnType<typeof parseAiDlpPayload>,
+      responseModel: string | undefined,
+      previous?: DailyLessonPlan,
+    ): DailyLessonPlan => {
+      const nextPreLesson = normalizeActivityPair(parsed.preLesson);
+      const nextLessonFlow = normalizeActivityPair(parsed.lessonFlow);
+      const nextResources = normalizeActivityPair(parsed.learningResources);
+      const nextIntegration = normalizeActivityPair(
         parsed.integrationAndContextualization,
-      ),
-      formativeAssessment: normalizeActivityPair(parsed.formativeAssessment),
-      extendedLearningOpportunities: normalizeActivityPair(
+      );
+      const nextAssessment = normalizeActivityPair(parsed.formativeAssessment);
+      const nextExtended = normalizeActivityPair(
         parsed.extendedLearningOpportunities,
-      ),
-      reflections: { teacherActivity: "", studentActivity: "" },
+      );
+      const parsedObjectives =
+        typeof parsed.learningObjectives === "string"
+          ? parsed.learningObjectives.trim()
+          : "";
+
+      return {
+        id: `dlp-${randomUUID().slice(0, 8)}`,
+        createdAt: now,
+        updatedAt: now,
+        ...(resolved.sourceDllId
+          ? {
+              sourceDllId: resolved.sourceDllId,
+              sourceSessionNumber: resolved.sourceSessionNumber,
+            }
+          : {}),
+        competencyIds: resolved.competencyIds,
+        lessonTitle:
+          effectiveBlueprint?.lessonTitle.trim() ||
+          input.lessonTitle?.trim() ||
+          (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
+          previous?.lessonTitle ||
+          fallbackTitle,
+        learningAreas: resolved.learningAreas,
+        gradeAndSection: resolved.gradeAndSection,
+        references: resolveLessonReferences(
+          effectiveBlueprint?.references.trim() || resolved.references,
+          parsed.references,
+          resolved.competencies,
+        ),
+        ...(classroomContext ? { classroomContext } : {}),
+        ...(referenceMaterial ? { referenceMaterial } : {}),
+        aiDeclaration: composeAiDeclaration({
+          template: settings.profile.aiDeclaration,
+          aiSettings: settings.ai,
+          responseModel,
+        }),
+        ...(locks.selectedActivityTitle
+          ? { selectedActivityTitle: locks.selectedActivityTitle }
+          : {}),
+        ...(locks.selectedActivitySummary
+          ? { selectedActivitySummary: locks.selectedActivitySummary }
+          : {}),
+        ...(locks.selectedAssessmentType
+          ? { selectedAssessmentType: locks.selectedAssessmentType }
+          : {}),
+        ...(locks.selectedAssessmentPreview
+          ? { selectedAssessmentPreview: locks.selectedAssessmentPreview }
+          : {}),
+        promptNotes: input.promptNotes?.trim() ?? "",
+        intentions: {
+          learningCompetencies: resolved.learningCompetencies,
+          contentStandards: resolved.contentStandards,
+          performanceStandards: resolved.performanceStandards,
+          learningObjectives:
+            locks.learningObjectives ||
+            resolved.inheritedObjectives ||
+            parsedObjectives ||
+            previous?.intentions.learningObjectives ||
+            "",
+          learnerContext: "",
+        },
+        preLesson: previous
+          ? mergeRepairedDlpPair(previous.preLesson, nextPreLesson)
+          : nextPreLesson,
+        lessonFlow: previous
+          ? mergeRepairedDlpPair(previous.lessonFlow, nextLessonFlow)
+          : nextLessonFlow,
+        learningResources: previous
+          ? mergeRepairedDlpPair(previous.learningResources, nextResources)
+          : nextResources,
+        integrationAndContextualization: previous
+          ? mergeRepairedDlpPair(
+              previous.integrationAndContextualization,
+              nextIntegration,
+            )
+          : nextIntegration,
+        formativeAssessment: previous
+          ? mergeRepairedDlpPair(previous.formativeAssessment, nextAssessment)
+          : nextAssessment,
+        extendedLearningOpportunities: previous
+          ? mergeRepairedDlpPair(
+              previous.extendedLearningOpportunities,
+              nextExtended,
+            )
+          : nextExtended,
+        reflections: { teacherActivity: "", studentActivity: "" },
+      };
     };
 
+    const dlp = await generateWithSingleRepair({
+      systemInstruction: DLP_SYSTEM_INSTRUCTION,
+      prompt,
+      aiSettings: settings.ai,
+      parse: parseAiDlpPayload,
+      build: buildCandidateDlp,
+      evaluate: (lesson, autoRepaired) =>
+        evaluateDlpAlignment(lesson, {
+          blueprint: effectiveBlueprint,
+          parentSession: resolved.derivedSession,
+          autoRepaired,
+        }),
+    });
     return dlpStore.prepend(dlp);
   }
 
@@ -1003,7 +1402,8 @@ export function createGuroMateEngine(
       "DLP",
       dlp.id,
       dlp.lessonTitle,
-      (docXml, profile) => injectDlpIntoDocumentXml(docXml, dlp, profile),
+      (docXml, profile, aiSettings) =>
+        injectDlpIntoDocumentXml(docXml, dlp, profile, aiSettings),
     );
   }
 
@@ -1094,14 +1494,23 @@ export function createGuroMateEngine(
             ? { ...s, formativeAssessment: formatted }
             : s,
         ) as DailyLessonLog["sessions"];
-        return { ...current, sessions, updatedAt: now };
+        const updatedDll: DailyLessonLog = { ...current, sessions, updatedAt: now };
+        return {
+          ...updatedDll,
+          alignmentCheck: evaluateDllAlignment(updatedDll),
+        };
       });
       return { kind: "dll", dll };
     }
 
+    const currentDlp = await dlpStore.getById(quiz.source.dlpId);
+    const parentSession = await resolveParentDllSession(
+      currentDlp.sourceDllId,
+      currentDlp.sourceSessionNumber,
+    );
     const dlp = await dlpStore.update(quiz.source.dlpId, (items, index) => {
       const current = items[index]!;
-      return {
+      const updatedDlp: DailyLessonPlan = {
         ...current,
         formativeAssessment: {
           teacherActivity: `Administer formative quiz "${quiz.title}" and check learner responses using the Quiz Answer Key.`,
@@ -1109,8 +1518,36 @@ export function createGuroMateEngine(
         },
         updatedAt: now,
       };
+      return {
+        ...updatedDlp,
+        alignmentCheck: evaluateDlpAlignment(updatedDlp, { parentSession }),
+      };
     });
     return { kind: "dlp", dlp };
+  }
+
+  async function saveDll(dll: DailyLessonLog): Promise<DailyLessonLog> {
+    return dllStore.update(dll.id, () => {
+      const normalized = normalizeEditedDll(dll);
+      return {
+        ...normalized,
+        alignmentCheck: evaluateDllAlignment(normalized),
+      };
+    });
+  }
+
+  async function saveDlp(dlp: DailyLessonPlan): Promise<DailyLessonPlan> {
+    const parentSession = await resolveParentDllSession(
+      dlp.sourceDllId,
+      dlp.sourceSessionNumber,
+    );
+    return dlpStore.update(dlp.id, () => {
+      const normalized = normalizeEditedDlp(dlp);
+      return {
+        ...normalized,
+        alignmentCheck: evaluateDlpAlignment(normalized, { parentSession }),
+      };
+    });
   }
 
   async function exportQuizDocx(id: string) {
@@ -1135,17 +1572,20 @@ export function createGuroMateEngine(
     listClassSections: readClassSections,
     saveClassSection,
     deleteClassSection,
+    extractReferenceMaterial: extractReferenceMaterialFromInput,
     listDlls: dllStore.readAll,
     getDll: dllStore.getById,
+    planDll,
     generateDll,
-    saveDll: (dll) => dllStore.update(dll.id, () => normalizeEditedDll(dll)),
+    saveDll,
     deleteDll: dllStore.remove,
     renderDllMarkdown,
     exportDllDocx,
     listDlps: dlpStore.readAll,
     getDlp: dlpStore.getById,
+    planDlp,
     generateDlp,
-    saveDlp: (dlp) => dlpStore.update(dlp.id, () => normalizeEditedDlp(dlp)),
+    saveDlp,
     deleteDlp: dlpStore.remove,
     renderDlpMarkdown,
     exportDlpDocx,

@@ -6,19 +6,27 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { evaluateDllAlignment } from "../engine/alignmentCheck";
+import { DEFAULT_CLASSROOM_CONTEXT } from "../engine/lessonHelpers";
 import {
   type ClassSection,
+  type ClassroomContext,
+  type ClassroomFacility,
   type CurriculumCompetency,
   type DailyLessonLog,
   type DailyLessonPlan,
+  type DeliveryModality,
   type DllIntentions,
+  type DllLessonBlueprint,
   type DllSessionConfig,
+  type FormativeAssessmentType,
   type SessionNumber,
   type TleComponent,
 } from "../engine/types";
 import {
   DLL_BUILDER_FIELDS,
   parseDllSessionFieldKey,
+  parsePeriodMinutes,
   updateFieldError,
   validateDllBuilderField,
   validateDllBuilderForm,
@@ -159,10 +167,20 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
   const [lessonTitle, setLessonTitle] = useState("");
   const [gradeAndSection, setGradeAndSection] = useState("");
   const [references, setReferences] = useState("");
+  const [classroomContext, setClassroomContext] = useState<ClassroomContext>(
+    () => ({ ...DEFAULT_CLASSROOM_CONTEXT }),
+  );
+  const [periodDraft, setPeriodDraft] = useState<string>(
+    String(DEFAULT_CLASSROOM_CONTEXT.periodMinutes),
+  );
+  const [referenceSourceLabel, setReferenceSourceLabel] = useState("");
+  const [referenceText, setReferenceText] = useState("");
   const [promptNotes, setPromptNotes] = useState("");
   const [sessionConfigs, setSessionConfigs] = useState<DllSessionConfig[]>(
     createInitialDllSessionConfigs,
   );
+  const [blueprint, setBlueprint] = useState<DllLessonBlueprint | null>(null);
+  const [planning, setPlanning] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
   const [fieldErrors, setFieldErrors] = useState<
@@ -173,6 +191,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     seq: number;
   } | null>(null);
   const gradeSectionRef = useRef<HTMLInputElement>(null);
+  const periodMinutesRef = useRef<HTMLInputElement>(null);
   const sessionCardRefs = useRef<
     Partial<Record<SessionNumber, HTMLElement | null>>
   >({});
@@ -192,8 +211,13 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setLessonTitle(fresh.lessonTitle);
     setGradeAndSection(fresh.gradeAndSection);
     setReferences(fresh.references);
+    setClassroomContext(fresh.classroomContext);
+    setPeriodDraft(String(fresh.classroomContext.periodMinutes));
+    setReferenceSourceLabel(fresh.referenceSourceLabel);
+    setReferenceText(fresh.referenceText);
     setPromptNotes(fresh.promptNotes);
     setSessionConfigs(fresh.sessionConfigs);
+    setBlueprint(null);
     setPickedCompetencyId(fresh.pickedCompetencyId);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
@@ -249,6 +273,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setSelectedDllId("");
     setViewMode("edit");
     setSessionConfigs((prev) => applyDllLaunchTarget(prev, initialLaunchTarget));
+    setBlueprint(null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
     const trimmed = initialLaunchTarget.competencyId.trim();
@@ -331,6 +356,11 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     [draftDll, dlps],
   );
 
+  const alignmentCheck = useMemo(() => {
+    if (!savedDll) return null;
+    return savedDll.alignmentCheck ?? evaluateDllAlignment(savedDll);
+  }, [savedDll]);
+
   useEffect(() => {
     onDirtyChange?.(isDirty, draftDll?.lessonTitle);
   }, [isDirty, draftDll?.lessonTitle, onDirtyChange]);
@@ -346,6 +376,8 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     const { field } = focusRequest;
     if (field === "gradeAndSection") {
       gradeSectionRef.current?.focus();
+    } else if (field === "periodMinutes") {
+      periodMinutesRef.current?.focus();
     } else if (field === "sessions") {
       sessionsGroupRef.current?.focus();
     } else {
@@ -402,13 +434,70 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     );
   }
 
+  function selectPeriodPreset(minutes: number) {
+    setPeriodDraft(String(minutes));
+    setClassroomContext((prev) => ({ ...prev, periodMinutes: minutes }));
+    setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
+  }
+
+  function updatePeriodDraft(value: string) {
+    interactedFieldsRef.current.add("periodMinutes");
+    setPeriodDraft(value);
+    const parsed = parsePeriodMinutes(value);
+    if (parsed !== null) {
+      setClassroomContext((prev) => ({ ...prev, periodMinutes: parsed }));
+    }
+    setFieldErrors((prev) => {
+      if (!prev.periodMinutes) return prev;
+      const nextMsg = validateDllBuilderField("periodMinutes", {
+        gradeAndSection,
+        periodMinutes: value,
+        sessions: sessionConfigs,
+      });
+      return updateFieldError(prev, "periodMinutes", nextMsg);
+    });
+  }
+
+  function validatePeriodDraftOnBlur() {
+    if (
+      !interactedFieldsRef.current.has("periodMinutes") &&
+      !fieldErrors.periodMinutes
+    ) {
+      return;
+    }
+    const nextMsg = validateDllBuilderField("periodMinutes", {
+      gradeAndSection,
+      periodMinutes: periodDraft,
+      sessions: sessionConfigs,
+    });
+    setFieldErrors((prev) =>
+      updateFieldError(prev, "periodMinutes", nextMsg),
+    );
+  }
+
+  function updateFacility(facility: ClassroomFacility) {
+    setClassroomContext((prev) => ({ ...prev, facility }));
+  }
+
+  function updateModality(modality: DeliveryModality) {
+    setClassroomContext((prev) => ({ ...prev, modality }));
+  }
+
+  function clearReferenceMaterial() {
+    setReferenceSourceLabel("");
+    setReferenceText("");
+  }
+
   function syncActiveSessionErrors(nextSessions: DllSessionConfig[]) {
     setFieldErrors((prev) => {
       let next = prev;
       for (const field of DLL_BUILDER_FIELDS) {
-        if (field === "gradeAndSection" || !next[field]) continue;
+        if (field === "gradeAndSection" || field === "periodMinutes" || !next[field]) {
+          continue;
+        }
         const nextMsg = validateDllBuilderField(field, {
           gradeAndSection,
+          periodMinutes: periodDraft,
           sessions: nextSessions,
         });
         next = updateFieldError(next, field, nextMsg);
@@ -435,6 +524,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
       };
     });
     setSessionConfigs(nextSessions);
+    setBlueprint(null);
     syncActiveSessionErrors(nextSessions);
   }
 
@@ -442,6 +532,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     sessionNumber: SessionNumber,
     competencyId: string,
   ) {
+    setBlueprint(null);
     setSessionConfigs((prev) =>
       prev.map((cfg) =>
         cfg.sessionNumber === sessionNumber
@@ -471,6 +562,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
         : cfg,
     );
     setSessionConfigs(nextSessions);
+    setBlueprint(null);
     syncActiveSessionErrors(nextSessions);
   }
 
@@ -478,6 +570,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     sessionNumber: SessionNumber,
     reason: string,
   ) {
+    setBlueprint(null);
     setSessionConfigs((prev) =>
       prev.map((cfg) =>
         cfg.sessionNumber === sessionNumber
@@ -487,13 +580,13 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     );
   }
 
-  async function handleGenerate(event: FormEvent) {
-    event.preventDefault();
+  function validateBuilderBeforeRequest(): boolean {
     for (const field of DLL_BUILDER_FIELDS) {
       interactedFieldsRef.current.add(field);
     }
     const errors = validateDllBuilderForm({
       gradeAndSection,
+      periodMinutes: periodDraft,
       sessions: sessionConfigs,
     });
     if (Object.keys(errors).length > 0) {
@@ -508,27 +601,135 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
           seq: (prev?.seq ?? 0) + 1,
         }));
       }
-      return;
+      return false;
     }
-
     interactedFieldsRef.current.clear();
     setFieldErrors({});
+    return true;
+  }
+
+  function buildPlanRequestPayload() {
+    const resolvedPeriod =
+      parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
+    return {
+      lessonTitle,
+      gradeAndSection,
+      references,
+      classroomContext: {
+        ...classroomContext,
+        periodMinutes: resolvedPeriod,
+      },
+      ...(referenceText.trim()
+        ? {
+            referenceMaterial: {
+              ...(referenceSourceLabel.trim()
+                ? { sourceLabel: referenceSourceLabel.trim() }
+                : {}),
+              text: referenceText,
+            },
+          }
+        : {}),
+      promptNotes,
+      sessions: sessionConfigs,
+    };
+  }
+
+  async function handlePlanLesson(event?: FormEvent) {
+    event?.preventDefault();
+    if (!validateBuilderBeforeRequest()) return;
+
+    setStatus(null);
+    setPlanning(true);
+    try {
+      const res = await fetch("/api/dlls/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPlanRequestPayload()),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const planned = (await res.json()) as DllLessonBlueprint;
+      setBlueprint(planned);
+      setStatus({
+        tone: "success",
+        text: "Lesson Blueprint ready. Review or tweak objectives, activities, and formative assessments, then click Approve & Generate DLL.",
+      });
+    } catch (err) {
+      setStatus({
+        tone: "error",
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  function updateBlueprintTitle(title: string) {
+    setBlueprint((prev) => (prev ? { ...prev, lessonTitle: title } : prev));
+  }
+
+  function updateBlueprintSessionObjectives(
+    sessionNumber: SessionNumber,
+    learningObjectives: string,
+  ) {
+    setBlueprint((prev) => {
+      if (!prev) return prev;
+      const nextSessions = prev.sessions.map((session) =>
+        session.sessionNumber === sessionNumber
+          ? { ...session, learningObjectives }
+          : session,
+      ) as DllLessonBlueprint["sessions"];
+      return { ...prev, sessions: nextSessions };
+    });
+  }
+
+  function selectBlueprintActivity(
+    sessionNumber: SessionNumber,
+    activityId: string,
+  ) {
+    setBlueprint((prev) => {
+      if (!prev) return prev;
+      const nextSessions = prev.sessions.map((session) =>
+        session.sessionNumber === sessionNumber
+          ? { ...session, selectedActivityId: activityId }
+          : session,
+      ) as DllLessonBlueprint["sessions"];
+      return { ...prev, sessions: nextSessions };
+    });
+  }
+
+  function selectBlueprintAssessment(
+    sessionNumber: SessionNumber,
+    assessmentType: FormativeAssessmentType,
+  ) {
+    setBlueprint((prev) => {
+      if (!prev) return prev;
+      const nextSessions = prev.sessions.map((session) =>
+        session.sessionNumber === sessionNumber
+          ? { ...session, selectedAssessmentType: assessmentType }
+          : session,
+      ) as DllLessonBlueprint["sessions"];
+      return { ...prev, sessions: nextSessions };
+    });
+  }
+
+  async function handleApproveAndGenerate() {
+    if (!validateBuilderBeforeRequest()) return;
+
     setStatus(null);
     setGenerating(true);
     try {
+      const payload = buildPlanRequestPayload();
       const res = await fetch("/api/dlls/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lessonTitle,
-          gradeAndSection,
-          references,
-          promptNotes,
-          sessions: sessionConfigs,
+          ...payload,
+          ...(blueprint ? { blueprint } : {}),
         }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const created = (await res.json()) as DailyLessonLog;
+      setBlueprint(null);
       setDlls((prev) => [created, ...prev]);
       setSelectedDllId(created.id);
       setViewMode("edit");
@@ -654,6 +855,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setSelectedDllId,
     startNewDll,
     draftDll,
+    alignmentCheck,
     isDirty,
     derivedDlpCount,
     viewMode,
@@ -666,13 +868,28 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     validateGradeAndSectionOnBlur,
     fieldErrors,
     gradeSectionRef,
+    periodMinutesRef,
     sessionCardRefs,
     sessionsGroupRef,
     references,
     setReferences,
+    classroomContext,
+    periodDraft,
+    selectPeriodPreset,
+    updatePeriodDraft,
+    validatePeriodDraftOnBlur,
+    updateFacility,
+    updateModality,
+    referenceSourceLabel,
+    setReferenceSourceLabel,
+    referenceText,
+    setReferenceText,
+    clearReferenceMaterial,
     promptNotes,
     setPromptNotes,
     sessionConfigs,
+    blueprint,
+    planning,
     generating,
     pickedCompetencyId,
     setPickedCompetencyId,
@@ -682,7 +899,12 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     removeCompetencyFromSession,
     updateSessionMode,
     updateNonInstructionalReason,
-    handleGenerate,
+    handlePlanLesson,
+    updateBlueprintTitle,
+    updateBlueprintSessionObjectives,
+    selectBlueprintActivity,
+    selectBlueprintAssessment,
+    handleApproveAndGenerate,
     updateDraftHeader,
     updateDraftSessionField,
     handleSaveEdits,

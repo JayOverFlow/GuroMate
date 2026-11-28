@@ -157,11 +157,107 @@ export interface ClassSectionInput {
 export const SESSION_NUMBERS = [1, 2, 3, 4, 5] as const;
 export type SessionNumber = (typeof SESSION_NUMBERS)[number];
 
+export const PERIOD_LENGTH_PRESETS = [45, 60, 90, 120] as const;
+export const MIN_PERIOD_MINUTES = 10;
+export const MAX_PERIOD_MINUTES = 360;
+
+export const CLASSROOM_FACILITIES = [
+  "standard-classroom",
+  "computer-lab",
+  "shop-workshop",
+  "kitchen-home-economics",
+  "agri-farm-site",
+  "limited-resources",
+] as const;
+export type ClassroomFacility = (typeof CLASSROOM_FACILITIES)[number];
+
+export const DELIVERY_MODALITIES = [
+  "face-to-face",
+  "blended",
+  "modular-offline",
+] as const;
+export type DeliveryModality = (typeof DELIVERY_MODALITIES)[number];
+
+export interface ClassroomContext {
+  periodMinutes: number;
+  facility: ClassroomFacility;
+  modality: DeliveryModality;
+}
+
+export interface ReferenceMaterial {
+  sourceLabel?: string;
+  text: string;
+}
+
+export interface ReferenceMaterialExtractInput {
+  filename: string;
+  dataBase64: string;
+}
+
+export interface ReferenceMaterialExtractResult {
+  sourceLabel: string;
+  text: string;
+  truncated: boolean;
+  originalLength: number;
+  maxLength: number;
+}
+
+export const FORMATIVE_ASSESSMENT_TYPES = [
+  "exit-ticket",
+  "checklist",
+  "demo-rubric",
+  "worksheet",
+  "short-quiz",
+] as const;
+export type FormativeAssessmentType =
+  (typeof FORMATIVE_ASSESSMENT_TYPES)[number];
+
+export interface BlueprintActivityOption {
+  id: string;
+  title: string;
+  summary: string;
+  source?: "bow" | "authentic" | "derived";
+  recommended: boolean;
+}
+
+export interface BlueprintAssessmentOption {
+  type: FormativeAssessmentType;
+  label: string;
+  preview: string;
+  recommended: boolean;
+}
+
 export interface DllSessionConfig {
   sessionNumber: SessionNumber;
   mode: "instructional" | "non-instructional";
   competencyIds: string[];
   nonInstructionalReason?: string;
+}
+
+export interface DllSessionBlueprint {
+  sessionNumber: SessionNumber;
+  mode: "instructional" | "non-instructional";
+  competencyIds: string[];
+  components: TleComponent[];
+  nonInstructionalReason?: string;
+  progressionFocus: string;
+  learningObjectives: string;
+  activityOptions: BlueprintActivityOption[];
+  selectedActivityId: string;
+  assessmentOptions: BlueprintAssessmentOption[];
+  selectedAssessmentType?: FormativeAssessmentType;
+}
+
+export interface DllLessonBlueprint {
+  lessonTitle: string;
+  references: string;
+  sessions: [
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+  ];
 }
 
 export interface DllSessionPlan {
@@ -170,6 +266,11 @@ export interface DllSessionPlan {
   competencyIds: string[];
   components: TleComponent[];
   nonInstructionalReason?: string;
+  progressionFocus?: string;
+  selectedActivityTitle?: string;
+  selectedActivitySummary?: string;
+  selectedAssessmentType?: FormativeAssessmentType;
+  selectedAssessmentPreview?: string;
   learningObjectives: string;
   preLesson: string;
   lessonFlow: string;
@@ -187,6 +288,32 @@ export interface DllIntentions {
   learnerContext: string;
 }
 
+export type AlignmentCheckSeverity = "pass" | "warning" | "error";
+
+export type AlignmentCheckCode =
+  | "structure"
+  | "objectives"
+  | "emergency-resources"
+  | "formative-support"
+  | "dlp-pacing"
+  | "dll-dlp-fidelity";
+
+export interface AlignmentCheckItem {
+  code: AlignmentCheckCode;
+  label: string;
+  severity: AlignmentCheckSeverity;
+  message: string;
+  sessionNumber?: SessionNumber;
+}
+
+export interface AlignmentCheckResult {
+  passed: boolean;
+  structuralValid: boolean;
+  autoRepaired: boolean;
+  checkedAt: string;
+  items: AlignmentCheckItem[];
+}
+
 export interface DailyLessonLog {
   id: string;
   createdAt: string;
@@ -195,6 +322,10 @@ export interface DailyLessonLog {
   learningAreas: string;
   gradeAndSection: string;
   references: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
+  aiDeclaration?: string;
+  alignmentCheck?: AlignmentCheckResult;
   promptNotes: string;
   intentions: DllIntentions;
   sessions: [
@@ -206,12 +337,18 @@ export interface DailyLessonLog {
   ];
 }
 
-export interface GenerateDllInput {
+export interface PlanDllInput {
   lessonTitle?: string;
   gradeAndSection: string;
   references?: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
   promptNotes?: string;
   sessions: DllSessionConfig[];
+}
+
+export interface GenerateDllInput extends PlanDllInput {
+  blueprint?: DllLessonBlueprint;
 }
 
 export interface DocxExport {
@@ -234,6 +371,24 @@ export interface DlpIntentions {
   learnerContext: string;
 }
 
+export interface DlpLessonBlueprint {
+  mode: "scratch" | "derive";
+  sourceDllId?: string;
+  sourceSessionNumber?: SessionNumber;
+  lessonTitle: string;
+  references: string;
+  competencyIds: string[];
+  components: TleComponent[];
+  progressionFocus: string;
+  learningObjectives: string;
+  activityOptions: BlueprintActivityOption[];
+  selectedActivityId: string;
+  assessmentOptions: BlueprintAssessmentOption[];
+  selectedAssessmentType: FormativeAssessmentType;
+  inheritedLearningResources?: string;
+  lockedToParentSession?: boolean;
+}
+
 export interface DailyLessonPlan {
   id: string;
   createdAt: string;
@@ -245,6 +400,14 @@ export interface DailyLessonPlan {
   learningAreas: string;
   gradeAndSection: string;
   references: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
+  aiDeclaration?: string;
+  alignmentCheck?: AlignmentCheckResult;
+  selectedActivityTitle?: string;
+  selectedActivitySummary?: string;
+  selectedAssessmentType?: FormativeAssessmentType;
+  selectedAssessmentPreview?: string;
   promptNotes: string;
   intentions: DlpIntentions;
   preLesson: DlpActivityPair;
@@ -256,13 +419,15 @@ export interface DailyLessonPlan {
   reflections: DlpActivityPair;
 }
 
-export type GenerateDlpInput =
+export type PlanDlpInput =
   | {
       mode: "derive";
       dllId: string;
       sessionNumber: SessionNumber;
       lessonTitle?: string;
       references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
       promptNotes?: string;
     }
   | {
@@ -270,8 +435,34 @@ export type GenerateDlpInput =
       lessonTitle?: string;
       gradeAndSection: string;
       references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
       promptNotes?: string;
       competencyIds: string[];
+    };
+
+export type GenerateDlpInput =
+  | {
+      mode: "derive";
+      dllId: string;
+      sessionNumber: SessionNumber;
+      lessonTitle?: string;
+      references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
+      promptNotes?: string;
+      blueprint?: DlpLessonBlueprint;
+    }
+  | {
+      mode: "scratch";
+      lessonTitle?: string;
+      gradeAndSection: string;
+      references?: string;
+      classroomContext?: ClassroomContext;
+      referenceMaterial?: ReferenceMaterial;
+      promptNotes?: string;
+      competencyIds: string[];
+      blueprint?: DlpLessonBlueprint;
     };
 
 export const QUIZ_QUESTION_TYPES = [
@@ -370,8 +561,12 @@ export interface GuroMateEngine {
   listClassSections(): Promise<ClassSection[]>;
   saveClassSection(input: ClassSectionInput): Promise<ClassSection>;
   deleteClassSection(id: string): Promise<void>;
+  extractReferenceMaterial(
+    input: ReferenceMaterialExtractInput,
+  ): Promise<ReferenceMaterialExtractResult>;
   listDlls(): Promise<DailyLessonLog[]>;
   getDll(id: string): Promise<DailyLessonLog>;
+  planDll(input: PlanDllInput): Promise<DllLessonBlueprint>;
   generateDll(input: GenerateDllInput): Promise<DailyLessonLog>;
   saveDll(dll: DailyLessonLog): Promise<DailyLessonLog>;
   deleteDll(id: string): Promise<void>;
@@ -379,6 +574,7 @@ export interface GuroMateEngine {
   exportDllDocx(id: string): Promise<DocxExport>;
   listDlps(): Promise<DailyLessonPlan[]>;
   getDlp(id: string): Promise<DailyLessonPlan>;
+  planDlp(input: PlanDlpInput): Promise<DlpLessonBlueprint>;
   generateDlp(input: GenerateDlpInput): Promise<DailyLessonPlan>;
   saveDlp(dlp: DailyLessonPlan): Promise<DailyLessonPlan>;
   deleteDlp(id: string): Promise<void>;

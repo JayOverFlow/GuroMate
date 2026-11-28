@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCompetencyLines,
+  normalizeBlueprintActivityOptions,
   parseLearningAreaComponents,
   resolveLessonReferences,
 } from "./lessonHelpers";
@@ -114,5 +115,55 @@ describe("lessonHelpers BoW formatting and reference citations", () => {
       "FCS",
     ]);
     expect(parseLearningAreaComponents("")).toEqual([]);
+  });
+
+  it("always produces 2–3 activity options with unique IDs even when AI returns 1 option colliding with the fallback ID", () => {
+    const comp = makeCompetency();
+
+    const singleColliding = normalizeBlueprintActivityOptions({
+      rawOptions: [
+        {
+          id: "s1-act-2",
+          title: "AI Single Activity",
+          summary: "Concrete guided station.",
+          source: "authentic",
+          recommended: true,
+        },
+      ],
+      idPrefix: "s1",
+      competencies: [comp],
+    });
+
+    expect(singleColliding.options.length).toBeGreaterThanOrEqual(2);
+    expect(singleColliding.options.length).toBeLessThanOrEqual(3);
+    expect(new Set(singleColliding.options.map((o) => o.id)).size).toBe(
+      singleColliding.options.length,
+    );
+    expect(singleColliding.options.filter((o) => o.recommended)).toHaveLength(1);
+    expect(singleColliding.selectedActivityId).toBe("s1-act-2");
+
+    const duplicateColliding = normalizeBlueprintActivityOptions({
+      rawOptions: [
+        {
+          id: "dlp-act-2",
+          title: "First Activity",
+          summary: "First summary.",
+          source: "bow",
+          recommended: true,
+        },
+        {
+          id: "dlp-act-2",
+          title: "Second Activity",
+          summary: "Second summary.",
+          source: "authentic",
+          recommended: false,
+        },
+      ],
+      idPrefix: "dlp",
+      competencies: [comp],
+    });
+
+    expect(duplicateColliding.options).toHaveLength(2);
+    expect(new Set(duplicateColliding.options.map((o) => o.id)).size).toBe(2);
   });
 });

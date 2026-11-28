@@ -1,6 +1,8 @@
+import { DEFAULT_CLASSROOM_CONTEXT } from "../engine/lessonHelpers";
 import {
   SESSION_NUMBERS,
   type ClassSection,
+  type ClassroomContext,
   type DailyLessonLog,
   type DailyLessonPlan,
   type DllSessionConfig,
@@ -50,6 +52,9 @@ export interface DllCreationFormState {
   lessonTitle: string;
   gradeAndSection: string;
   references: string;
+  classroomContext: ClassroomContext;
+  referenceSourceLabel: string;
+  referenceText: string;
   promptNotes: string;
   sessionConfigs: DllSessionConfig[];
   pickedCompetencyId: string;
@@ -62,6 +67,9 @@ export interface DlpCreationFormState {
   lessonTitle: string;
   gradeAndSection: string;
   references: string;
+  classroomContext: ClassroomContext;
+  referenceSourceLabel: string;
+  referenceText: string;
   promptNotes: string;
   selectedCompetencyIds: string[];
   pickedCompetencyId: string;
@@ -93,6 +101,9 @@ export function createFreshDllCreationFormState(
     lessonTitle: "",
     gradeAndSection: formatDefaultGradeAndSection(sections),
     references: "",
+    classroomContext: { ...DEFAULT_CLASSROOM_CONTEXT },
+    referenceSourceLabel: "",
+    referenceText: "",
     promptNotes: "",
     sessionConfigs: launchTarget
       ? applyDllLaunchTarget(baseSessions, launchTarget)
@@ -113,6 +124,9 @@ export function createFreshDlpCreationFormState(
     lessonTitle: "",
     gradeAndSection: formatDefaultGradeAndSection(sections),
     references: "",
+    classroomContext: { ...DEFAULT_CLASSROOM_CONTEXT },
+    referenceSourceLabel: "",
+    referenceText: "",
     promptNotes: "",
     selectedCompetencyIds: [],
     pickedCompetencyId: "",
@@ -268,6 +282,8 @@ function serializeDllEditableState(dll: DailyLessonLog): string {
     learningAreas: dll.learningAreas,
     gradeAndSection: dll.gradeAndSection,
     references: dll.references,
+    classroomContext: dll.classroomContext ?? null,
+    aiDeclaration: dll.aiDeclaration ?? "",
     promptNotes: dll.promptNotes,
     intentions: {
       learningCompetencies: dll.intentions.learningCompetencies,
@@ -307,6 +323,8 @@ function serializeDlpEditableState(dlp: DailyLessonPlan): string {
     learningAreas: dlp.learningAreas,
     gradeAndSection: dlp.gradeAndSection,
     references: dlp.references,
+    classroomContext: dlp.classroomContext ?? null,
+    aiDeclaration: dlp.aiDeclaration ?? "",
     promptNotes: dlp.promptNotes,
     intentions: {
       learningCompetencies: dlp.intentions.learningCompetencies,

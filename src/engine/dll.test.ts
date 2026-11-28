@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -161,6 +161,10 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
 
     const systemInstruction = requests[0]!.systemInstruction ?? "";
     expect(systemInstruction).toContain("ILAW Framework");
+    expect(systemInstruction).toMatch(/DepEd Order No\.\s*016,\s*s\.\s*2026/i);
+    expect(systemInstruction).toMatch(/Learning Design Principles/i);
+    expect(systemInstruction).toMatch(/MATATAG.*IDF|4Is.*4Cs.*4Es/i);
+    expect(systemInstruction).toMatch(/DepEd Order No\.\s*8,\s*s\.\s*2015/i);
     expect(systemInstruction).toMatch(/4As.*5Es.*DepEd DO 42/i);
     expect(systemInstruction).toMatch(/OSH|PPE/i);
     expect(systemInstruction).toMatch(/Budget of Work/i);
@@ -168,8 +172,12 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(systemInstruction).toMatch(/Cognitive.*Psychomotor.*Affective/i);
     expect(systemInstruction).toContain("• ");
     expect(systemInstruction).toContain("Pre-lesson activity:");
+    expect(systemInstruction).toMatch(/emergency|offline/i);
+    expect(systemInstruction).toMatch(/feedback|help-seeking|guidance/i);
+    expect(systemInstruction).toMatch(/accommodation/i);
+    expect(systemInstruction).toMatch(/constructive alignment|1-to-1/i);
     expect(systemInstruction).toMatch(/N\/A/);
-    expect(systemInstruction).toMatch(/5-item multiple-choice quiz/i);
+    expect(systemInstruction).not.toMatch(/Default to a 5-item multiple-choice quiz/i);
     expect(systemInstruction).toContain("Prompt Notes");
     expect(systemInstruction).toContain("Learner Context");
     expect(systemInstruction).toContain("Reflections");
@@ -604,5 +612,1007 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(md).toContain("- **Reflections:** Students excelled.\n");
     expect(md).not.toContain("SHS_CORE");
     expect(md).not.toContain("Private prompt note");
+  });
+
+  it("grounds DLL generation in Classroom Context (including 2-hour periods), Reference Material, and competency customNotes, persists cleanly with backward compatibility, and keeps exported Learner Context and Reflections blank", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Electrical Wiring Safety & Splicing",
+            references: "MATATAG TLE IA CG",
+            sessions: [1, 2, 3, 4, 5].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: `• Objective ${n}`,
+              preLesson: `Pre-lesson activity: “Hook ${n}”`,
+              lessonFlow: `Shop Lab Activity ${n}`,
+              learningResources: "• Insulated pliers\n• Offline wiring board",
+              integrationAndContextualization: "Barangay electrical safety.",
+              formativeAssessment: `Skill checklist ${n}`,
+              extendedLearningOpportunities: `Home safety audit ${n}`,
+            })),
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const iaComp = (await engine.listCurriculum({ gradeLevel: 7, component: "IA" }))[0]!;
+    await engine.saveCompetencyNotes(
+      iaComp.id,
+      "Emphasize PPE gloves and dry-hand inspection before touching conductors.",
+    );
+
+    const classroomContext = {
+      periodMinutes: 120,
+      facility: "shop-workshop" as const,
+      modality: "face-to-face" as const,
+    };
+    const referenceMaterial = {
+      sourceLabel: "TESDA EIM NC II Safety Excerpt.txt",
+      text: "Always verify circuit de-energization with a tester before stripping AWG 14 solid wire.",
+    };
+    const promptNotes = "Pair taller learners with shorter learners at bench stations.";
+
+    const created = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Bonifacio",
+      classroomContext,
+      referenceMaterial,
+      promptNotes,
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [iaComp.id],
+      })),
+    });
+
+    expect(requests).toHaveLength(1);
+    const prompt = requests[0]!.prompt;
+    expect(prompt).toContain("120 minutes");
+    expect(prompt).toContain("2 hrs");
+    expect(prompt).toMatch(/Shop\s*\/\s*Workshop/i);
+    expect(prompt).toMatch(/Face-to-Face/i);
+    expect(prompt).toContain("TESDA EIM NC II Safety Excerpt.txt");
+    expect(prompt).toContain("Always verify circuit de-energization with a tester");
+    expect(prompt).toContain("Emphasize PPE gloves and dry-hand inspection");
+    expect(prompt).toContain(promptNotes);
+
+    expect(created.classroomContext).toEqual(classroomContext);
+    expect(created.intentions.learnerContext).toBe("");
+    expect(created.sessions.every((s) => s.reflections === "")).toBe(true);
+
+    // Reload from disk with a fresh engine instance and verify persistence
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+    const reloaded = await engine2.getDll(created.id);
+    expect(reloaded.classroomContext).toEqual(classroomContext);
+
+    // Inline edits preserve Classroom Context
+    const edited = await engine2.saveDll({
+      ...reloaded,
+      lessonTitle: "Updated Shop Safety DLL",
+    });
+    expect(edited.classroomContext).toEqual(classroomContext);
+
+    // Exported .docx must keep Learner Context and Reflections strictly blank and never leak context/reference/promptNotes
+    const exported = await engine2.exportDllDocx(edited.id);
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+    const docXml = readZipEntry(exported.buffer, "word/document.xml").toString("utf8");
+    const tables = extractTableCellTexts(docXml);
+    expect(tables[1]![4]![1]).toBe("");
+    for (let col = 1; col <= 5; col++) {
+      expect(tables[4]![2]![col]).toBe("");
+    }
+    expect(docXml).not.toContain("Always verify circuit de-energization");
+    expect(docXml).not.toContain("Pair taller learners");
+    expect(docXml).not.toContain("Shop / Workshop");
+
+    // Backward compatibility: legacy saved DLL record lacking classroomContext still loads, saves, and exports cleanly
+    const legacyRecord = { ...edited };
+    delete legacyRecord.classroomContext;
+    delete legacyRecord.referenceMaterial;
+    await writeFile(
+      path.join(dataDir, "dlls.json"),
+      JSON.stringify([legacyRecord], null, 2),
+      "utf8",
+    );
+    const loadedLegacy = await engine2.getDll(legacyRecord.id);
+    expect(loadedLegacy.classroomContext).toBeUndefined();
+    const savedLegacy = await engine2.saveDll({
+      ...loadedLegacy,
+      lessonTitle: "Legacy Record Resaved",
+    });
+    expect(savedLegacy.classroomContext).toBeUndefined();
+    const legacyDocx = await engine2.exportDllDocx(savedLegacy.id);
+    expect(legacyDocx.buffer.subarray(0, 2).toString("ascii")).toBe("PK");
+  });
+
+  it("auto-populates DO 003 Annex A Declaration of AI Use on generated DLLs, persists per-lesson edits across Markdown and .docx, and falls back cleanly for legacy saved DLLs", async () => {
+    const dataDir = await makeTempDir();
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText() {
+        return {
+          text: JSON.stringify({
+            lessonTitle: "DO 003 AI Declaration DLL",
+            references: "MATATAG TLE 7 CG",
+            sessions: [1, 2, 3, 4, 5].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: `• Objective ${n}`,
+              preLesson: `Pre-Lesson ${n}`,
+              lessonFlow: `Lesson Flow ${n}`,
+              learningResources: `• Resource ${n}`,
+              integrationAndContextualization: `Integration ${n}`,
+              formativeAssessment: `Assessment ${n}`,
+              extendedLearningOpportunities: `Extended ${n}`,
+            })),
+          }),
+          model: "gemini-2.5-flash",
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    await engine.saveSettings({
+      ai: {
+        aiProvider: "gemini",
+        apiKey: "gem-test-key",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        modelId: "gemini-2.5-flash",
+      },
+    });
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const created = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [ict.id],
+      })),
+    });
+
+    expect(created.aiDeclaration).toBeDefined();
+    expect(created.aiDeclaration).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(created.aiDeclaration).toMatch(/Annex A/i);
+    expect(created.aiDeclaration).toContain("Google Gemini (gemini-2.5-flash)");
+    expect(created.aiDeclaration).toMatch(/auxiliary/i);
+    expect(created.aiDeclaration).toMatch(/review|validat/i);
+    expect(created.aiDeclaration).toMatch(/no confidential learner/i);
+    expect(created.aiDeclaration).not.toContain("{aiTool}");
+
+    const generatedMd = await readFile(
+      path.join(dataDir, "dlls", `${created.id}.md`),
+      "utf8",
+    );
+    expect(generatedMd).toContain(`- **Declaration of AI Use:** ${created.aiDeclaration}`);
+
+    const customDeclaration =
+      "Declaration of AI Use (DO 003, s. 2026 Annex A): Drafted with Google Gemini (gemini-2.5-flash) and verified by teacher for Grade 7 ICT; zero learner PII shared.";
+    const edited = await engine.saveDll({
+      ...created,
+      aiDeclaration: `  ${customDeclaration}  `,
+    });
+    expect(edited.aiDeclaration).toBe(customDeclaration);
+
+    const editedMd = await readFile(
+      path.join(dataDir, "dlls", `${created.id}.md`),
+      "utf8",
+    );
+    expect(editedMd).toContain(`- **Declaration of AI Use:** ${customDeclaration}`);
+
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+
+    const editedDocx = await engine.exportDllDocx(created.id);
+    const editedTables = extractTableCellTexts(
+      readZipEntry(editedDocx.buffer, "word/document.xml").toString("utf8"),
+    );
+    expect(editedTables[0]![7]![1]).toBe(customDeclaration);
+
+    // Legacy saved DLL without aiDeclaration falls back cleanly to DO 003 Annex A template with active AI tool
+    const legacyDll: Omit<DailyLessonLog, "aiDeclaration"> = {
+      ...created,
+      id: "dll-legacy-1",
+      lessonTitle: "Legacy Saved DLL",
+    };
+    delete (legacyDll as Partial<DailyLessonLog>).aiDeclaration;
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "dlls.json"),
+      JSON.stringify([legacyDll], null, 2),
+      "utf8",
+    );
+
+    const legacyDocx = await engine.exportDllDocx("dll-legacy-1");
+    const legacyTables = extractTableCellTexts(
+      readZipEntry(legacyDocx.buffer, "word/document.xml").toString("utf8"),
+    );
+    expect(legacyTables[0]![7]![1]).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(legacyTables[0]![7]![1]).toContain("Google Gemini (gemini-2.5-flash)");
+    expect(legacyTables[0]![7]![1]).not.toContain("{aiTool}");
+  });
+
+  it("plans an editable 5-Session Lesson Blueprint via planDll with progressive multi-session scaffolding, guaranteed (Recommended) activity and 5-type Formative Assessment selections, empty-BoW fallback cues, and preserved non-instructional sessions", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        return {
+          text: JSON.stringify({
+            lessonTitle: "ICT Digital Productivity & Office Applications",
+            references: "MATATAG TLE 7 ICT CG & BoW",
+            sessions: [
+              {
+                sessionNumber: 1,
+                progressionFocus: "Foundational concepts and workspace orientation",
+                learningObjectives:
+                  "• Cognitive: Identify key ICT productivity tools with 90% accuracy.\n• Psychomotor: Navigate basic workspace menus accurately.\n• Affective: Value responsible digital workspace habits.",
+                activityOptions: [
+                  {
+                    id: "s1-a",
+                    title: "ICT Tool Gallery Walk",
+                    summary: "Teams inspect local office software screenshots and classify uses.",
+                    source: "bow",
+                    recommended: true,
+                  },
+                  {
+                    id: "s1-b",
+                    title: "Role-Play Helpdesk Match",
+                    summary: "Pairs match barangay office tasks to the right software tool.",
+                    source: "authentic",
+                    recommended: true,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "exit-ticket",
+                    preview: "3-prompt slip matching tools to real school tasks.",
+                    recommended: true,
+                  },
+                  {
+                    type: "short-quiz",
+                    preview: "5-item identification check on software menus.",
+                    recommended: false,
+                  },
+                ],
+              },
+              {
+                sessionNumber: 2,
+                progressionFocus: "Guided document formatting practice",
+                learningObjectives:
+                  "• Explain formatting standards for formal documents.\n• Apply heading styles and tables to a sample barangay memo.\n• Show care for readable document layout.",
+                activityOptions: [
+                  {
+                    id: "s2-a",
+                    title: "Guided Memo Formatting Lab",
+                    summary: "Step-by-step teacher modeling followed by pair formatting.",
+                    source: "bow",
+                    recommended: false,
+                  },
+                  {
+                    id: "s2-b",
+                    title: "Peer Layout Audit",
+                    summary: "Pairs spot and fix formatting issues on printed/offline drafts.",
+                    source: "authentic",
+                    recommended: false,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "checklist",
+                    preview: "6-point observation checklist verifying margin, heading, and table formatting.",
+                    recommended: true,
+                  },
+                ],
+              },
+              {
+                sessionNumber: 3,
+                progressionFocus: "Hands-on independent synthesis output",
+                learningObjectives:
+                  "• Analyze audience requirements for a community flyer.\n• Produce a one-page formatted announcement using templates.\n• Demonstrate pride in accurate, original work.",
+                activityOptions: [
+                  {
+                    id: "s3-a",
+                    title: "Community Flyer Mini-Project",
+                    summary: "Learners create a localized barangay event flyer using learned formatting.",
+                    source: "bow",
+                    recommended: true,
+                  },
+                  {
+                    id: "s3-b",
+                    title: "Station Critique & Polish",
+                    summary: "Small groups refine draft flyers using peer feedback criteria.",
+                    source: "authentic",
+                    recommended: false,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "demo-rubric",
+                    preview: "3-criterion rubric scoring layout clarity, tool accuracy, and completeness.",
+                    recommended: true,
+                  },
+                ],
+              },
+              {
+                sessionNumber: 4,
+                progressionFocus: "Authentic workplace communication scenario",
+                learningObjectives:
+                  "• Distinguish concise workplace notices from informal messages.\n• Draft a 1-paragraph safety advisory for a school lab.\n• Appreciate clear, respectful workplace communication.",
+                activityOptions: [
+                  {
+                    id: "s4-a",
+                    title: "Lab Advisory Drafting Sprint",
+                    summary: "Small groups convert raw incident notes into a clear posted advisory.",
+                    source: "authentic",
+                    recommended: true,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "worksheet",
+                    preview: "Structured editing worksheet comparing unclear vs. concise advisories.",
+                    recommended: true,
+                  },
+                ],
+              },
+            ],
+          }),
+          model: "mock-plan-model",
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ictComp = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const emptyBowComp = await engine.saveCustomCompetency({
+      gradeLevels: [11],
+      quarters: [1],
+      component: "SHS_CORE",
+      sector: "Effective Communication",
+      contentTopic: "Workplace Notices",
+      contentStandard: "Demonstrates understanding of concise workplace notices.",
+      performanceStandard: "Drafts clear operational advisories.",
+      learningCompetency: "Draft concise workplace advisories for school or barangay contexts.",
+      budgetOfWork: {
+        term: "First Term",
+        weekRange: "2",
+        suggestedActivities: "",
+        suggestedPerformanceTasks: "",
+      },
+    });
+
+    const blueprint = await engine.planDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      classroomContext: {
+        periodMinutes: 90,
+        facility: "computer-lab",
+        modality: "face-to-face",
+      },
+      referenceMaterial: {
+        sourceLabel: "DepEd LE Excerpt.txt",
+        text: "Always save drafts every 5 minutes using Ctrl+S and verify print preview margins.",
+      },
+      promptNotes: "Emphasize localized barangay documents.",
+      sessions: [
+        { sessionNumber: 1, mode: "instructional", competencyIds: [ictComp.id] },
+        { sessionNumber: 2, mode: "instructional", competencyIds: [ictComp.id] },
+        { sessionNumber: 3, mode: "instructional", competencyIds: [ictComp.id] },
+        { sessionNumber: 4, mode: "instructional", competencyIds: [emptyBowComp.id] },
+        {
+          sessionNumber: 5,
+          mode: "non-instructional",
+          competencyIds: [],
+          nonInstructionalReason: "Rizal Day (Holiday)",
+        },
+      ],
+    });
+
+    expect(requests).toHaveLength(1);
+    const planPrompt = requests[0]!.prompt;
+    const planSystem = requests[0]!.systemInstruction ?? "";
+    expect(planSystem).toMatch(/DO 016|DepEd Order No\.\s*016/i);
+    expect(planSystem).toMatch(/Lesson Blueprint/i);
+    expect(planPrompt).toMatch(/Part 1 of 3/i);
+    expect(planPrompt).toMatch(/Part 2 of 3/i);
+    expect(planPrompt).toMatch(/Part 3 of 3/i);
+    expect(planPrompt).toMatch(/no Budget of Work Suggested Activities/i);
+    expect(planPrompt).toContain("90 minutes");
+    expect(planPrompt).toContain("Ctrl+S");
+
+    expect(blueprint.lessonTitle).toBe("ICT Digital Productivity & Office Applications");
+    expect(blueprint.sessions).toHaveLength(5);
+
+    // Non-instructional session preserved cleanly
+    const s5 = blueprint.sessions[4];
+    expect(s5.mode).toBe("non-instructional");
+    expect(s5.nonInstructionalReason).toBe("Rizal Day (Holiday)");
+    expect(s5.activityOptions).toEqual([]);
+    expect(s5.assessmentOptions).toEqual([]);
+    expect(s5.selectedAssessmentType).toBeUndefined();
+
+    // Every instructional session meets strict Lesson Blueprint invariants
+    for (const session of blueprint.sessions.slice(0, 4)) {
+      expect(session.mode).toBe("instructional");
+      expect(session.progressionFocus.trim().length).toBeGreaterThan(0);
+      expect(session.learningObjectives).not.toMatch(/\b(Cognitive|Psychomotor|Affective)\s*:/i);
+      expect(session.activityOptions.length).toBeGreaterThanOrEqual(2);
+      expect(session.activityOptions.length).toBeLessThanOrEqual(3);
+      const recActivities = session.activityOptions.filter((opt) => opt.recommended);
+      expect(recActivities).toHaveLength(1);
+      expect(session.selectedActivityId).toBe(recActivities[0]!.id);
+
+      expect(session.assessmentOptions.map((opt) => opt.type)).toEqual([
+        "exit-ticket",
+        "checklist",
+        "demo-rubric",
+        "worksheet",
+        "short-quiz",
+      ]);
+      for (const opt of session.assessmentOptions) {
+        expect(opt.label.trim().length).toBeGreaterThan(0);
+        expect(opt.preview.trim().length).toBeGreaterThan(0);
+      }
+      const recAssessments = session.assessmentOptions.filter((opt) => opt.recommended);
+      expect(recAssessments).toHaveLength(1);
+      expect(session.selectedAssessmentType).toBe(recAssessments[0]!.type);
+    }
+
+    // Specific AI recommendations preserved even after normalizing duplicates/missing entries
+    expect(blueprint.sessions[0].selectedActivityId).toBe("s1-a");
+    expect(blueprint.sessions[0].selectedAssessmentType).toBe("exit-ticket");
+    expect(blueprint.sessions[1].selectedActivityId).toBe("s2-a");
+    expect(blueprint.sessions[1].selectedAssessmentType).toBe("checklist");
+    expect(blueprint.sessions[2].selectedAssessmentType).toBe("demo-rubric");
+    expect(blueprint.sessions[3].selectedAssessmentType).toBe("worksheet");
+    // Session 4 had only 1 AI activity option, so engine ensures at least 2 concrete options
+    expect(blueprint.sessions[3].activityOptions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("locks Step 2 generateDll strictly to teacher-edited Lesson Blueprint objectives, chosen activity, and chosen Formative Assessment, persists session metadata, and exports valid ILAW .docx", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        if (req.prompt.includes("Create an editable 5-Session Lesson Blueprint")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Planned ICT Productivity Week",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) => ({
+                sessionNumber: n,
+                progressionFocus: `Stage ${n} focus`,
+                learningObjectives: `• Explain concept ${n}.\n• Demonstrate skill ${n}.\n• Value safe practice ${n}.`,
+                activityOptions: [
+                  {
+                    id: `s${n}-a`,
+                    title: `Primary Activity ${n}`,
+                    summary: `Primary summary ${n}.`,
+                    source: "bow",
+                    recommended: true,
+                  },
+                  {
+                    id: `s${n}-b`,
+                    title: `Alternative Shop Activity ${n}`,
+                    summary: `Hands-on collaborative station ${n}.`,
+                    source: "authentic",
+                    recommended: false,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "exit-ticket",
+                    preview: `Exit slip check for session ${n}.`,
+                    recommended: true,
+                  },
+                  {
+                    type: "checklist",
+                    preview: `Observation checklist for session ${n}.`,
+                    recommended: false,
+                  },
+                  {
+                    type: "demo-rubric",
+                    preview: `3-criterion demo rubric for session ${n}.`,
+                    recommended: false,
+                  },
+                  {
+                    type: "worksheet",
+                    preview: `Activity worksheet for session ${n}.`,
+                    recommended: false,
+                  },
+                  {
+                    type: "short-quiz",
+                    preview: `Short quiz for session ${n}.`,
+                    recommended: false,
+                  },
+                ],
+              })),
+            }),
+            model: "mock-model",
+          };
+        }
+
+        return {
+          text: JSON.stringify({
+            lessonTitle: "AI Suggested Override Title",
+            references: "MATATAG TLE 7 ICT CG",
+            sessions: [1, 2, 3, 4].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: `• AI paraphrased objective ${n}.`,
+              preLesson: `Pre-lesson activity: “Warm-Up ${n}” Check learner well-being and share objectives.`,
+              lessonFlow: `Alternative Shop Activity ${n}: Guided demo before collaborative practice.`,
+              learningResources: `• Projector & slides\n• Emergency/offline backup: Printed visual cards and chalkboard diagram`,
+              integrationAndContextualization: "Connect to local barangay computer shop operations.",
+              formativeAssessment: `Performance / Demo Rubric: Score session ${n}. Raise help cards for teacher feedback; offer oral/visual accommodations.`,
+              extendedLearningOpportunities: `Practice task ${n} at home.`,
+            })),
+          }),
+          model: "mock-model",
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ictComp = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const sessions = [
+      { sessionNumber: 1 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      { sessionNumber: 2 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      { sessionNumber: 3 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      { sessionNumber: 4 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      {
+        sessionNumber: 5 as const,
+        mode: "non-instructional" as const,
+        competencyIds: [],
+        nonInstructionalReason: "School Foundation Day",
+      },
+    ];
+
+    const blueprint = await engine.planDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      classroomContext: {
+        periodMinutes: 60,
+        facility: "computer-lab",
+        modality: "face-to-face",
+      },
+      sessions,
+    });
+
+    // Teacher edits Lesson Title, Session 1 objectives, swaps activity to s1-b and assessment to demo-rubric
+    const editedObjectives = [
+      "• Identify three core ICT productivity tools with 100% accuracy.",
+      "• Configure a clean document workspace safely on a lab workstation.",
+      "• Appreciate ethical digital practices in Philippine workplaces.",
+    ].join("\n");
+
+    const approvedBlueprint = {
+      ...blueprint,
+      lessonTitle: "Teacher-Approved ICT Week",
+      sessions: [
+        {
+          ...blueprint.sessions[0],
+          learningObjectives: editedObjectives,
+          selectedActivityId: "s1-b",
+          selectedAssessmentType: "demo-rubric" as const,
+        },
+        blueprint.sessions[1],
+        blueprint.sessions[2],
+        blueprint.sessions[3],
+        blueprint.sessions[4],
+      ] as typeof blueprint.sessions,
+    };
+
+    const created = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      classroomContext: {
+        periodMinutes: 60,
+        facility: "computer-lab",
+        modality: "face-to-face",
+      },
+      sessions,
+      blueprint: approvedBlueprint,
+    });
+
+    expect(requests).toHaveLength(2);
+    const step2Prompt = requests[1]!.prompt;
+    expect(step2Prompt).toContain("Approved Lesson Blueprint");
+    expect(step2Prompt).toContain(editedObjectives);
+    expect(step2Prompt).toContain("Alternative Shop Activity 1");
+    expect(step2Prompt).toContain("Performance / Demo Rubric");
+    expect(step2Prompt).toContain("3-criterion demo rubric for session 1.");
+
+    // Locked lesson title, locked Session 1 objectives verbatim, and persisted choice metadata
+    expect(created.lessonTitle).toBe("Teacher-Approved ICT Week");
+    expect(created.sessions[0].learningObjectives).toBe(editedObjectives);
+    expect(created.sessions[0].lessonFlow).toContain("Alternative Shop Activity 1");
+    expect(created.sessions[0].learningResources).toMatch(/emergency\/offline backup/i);
+    expect(created.sessions[0].formativeAssessment).toContain("Performance / Demo Rubric");
+    expect(created.sessions[0].progressionFocus).toBe("Stage 1 focus");
+    expect(created.sessions[0].selectedActivityTitle).toBe("Alternative Shop Activity 1");
+    expect(created.sessions[0].selectedActivitySummary).toBe("Hands-on collaborative station 1.");
+    expect(created.sessions[0].selectedAssessmentType).toBe("demo-rubric");
+    expect(created.sessions[0].selectedAssessmentPreview).toBe(
+      "3-criterion demo rubric for session 1.",
+    );
+    expect(created.sessions[4].mode).toBe("non-instructional");
+    expect(created.sessions[4].selectedAssessmentType).toBeUndefined();
+
+    // Persists metadata cleanly across disk reload and saveDll edits
+    const reloaded = await engine.getDll(created.id);
+    expect(reloaded.sessions[0].selectedActivityTitle).toBe("Alternative Shop Activity 1");
+    expect(reloaded.sessions[0].selectedAssessmentType).toBe("demo-rubric");
+
+    const saved = await engine.saveDll({
+      ...reloaded,
+      sessions: [
+        { ...reloaded.sessions[0], lessonFlow: "Refined station instructions." },
+        reloaded.sessions[1],
+        reloaded.sessions[2],
+        reloaded.sessions[3],
+        reloaded.sessions[4],
+      ],
+    });
+    expect(saved.sessions[0].selectedActivityTitle).toBe("Alternative Shop Activity 1");
+    expect(saved.sessions[0].selectedAssessmentType).toBe("demo-rubric");
+
+    // Exported .docx contains locked objectives and keeps Learner Context & Reflections blank
+    const exported = await engine.exportDllDocx(saved.id);
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+    const docXml = readZipEntry(exported.buffer, "word/document.xml").toString("utf8");
+    expect(docXml).toContain("Teacher-Approved ICT Week");
+    expect(docXml).toContain("Configure a clean document workspace safely on a lab workstation.");
+    const tables = extractTableCellTexts(docXml);
+    expect(tables[1]![4]![1]).toBe("");
+    for (let col = 1; col <= 5; col++) {
+      expect(tables[4]![2]![col]).toBe("");
+    }
+  });
+
+  it("runs deterministic DO 016 Alignment Check with zero extra AI calls on structurally valid output, at most 1 auto-repair retry on malformed or incomplete output, and live recomputation on saveDll", async () => {
+    const dataDir = await makeTempDir();
+    const ict = (
+      await createGuroMateEngine({
+        dataDir,
+        templatesDir: process.cwd(),
+      }).listCurriculum({ gradeLevel: 7, component: "ICT" })
+    )[0]!;
+
+    const sessionsInput = [1, 2, 3, 4, 5].map((n) => ({
+      sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+      mode: n === 5 ? ("non-instructional" as const) : ("instructional" as const),
+      competencyIds: n === 5 ? [] : [ict.id],
+      ...(n === 5 ? { nonInstructionalReason: "Holiday" } : {}),
+    }));
+
+    const buildValidSession = (n: number, opts?: { omitSoft?: boolean }) => ({
+      sessionNumber: n,
+      learningObjectives: [
+        `• Identify ICT sector principle ${n} accurately.`,
+        `• Demonstrate safe lab task ${n} following OHS rules.`,
+        `• Express responsible teamwork during session ${n}.`,
+      ].join("\n"),
+      preLesson: `Pre-lesson activity: “Warm-up ${n}” — Check well-being and share objectives.`,
+      lessonFlow: `Station Activity ${n}: Model steps and facilitate paired hands-on practice.`,
+      learningResources: opts?.omitSoft
+        ? "• Projector and slides"
+        : "• Projector and slides\n• Emergency/offline backup: Printed visual cards and chalkboard diagram",
+      integrationAndContextualization: `Philippine local workplace link ${n}.`,
+      formativeAssessment: opts?.omitSoft
+        ? `Short quiz for session ${n}.`
+        : `Observation / Skill Checklist for session ${n}. Learners raise help cards for guidance and teacher feedback. Accommodations: small-group option and visual cue cards.`,
+      extendedLearningOpportunities: `Practice task ${n} at home.`,
+    });
+
+    // 1. Structurally valid DLL with soft warnings makes ZERO extra AI calls
+    const softWarnCalls: AiGenerateRequest[] = [];
+    const softWarnEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          softWarnCalls.push(req);
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Soft Warning DLL",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) =>
+                buildValidSession(n, { omitSoft: n === 1 }),
+              ),
+            }),
+            model: "mock-model",
+          };
+        },
+      },
+    });
+
+    const softDll = await softWarnEngine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: sessionsInput,
+    });
+    expect(softWarnCalls).toHaveLength(1);
+    expect(softDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(softDll.alignmentCheck?.passed).toBe(false);
+    expect(softDll.alignmentCheck?.autoRepaired).toBe(false);
+    expect(
+      softDll.alignmentCheck?.items.some(
+        (i) => i.code === "emergency-resources" && i.severity === "warning",
+      ),
+    ).toBe(true);
+    expect(
+      softDll.alignmentCheck?.items.some(
+        (i) => i.code === "formative-support" && i.severity === "warning",
+      ),
+    ).toBe(true);
+
+    // 2. Editing and saving recomputes alignmentCheck deterministically without blocking export
+    const fixedDll = await softWarnEngine.saveDll({
+      ...softDll,
+      sessions: [
+        {
+          ...softDll.sessions[0],
+          learningResources:
+            "• Projector and slides\n• Emergency/offline backup: Printed handouts and chalkboard",
+          formativeAssessment:
+            "Exit Ticket measuring all 3 objectives. Learners raise help cards for teacher feedback. Accommodations: oral response and visual cues.",
+        },
+        softDll.sessions[1],
+        softDll.sessions[2],
+        softDll.sessions[3],
+        softDll.sessions[4],
+      ],
+    });
+    expect(fixedDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(fixedDll.alignmentCheck?.passed).toBe(true);
+    const exportedFixed = await softWarnEngine.exportDllDocx(fixedDll.id);
+    expect(exportedFixed.buffer.length).toBeGreaterThan(0);
+
+    // 3. Malformed JSON on initial generation triggers EXACTLY 1 repair retry
+    const malformedCalls: AiGenerateRequest[] = [];
+    const malformedEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          malformedCalls.push(req);
+          if (malformedCalls.length === 1) {
+            return { text: "NOT VALID JSON {{{", model: "mock-model" };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Repaired From Malformed JSON",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) => buildValidSession(n)),
+            }),
+            model: "mock-model",
+          };
+        },
+      },
+    });
+    const repairedJsonDll = await malformedEngine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: sessionsInput,
+    });
+    expect(malformedCalls).toHaveLength(2);
+    expect(repairedJsonDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(repairedJsonDll.alignmentCheck?.passed).toBe(true);
+    expect(repairedJsonDll.alignmentCheck?.autoRepaired).toBe(true);
+
+    // 4. Missing required structural fields triggers EXACTLY 1 repair retry and stops even if soft warnings remain
+    const incompleteCalls: AiGenerateRequest[] = [];
+    const incompleteEngine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          incompleteCalls.push(req);
+          if (incompleteCalls.length === 1) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "Incomplete Initial DLL",
+                references: "MATATAG TLE 7 ICT CG",
+                sessions: [1, 2, 3, 4].map((n) =>
+                  n === 2
+                    ? { ...buildValidSession(n), lessonFlow: "", formativeAssessment: "" }
+                    : buildValidSession(n),
+                ),
+              }),
+              model: "mock-model",
+            };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Incomplete Initial DLL",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) =>
+                buildValidSession(n, { omitSoft: n === 2 }),
+              ),
+            }),
+            model: "mock-model",
+          };
+        },
+      },
+    });
+    const repairedIncompleteDll = await incompleteEngine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: sessionsInput,
+    });
+    expect(incompleteCalls).toHaveLength(2);
+    expect(incompleteCalls[1]!.prompt).toMatch(/Session 2/i);
+    expect(repairedIncompleteDll.alignmentCheck?.structuralValid).toBe(true);
+    expect(repairedIncompleteDll.alignmentCheck?.passed).toBe(false);
+    expect(repairedIncompleteDll.alignmentCheck?.autoRepaired).toBe(true);
+    expect(repairedIncompleteDll.sessions[1].lessonFlow).not.toBe("");
+    const exportedRepaired = await incompleteEngine.exportDllDocx(
+      repairedIncompleteDll.id,
+    );
+    expect(exportedRepaired.buffer.length).toBeGreaterThan(0);
+  });
+
+  it("skips stale Lesson Blueprint session locks when a Session's competencies or mode changed before generateDll", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        if (req.prompt.includes("Create an editable 5-Session Lesson Blueprint")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Stale ICT Blueprint Title",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) => ({
+                sessionNumber: n,
+                progressionFocus: `Stale ICT Stage ${n}`,
+                learningObjectives: [
+                  `• Stale ICT Objective A ${n}.`,
+                  `• Stale ICT Objective B ${n}.`,
+                  `• Stale ICT Objective C ${n}.`,
+                ].join("\n"),
+                activityOptions: [
+                  {
+                    id: `s${n}-ict-1`,
+                    title: `Stale ICT Activity ${n}`,
+                    summary: `Stale ICT summary ${n}.`,
+                    source: "bow",
+                    recommended: true,
+                  },
+                  {
+                    id: `s${n}-ict-2`,
+                    title: `Stale ICT Alt ${n}`,
+                    summary: `Alt summary ${n}.`,
+                    source: "authentic",
+                    recommended: false,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "demo-rubric",
+                    preview: `Stale ICT rubric ${n}.`,
+                    recommended: true,
+                  },
+                ],
+              })),
+            }),
+          };
+        }
+
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Fresh Mixed ICT & FCS Week",
+            references: "MATATAG TLE 7 CG",
+            sessions: [1, 2, 3, 4, 5].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: [
+                `• Fresh AI Objective A for Session ${n}.`,
+                `• Fresh AI Objective B for Session ${n}.`,
+                `• Fresh AI Objective C for Session ${n}.`,
+              ].join("\n"),
+              preLesson: `Pre-lesson activity: “Fresh Hook ${n}”`,
+              lessonFlow: `Fresh Activity ${n}: Guided practice.`,
+              learningResources:
+                "• Lab kit\n• Emergency/offline backup: Printed visual cards",
+              integrationAndContextualization: "Barangay link.",
+              formativeAssessment:
+                "Exit Ticket with help cards for feedback and visual accommodations.",
+              extendedLearningOpportunities: `Home reflection ${n}.`,
+            })),
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const fcs = (await engine.listCurriculum({ gradeLevel: 7, component: "FCS" }))[0]!;
+
+    const staleBlueprint = await engine.planDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: [
+        { sessionNumber: 1, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 2, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 3, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 4, mode: "instructional", competencyIds: [ict.id] },
+        {
+          sessionNumber: 5,
+          mode: "non-instructional",
+          competencyIds: [],
+          nonInstructionalReason: "Holiday",
+        },
+      ],
+    });
+
+    // Mutate Session 1 to FCS and Session 5 to instructional FCS, while keeping Session 2 ICT unchanged
+    const created = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: [
+        { sessionNumber: 1, mode: "instructional", competencyIds: [fcs.id] },
+        { sessionNumber: 2, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 3, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 4, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 5, mode: "instructional", competencyIds: [fcs.id] },
+      ],
+      blueprint: staleBlueprint,
+    });
+
+    const genPrompt = requests[1]!.prompt;
+    expect(genPrompt).not.toContain("Stale ICT Activity 1");
+    expect(genPrompt).toContain("Stale ICT Activity 2");
+
+    // Session 1 (competency changed) skipped stale ICT blueprint lock
+    expect(created.sessions[0].learningObjectives).toContain(
+      "Fresh AI Objective A for Session 1",
+    );
+    expect(created.sessions[0].selectedActivityTitle).toBeUndefined();
+    expect(created.sessions[0].selectedAssessmentType).toBeUndefined();
+
+    // Session 2 (unchanged ICT) preserved valid blueprint lock
+    expect(created.sessions[1].learningObjectives).toContain(
+      "Stale ICT Objective A 2",
+    );
+    expect(created.sessions[1].selectedActivityTitle).toBe("Stale ICT Activity 2");
+    expect(created.sessions[1].selectedAssessmentType).toBe("demo-rubric");
+
+    // Session 5 (switched from non-instructional to instructional) used fresh AI content
+    expect(created.sessions[4].learningObjectives).toContain(
+      "Fresh AI Objective A for Session 5",
+    );
+    expect(created.sessions[4].selectedActivityTitle).toBeUndefined();
   });
 });
