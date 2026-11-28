@@ -1,8 +1,13 @@
 import { useEffect, useId } from "react";
+import { ClassroomContextFieldset } from "../components/ClassroomContextFieldset";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
 import { FocusModeToggleButton } from "../components/LessonMarkdownToolbar";
-import { formatLearningAreas } from "../engine/lessonHelpers";
+import { ReferenceMaterialInput } from "../components/ReferenceMaterialInput";
+import {
+  formatClassroomContextSummary,
+  formatLearningAreas,
+} from "../engine/lessonHelpers";
 import { type SessionNumber } from "../engine/types";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import {
@@ -86,10 +91,23 @@ export function DllWorkspace({
     validateGradeAndSectionOnBlur,
     fieldErrors,
     gradeSectionRef,
+    periodMinutesRef,
     sessionCardRefs,
     sessionsGroupRef,
     references,
     setReferences,
+    classroomContext,
+    periodDraft,
+    selectPeriodPreset,
+    updatePeriodDraft,
+    validatePeriodDraftOnBlur,
+    updateFacility,
+    updateModality,
+    referenceSourceLabel,
+    setReferenceSourceLabel,
+    referenceText,
+    setReferenceText,
+    clearReferenceMaterial,
     promptNotes,
     setPromptNotes,
     sessionConfigs,
@@ -249,7 +267,7 @@ export function DllWorkspace({
         >
           <fieldset className="bg-surface-container-lowest border border-outline-variant rounded-md p-gutter-lg flex flex-col gap-gutter-md">
             <legend className="font-title text-title-lg text-on-surface px-1">
-              1. Header &amp; Prompt Notes
+              1. Header, Classroom Context &amp; Reference Material
             </legend>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter-md">
@@ -338,17 +356,39 @@ export function DllWorkspace({
               />
             </div>
 
+            <ClassroomContextFieldset
+              baseId={baseId}
+              value={classroomContext}
+              periodDraft={periodDraft}
+              periodInputRef={periodMinutesRef}
+              periodError={fieldErrors.periodMinutes}
+              onSelectPresetMinutes={selectPeriodPreset}
+              onChangePeriodDraft={updatePeriodDraft}
+              onBlurPeriodDraft={validatePeriodDraftOnBlur}
+              onChangeFacility={updateFacility}
+              onChangeModality={updateModality}
+            />
+
+            <ReferenceMaterialInput
+              baseId={baseId}
+              sourceLabel={referenceSourceLabel}
+              text={referenceText}
+              onChangeSourceLabel={setReferenceSourceLabel}
+              onChangeText={setReferenceText}
+              onClear={clearReferenceMaterial}
+            />
+
             <div className="flex flex-col gap-gutter-xs">
               <div className="flex flex-wrap items-center justify-between gap-gutter-xs">
                 <label
                   htmlFor={`${baseId}-prompt-notes`}
                   className="font-label text-label-md text-on-surface"
                 >
-                  Optional Prompt Notes (AI Steering)
+                  Optional Prompt Notes
                 </label>
                 <span className="font-body text-body-sm text-on-surface-variant">
-                  Included in AI prompt only — never written into Learner
-                  Context
+                  Extra instructions beyond Classroom Context — never written
+                  into Learner Context
                 </span>
               </div>
               <textarea
@@ -356,7 +396,7 @@ export function DllWorkspace({
                 rows={2}
                 value={promptNotes}
                 onChange={(e) => setPromptNotes(e.target.value)}
-                placeholder="e.g. 45-minute periods, limited tools in lab, group rotation..."
+                placeholder="e.g. Use local barangay examples, rotate pairs across limited toolkits, emphasize OHS..."
                 className={INPUT_CLASS}
               />
             </div>
@@ -628,6 +668,11 @@ export function DllWorkspace({
                 <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-mono text-label-sm tabular-nums">
                   5 Sessions
                 </span>
+                {draftDll.classroomContext && (
+                  <span className="px-gutter-sm py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label text-label-sm">
+                    {formatClassroomContextSummary(draftDll.classroomContext)}
+                  </span>
+                )}
                 {isDirty && (
                   <span className="px-gutter-sm py-0.5 rounded-full bg-warning-container text-on-warning-container font-label text-label-sm">
                     Unsaved edits

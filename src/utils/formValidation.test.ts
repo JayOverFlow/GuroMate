@@ -866,3 +866,44 @@ describe("validateQuizBuilderForm, validateQuizBuilderField & Quiz item count he
     ).toBeUndefined();
   });
 });
+
+describe("Classroom Context periodMinutes validation", () => {
+  it("accepts presets (including 120-min 2-hour periods) and custom whole minutes between 10 and 360 and rejects invalid values", () => {
+    const validSession: DllSessionConfig[] = [
+      { sessionNumber: 1, mode: "instructional", competencyIds: ["c1"] },
+      { sessionNumber: 2, mode: "non-instructional", competencyIds: [] },
+      { sessionNumber: 3, mode: "non-instructional", competencyIds: [] },
+      { sessionNumber: 4, mode: "non-instructional", competencyIds: [] },
+      { sessionNumber: 5, mode: "non-instructional", competencyIds: [] },
+    ];
+    expect(
+      validateDllBuilderField("periodMinutes", {
+        gradeAndSection: "7-Rizal",
+        periodMinutes: "120",
+        sessions: validSession,
+      }),
+    ).toBeUndefined();
+    expect(
+      validateDllBuilderField("periodMinutes", {
+        gradeAndSection: "7-Rizal",
+        periodMinutes: "75",
+        sessions: validSession,
+      }),
+    ).toBeUndefined();
+    expect(
+      validateDllBuilderField("periodMinutes", {
+        gradeAndSection: "7-Rizal",
+        periodMinutes: "5",
+        sessions: validSession,
+      }),
+    ).toMatch(/10 to 360/);
+    expect(
+      validateDlpBuilderField("periodMinutes", {
+        mode: "derive",
+        gradeAndSection: "",
+        periodMinutes: "abc",
+        selectedCompetencyIds: [],
+      }),
+    ).toMatch(/10 to 360/);
+  });
+});

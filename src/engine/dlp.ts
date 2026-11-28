@@ -1,16 +1,23 @@
 import {
   dedupeOrdered,
+  formatClassroomContextPromptBlock,
+  formatClassroomContextSummary,
   formatCompetencyLines,
   formatLearningAreas,
+  formatReferenceMaterialPromptBlock,
+  normalizeClassroomContext,
+  normalizeReferenceMaterial,
   parseAiJsonObject,
 } from "./lessonHelpers";
 import {
   SESSION_NUMBERS,
+  type ClassroomContext,
   type CurriculumCompetency,
   type DailyLessonLog,
   type DailyLessonPlan,
   type DlpActivityPair,
   type DllSessionPlan,
+  type ReferenceMaterial,
   type SessionNumber,
 } from "./types";
 
@@ -65,6 +72,8 @@ export interface ResolvedDlpContext {
   competencies: CurriculumCompetency[];
   references: string;
   inheritedObjectives: string;
+  inheritedClassroomContext?: ClassroomContext;
+  inheritedReferenceMaterial?: ReferenceMaterial;
   sourceDllId?: string;
   sourceSessionNumber?: SessionNumber;
   derivedSession?: DllSessionPlan;
@@ -156,6 +165,8 @@ export function resolveDerivedDlpContext(
     competencies,
     references: references?.trim() || dll.references,
     inheritedObjectives: session.learningObjectives.trim(),
+    ...(dll.classroomContext ? { inheritedClassroomContext: dll.classroomContext } : {}),
+    ...(dll.referenceMaterial ? { inheritedReferenceMaterial: dll.referenceMaterial } : {}),
     sourceDllId: dll.id,
     sourceSessionNumber: session.sessionNumber,
     derivedSession: session,
@@ -168,11 +179,19 @@ export function buildDlpPrompt(params: {
   gradeAndSection: string;
   learningAreas: string;
   references?: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
   promptNotes?: string;
   competencies: CurriculumCompetency[];
   learningCompetencies: string[];
   derivedSession?: DllSessionPlan;
 }): string {
+  const classroomContextBlock = formatClassroomContextPromptBlock(
+    params.classroomContext,
+  );
+  const referenceMaterialBlock = formatReferenceMaterialPromptBlock(
+    params.referenceMaterial,
+  );
   const promptNotes = params.promptNotes?.trim();
   const compSection =
     params.competencies.length > 0
@@ -219,8 +238,10 @@ export function buildDlpPrompt(params: {
     `Grade Level and Section: ${params.gradeAndSection}`,
     params.lessonTitle?.trim() ? `Requested Lesson Title: ${params.lessonTitle.trim()}` : "",
     params.references?.trim() ? `Requested References: ${params.references.trim()}` : "",
+    classroomContextBlock,
+    referenceMaterialBlock,
     promptNotes
-      ? `Teacher Prompt Notes (use to guide pacing, equipment, and activities; never copy into Learner Context):\n${promptNotes}`
+      ? `Teacher Prompt Notes (extra instructions beyond Classroom Context; never copy into Learner Context):\n${promptNotes}`
       : "",
     "",
     "Target Learning Competencies & Standards:",
@@ -282,12 +303,23 @@ export function normalizeEditedDlp(dlp: DailyLessonPlan): DailyLessonPlan {
     throw new DlpValidationError("Grade Level and Section is required.");
   }
 
+  const classroomContext = normalizeClassroomContext(
+    dlp.classroomContext,
+    (msg) => new DlpValidationError(msg),
+  );
+  const referenceMaterial = normalizeReferenceMaterial(dlp.referenceMaterial);
+  const { classroomContext: _c, referenceMaterial: _r, ...rest } = dlp;
+  void _c;
+  void _r;
+
   return {
-    ...dlp,
+    ...rest,
     lessonTitle,
     learningAreas,
     gradeAndSection,
     references: dlp.references.trim(),
+    ...(classroomContext ? { classroomContext } : {}),
+    ...(referenceMaterial ? { referenceMaterial } : {}),
     promptNotes: dlp.promptNotes.trim(),
     intentions: {
       learningCompetencies: dlp.intentions.learningCompetencies
@@ -357,6 +389,9 @@ export function renderDlpMarkdown(dlp: DailyLessonPlan): string {
     `- **Grade Level and Section:** ${dlp.gradeAndSection}`,
     "- **No. of Sessions:** 1",
     `- **References:** ${dlp.references || "—"}`,
+    ...(dlp.classroomContext
+      ? [`- **Classroom Context:** ${formatClassroomContextSummary(dlp.classroomContext)}`]
+      : []),
     ...(dlp.sourceDllId
       ? [`- **Derived From:** ${dlp.sourceDllId} (Session ${dlp.sourceSessionNumber})`]
       : []),

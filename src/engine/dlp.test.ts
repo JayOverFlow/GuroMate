@@ -630,4 +630,171 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
       "### Reflections\n- **Teacher's Activity:** Pacing worked well.\n- **Student's Activity:** Requested extra practice.\n",
     );
   });
+
+  it("grounds scratch and derived DLPs in Classroom Context (including 2-hour periods), Reference Material, and competency customNotes, inherits parent DLL Classroom Context when deriving, persists backward-compatibly, and leaves exported Learner Context and Reflections blank", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Computer Lab Networking Week",
+              references: "MATATAG TLE ICT CG",
+              sessions: [1, 2, 3, 4, 5].map((n) => ({
+                sessionNumber: n,
+                learningObjectives: `• Session ${n} objective`,
+                preLesson: `Pre ${n}`,
+                lessonFlow: `Flow ${n}`,
+                learningResources: "• Ethernet cable\n• Printed diagram",
+                integrationAndContextualization: "School LAN link.",
+                formativeAssessment: `Checklist ${n}`,
+                extendedLearningOpportunities: `Ext ${n}`,
+              })),
+            }),
+          };
+        }
+        return {
+          text: JSON.stringify({
+            lessonTitle: "RJ45 Straight-Through Cable Crimping",
+            references: "MATATAG TLE ICT CG",
+            learningObjectives: "• Assemble a working T568B straight-through cable.",
+            preLesson: { teacherActivity: "Greet and warm up.", studentActivity: "Respond." },
+            lessonFlow: { teacherActivity: "Demonstrate T568B color code.", studentActivity: "Crimp cable in pairs." },
+            learningResources: { teacherActivity: "• Crimping tool", studentActivity: "• UTP cable" },
+            integrationAndContextualization: { teacherActivity: "Local ISP wiring.", studentActivity: "" },
+            formativeAssessment: { teacherActivity: "Test cable with LAN tester.", studentActivity: "Verify 1-8 LEDs." },
+            extendedLearningOpportunities: { teacherActivity: "Sketch home router layout.", studentActivity: "" },
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ictComp = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    await engine.saveCompetencyNotes(
+      ictComp.id,
+      "Remind learners to inspect RJ45 pin alignment before crimping.",
+    );
+
+    const scratchContext = {
+      periodMinutes: 120,
+      facility: "computer-lab" as const,
+      modality: "blended" as const,
+    };
+    const refMaterial = {
+      sourceLabel: "DepEd LAS - T568B Wiring.docx",
+      text: "T568B pinout order: White-Orange, Orange, White-Green, Blue, White-Blue, Green, White-Brown, Brown.",
+    };
+    const promptNotes = "Rotate 20 crimping tools across 40 learners in pairs.";
+
+    const scratchDlp = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Mabini",
+      competencyIds: [ictComp.id],
+      classroomContext: scratchContext,
+      referenceMaterial: refMaterial,
+      promptNotes,
+    });
+
+    expect(requests).toHaveLength(1);
+    const scratchPrompt = requests[0]!.prompt;
+    expect(scratchPrompt).toContain("120 minutes");
+    expect(scratchPrompt).toContain("2 hrs");
+    expect(scratchPrompt).toMatch(/Computer Lab/i);
+    expect(scratchPrompt).toMatch(/Blended/i);
+    expect(scratchPrompt).toContain("DepEd LAS - T568B Wiring.docx");
+    expect(scratchPrompt).toContain("T568B pinout order: White-Orange");
+    expect(scratchPrompt).toContain("Remind learners to inspect RJ45 pin alignment");
+    expect(scratchPrompt).toContain(promptNotes);
+
+    expect(scratchDlp.classroomContext).toEqual(scratchContext);
+    expect(scratchDlp.intentions.learnerContext).toBe("");
+    expect(scratchDlp.reflections).toEqual({ teacherActivity: "", studentActivity: "" });
+
+    // Persistence across fresh engine instance & saveDlp
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+    const reloaded = await engine2.getDlp(scratchDlp.id);
+    expect(reloaded.classroomContext).toEqual(scratchContext);
+    const saved = await engine2.saveDlp({ ...reloaded, lessonTitle: "Updated Crimping DLP" });
+    expect(saved.classroomContext).toEqual(scratchContext);
+
+    // Exported .docx must keep Learner Context & Reflections strictly blank and never leak context/ref/promptNotes
+    const exported = await engine2.exportDlpDocx(saved.id);
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+    const docXml = readZipEntry(exported.buffer, "word/document.xml").toString("utf8");
+    const tables = extractTableCellTexts(docXml);
+    expect(tables[1]![3]![1]).toBe("");
+    expect(tables[4]![3]![1]).toBe("");
+    expect(tables[4]![3]![2]).toBe("");
+    expect(docXml).not.toContain("T568B pinout order");
+    expect(docXml).not.toContain("Rotate 20 crimping tools");
+    expect(docXml).not.toContain("Computer Lab");
+
+    // Derive mode inherits parent DLL Classroom Context and Reference Material when omitted
+    const parentDll = await engine2.generateDll({
+      gradeAndSection: "Grade 7 - Mabini",
+      classroomContext: {
+        periodMinutes: 90,
+        facility: "shop-workshop",
+        modality: "face-to-face",
+      },
+      referenceMaterial: {
+        sourceLabel: "Parent DLL Exemplar.pdf",
+        text: "Parent DLL technical safety procedure for wiring benches.",
+      },
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [ictComp.id],
+      })),
+    });
+
+    const derivedDlp = await engine2.generateDlp({
+      mode: "derive",
+      dllId: parentDll.id,
+      sessionNumber: 1,
+    });
+    expect(derivedDlp.classroomContext).toEqual({
+      periodMinutes: 90,
+      facility: "shop-workshop",
+      modality: "face-to-face",
+    });
+    const derivedPrompt = requests[requests.length - 1]!.prompt;
+    expect(derivedPrompt).toContain("90 minutes");
+    expect(derivedPrompt).toMatch(/Shop\s*\/\s*Workshop/i);
+    expect(derivedPrompt).toContain("Parent DLL technical safety procedure");
+
+    // Backward compatibility: legacy saved DLP lacking classroomContext still loads, saves, and exports cleanly
+    const { writeFile } = await import("node:fs/promises");
+    const legacyDlp = { ...saved };
+    delete legacyDlp.classroomContext;
+    delete legacyDlp.referenceMaterial;
+    await writeFile(
+      path.join(dataDir, "dlps.json"),
+      JSON.stringify([legacyDlp], null, 2),
+      "utf8",
+    );
+    const loadedLegacy = await engine2.getDlp(legacyDlp.id);
+    expect(loadedLegacy.classroomContext).toBeUndefined();
+    const resavedLegacy = await engine2.saveDlp({
+      ...loadedLegacy,
+      lessonTitle: "Legacy DLP Resaved",
+    });
+    expect(resavedLegacy.classroomContext).toBeUndefined();
+    const legacyDocx = await engine2.exportDlpDocx(resavedLegacy.id);
+    expect(legacyDocx.buffer.subarray(0, 2).toString("ascii")).toBe("PK");
+  });
 });

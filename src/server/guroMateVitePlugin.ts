@@ -12,6 +12,7 @@ import {
   DlpValidationError,
   QuizNotFoundError,
   QuizValidationError,
+  ReferenceMaterialError,
   SettingsValidationError,
   createGuroMateEngine,
 } from "../engine/createGuroMateEngine";
@@ -22,10 +23,13 @@ import {
   TLE_COMPONENTS,
   type AiProviderSettings,
   type ClassSectionInput,
+  type ClassroomContext,
+  type ClassroomFacility,
   type CurriculumFilter,
   type CustomCompetencyInput,
   type DailyLessonLog,
   type DailyLessonPlan,
+  type DeliveryModality,
   type DllSessionConfig,
   type GenerateDllInput,
   type GenerateDlpInput,
@@ -35,12 +39,14 @@ import {
   type QuarterNumber,
   type Quiz,
   type QuizItemCounts,
+  type ReferenceMaterial,
   type SessionNumber,
   type SettingsPatch,
   type TleComponent,
 } from "../engine/types";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_REFERENCE_UPLOAD_BODY_BYTES = 16 * 1024 * 1024;
 
 class HttpError extends Error {
   constructor(
@@ -51,15 +57,19 @@ class HttpError extends Error {
   }
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+async function readJsonBody(
+  req: IncomingMessage,
+  maxBytes: number = MAX_BODY_BYTES,
+): Promise<unknown> {
   const chunks: Buffer[] = [];
   let total = 0;
 
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += buf.length;
-    if (total > MAX_BODY_BYTES) {
-      throw new HttpError(413, "Request body exceeds 1 MB limit.");
+    if (total > maxBytes) {
+      const limitMb = Math.round(maxBytes / (1024 * 1024));
+      throw new HttpError(413, `Request body exceeds ${limitMb} MB limit.`);
     }
     chunks.push(buf);
   }
@@ -213,10 +223,37 @@ function parseClassSectionBody(body: unknown): ClassSectionInput {
   };
 }
 
+function parseClassroomContext(raw: unknown): ClassroomContext | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isRecord(raw)) {
+    throw new HttpError(400, "classroomContext must be a JSON object.");
+  }
+  return {
+    periodMinutes: Number(raw.periodMinutes),
+    facility: raw.facility as ClassroomFacility,
+    modality: raw.modality as DeliveryModality,
+  };
+}
+
+function parseReferenceMaterial(raw: unknown): ReferenceMaterial | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isRecord(raw)) {
+    throw new HttpError(400, "referenceMaterial must be a JSON object.");
+  }
+  return {
+    ...(typeof raw.sourceLabel === "string"
+      ? { sourceLabel: raw.sourceLabel }
+      : {}),
+    text: typeof raw.text === "string" ? raw.text : "",
+  };
+}
+
 function parseGenerateDllBody(body: unknown): GenerateDllInput {
   if (!isRecord(body)) {
     throw new HttpError(400, "DLL generation payload must be a JSON object.");
   }
+  const classroomContext = parseClassroomContext(body.classroomContext);
+  const referenceMaterial = parseReferenceMaterial(body.referenceMaterial);
   const sessions: DllSessionConfig[] = Array.isArray(body.sessions)
     ? body.sessions.map((entry) => {
         if (!isRecord(entry)) {
@@ -246,6 +283,8 @@ function parseGenerateDllBody(body: unknown): GenerateDllInput {
     ...(typeof body.references === "string"
       ? { references: body.references }
       : {}),
+    ...(classroomContext ? { classroomContext } : {}),
+    ...(referenceMaterial ? { referenceMaterial } : {}),
     ...(typeof body.promptNotes === "string"
       ? { promptNotes: body.promptNotes }
       : {}),
@@ -257,9 +296,13 @@ function parseGenerateDlpBody(body: unknown): GenerateDlpInput {
   if (!isRecord(body)) {
     throw new HttpError(400, "DLP generation payload must be a JSON object.");
   }
+  const classroomContext = parseClassroomContext(body.classroomContext);
+  const referenceMaterial = parseReferenceMaterial(body.referenceMaterial);
   const optional = {
     ...(typeof body.lessonTitle === "string" ? { lessonTitle: body.lessonTitle } : {}),
     ...(typeof body.references === "string" ? { references: body.references } : {}),
+    ...(classroomContext ? { classroomContext } : {}),
+    ...(referenceMaterial ? { referenceMaterial } : {}),
     ...(typeof body.promptNotes === "string" ? { promptNotes: body.promptNotes } : {}),
   };
   if (body.mode === "derive") {
@@ -467,6 +510,19 @@ export function createGuroMateMiddleware(
         }
       }
 
+      if (req.method === "POST" && urlPath === "/api/reference-material/extract") {
+        const body = await readJsonBody(req, MAX_REFERENCE_UPLOAD_BODY_BYTES);
+        if (!isRecord(body)) {
+          throw new HttpError(400, "Reference material payload must be a JSON object.");
+        }
+        const extracted = await engine.extractReferenceMaterial({
+          filename: typeof body.filename === "string" ? body.filename : "",
+          dataBase64: typeof body.dataBase64 === "string" ? body.dataBase64 : "",
+        });
+        sendJson(res, 200, extracted);
+        return;
+      }
+
       if (req.method === "GET" && urlPath === "/api/dlls") {
         sendJson(res, 200, await engine.listDlls());
         return;
@@ -621,7 +677,8 @@ export function createGuroMateMiddleware(
         err instanceof ClassSectionValidationError ||
         err instanceof DllValidationError ||
         err instanceof DlpValidationError ||
-        err instanceof QuizValidationError
+        err instanceof QuizValidationError ||
+        err instanceof ReferenceMaterialError
       ) {
         sendJson(res, 400, { error: err.message });
         return;

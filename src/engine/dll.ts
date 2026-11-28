@@ -1,16 +1,23 @@
 import {
   dedupeOrdered,
+  formatClassroomContextPromptBlock,
+  formatClassroomContextSummary,
   formatCompetencyLines,
   formatLearningAreas,
+  formatReferenceMaterialPromptBlock,
+  normalizeClassroomContext,
+  normalizeReferenceMaterial,
   parseAiJsonObject,
 } from "./lessonHelpers";
 import {
   SESSION_NUMBERS,
+  type ClassroomContext,
   type CurriculumCompetency,
   type DailyLessonLog,
   type DllSessionConfig,
   type DllSessionPlan,
   type GenerateDllInput,
+  type ReferenceMaterial,
   type SessionNumber,
   type TleComponent,
 } from "./types";
@@ -151,12 +158,14 @@ export function resolveDllSessions(
   };
 }
 
-/** Builds the AI generation prompt combining Curriculum Guide, Budget of Work, and Prompt Notes. */
+/** Builds the AI generation prompt combining Curriculum Guide, Budget of Work, Classroom Context, Reference Material, and Prompt Notes. */
 export function buildDllPrompt(params: {
   lessonTitle?: string;
   gradeAndSection: string;
   learningAreas: string;
   references?: string;
+  classroomContext?: ClassroomContext;
+  referenceMaterial?: ReferenceMaterial;
   promptNotes?: string;
   orderedConfigs: DllSessionConfig[];
   sessionCompetencies: Map<SessionNumber, CurriculumCompetency[]>;
@@ -171,6 +180,12 @@ export function buildDllPrompt(params: {
     return `Session ${cfg.sessionNumber} (Instructional):\n${compDetails}`;
   });
 
+  const classroomContextBlock = formatClassroomContextPromptBlock(
+    params.classroomContext,
+  );
+  const referenceMaterialBlock = formatReferenceMaterialPromptBlock(
+    params.referenceMaterial,
+  );
   const promptNotes = params.promptNotes?.trim();
 
   return [
@@ -179,8 +194,10 @@ export function buildDllPrompt(params: {
     `Grade Level and Section: ${params.gradeAndSection}`,
     params.lessonTitle?.trim() ? `Requested Lesson Title: ${params.lessonTitle.trim()}` : "",
     params.references?.trim() ? `Requested References: ${params.references.trim()}` : "",
+    classroomContextBlock,
+    referenceMaterialBlock,
     promptNotes
-      ? `Teacher Prompt Notes (use to guide pacing, equipment, and activities; never copy into Learner Context):\n${promptNotes}`
+      ? `Teacher Prompt Notes (extra instructions beyond Classroom Context; never copy into Learner Context):\n${promptNotes}`
       : "",
     "",
     "Session Assignments:",
@@ -316,12 +333,23 @@ export function normalizeEditedDll(dll: DailyLessonLog): DailyLessonLog {
     reflections: s.reflections.trim(),
   })) as DailyLessonLog["sessions"];
 
+  const classroomContext = normalizeClassroomContext(
+    dll.classroomContext,
+    (msg) => new DllValidationError(msg),
+  );
+  const referenceMaterial = normalizeReferenceMaterial(dll.referenceMaterial);
+  const { classroomContext: _c, referenceMaterial: _r, ...rest } = dll;
+  void _c;
+  void _r;
+
   return {
-    ...dll,
+    ...rest,
     lessonTitle,
     learningAreas,
     gradeAndSection,
     references: dll.references.trim(),
+    ...(classroomContext ? { classroomContext } : {}),
+    ...(referenceMaterial ? { referenceMaterial } : {}),
     promptNotes: dll.promptNotes.trim(),
     intentions: {
       learningCompetencies: dll.intentions.learningCompetencies
@@ -349,6 +377,9 @@ export function renderDllMarkdown(dll: DailyLessonLog): string {
     `- **Grade Level and Section:** ${dll.gradeAndSection}`,
     "- **No. of Sessions:** 5",
     `- **References:** ${dll.references || "—"}`,
+    ...(dll.classroomContext
+      ? [`- **Classroom Context:** ${formatClassroomContextSummary(dll.classroomContext)}`]
+      : []),
     "",
     "## Intentions",
     "",
