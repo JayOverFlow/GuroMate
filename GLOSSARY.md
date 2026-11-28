@@ -7,8 +7,12 @@ GuroMate is a personal instructional planning and classroom management system fo
 ### Lesson Design (ILAW Framework)
 
 **ILAW Framework**:
-The four-part lesson design structure consisting of **Intentions**, **Learning Experience**, **Assessing Learning**, and **Ways Forward**.
+The DepEd Order No. 016, s. 2026 four-part lesson design structure consisting of **Intentions**, **Learning Experience**, **Assessing Learning**, and **Ways Forward**.
 _Avoid_: 4As, 5Es, DepEd DO 42 standard format
+
+**Learning Design Principles**:
+The seven DepEd Order No. 016, s. 2026 pedagogical principles guiding **Learning Experience**—clarifying objectives, guiding before independent practice, checking well-being and mastery, connecting to prior competencies, encouraging collaboration, reflecting on relevance, and ensuring inclusion.
+_Avoid_: Teaching tips, 4As, 5Es
 
 **Daily Lesson Log (DLL)**:
 A multi-session (typically 5-session) weekly lesson plan organized as a grid where **Intentions** span the whole log and each **Session** has its own column for **Learning Objectives**, **Learning Experience**, **Assessing Learning**, and **Ways Forward**. A single DLL may target one or more **Learning Competencies** across one or more **TLE Components** assigned to specific **Sessions** (e.g., Sessions 1–2 for ICT and Sessions 3–5 for FCS).
@@ -46,9 +50,17 @@ _Avoid_: Assignment, homework, remarks
 The teacher's manually written observations of learners' recent performance, strengths, interests, and barriers to learning; left blank in generated documents for manual completion.
 _Avoid_: Student profile, class background
 
+**Lesson Blueprint**:
+An AI-drafted, teacher-editable planning proposal generated before full document creation that unpacks session progression, **Learning Objectives**, selectable **Learning Experience** activity options, and selectable **Formative Assessment** options with recommended choices pre-selected.
+_Avoid_: Lesson outline, draft plan, syllabus
+
+**Classroom Context**:
+Structured practical teaching constraints—such as period length (e.g., 45 minutes, 60 minutes, 90 minutes, 2 hours), available lab or shop facilities, and delivery modality—used to pace activities and choose realistic resources without populating **Learner Context**.
+_Avoid_: Learner context, class profile, prompt notes
+
 **Prompt Notes**:
-Optional teacher instructions (e.g., period duration, available lab/shop equipment, activity constraints) passed to the AI during generation and excluded from the exported document's **Learner Context** cell.
-_Avoid_: Learner context, system prompt
+Optional free-text teacher instructions beyond structured **Classroom Context** (such as custom scenarios, local examples, or specific activity constraints) passed to the AI during generation and excluded from the exported document's **Learner Context** cell.
+_Avoid_: Learner context, classroom context, system prompt
 
 **System Instructions**:
 Built-in DepEd MATATAG and **ILAW Framework** pedagogical and formatting directives sent via the AI provider's native system role during **Daily Lesson Log (DLL)** or **Daily Lesson Plan (DLP)** generation; distinct from per-lesson teacher **Prompt Notes**.
@@ -57,6 +69,14 @@ _Avoid_: Prompt notes, user prompt, custom notes
 **Reflections**:
 The teacher's manually written post-session notes on instructional adjustments, learner interests, and coaching points under **Ways Forward**; left blank in generated documents for manual completion.
 _Avoid_: Remarks, post-lesson notes
+
+**Declaration of AI Use**:
+The DepEd Order No. 003, s. 2026 Annex A statement in a **Daily Lesson Log (DLL)** or **Daily Lesson Plan (DLP)** disclosing the AI tool used, its auxiliary drafting role, teacher review and validation, and confirmation that no confidential learner data was shared.
+_Avoid_: AI disclaimer, AI note, footnote
+
+**Reference Material**:
+Optional teacher-supplied subject-matter content (such as excerpts from a DepEd Lesson Exemplar, Learning Activity Sheet, Learner's Material, or TESDA Training Regulation) used to ground a **Daily Lesson Log (DLL)** or **Daily Lesson Plan (DLP)** in accurate technical facts and procedures.
+_Avoid_: Attachment, textbook upload, RAG source
 
 ### Curriculum
 
