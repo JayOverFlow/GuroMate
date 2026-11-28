@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,20 +31,47 @@ describe("createGuroMateEngine", () => {
 
     const settings = await engine.getSettings();
 
-    expect(settings.profile).toEqual({
+    expect(settings.profile).toMatchObject({
       studentTeacherName: "JOHN REX B. DURAN",
       cooperatingTeacherName: "FERDINAND S. BALTAZAR",
       tleCoordinatorName: "LEA S. RESTA",
       academicHeadName: "NARIZA JANE M. TUMUNDONG",
-      aiDeclaration:
-        "This lesson plan was developed using AI and subsequently reviewed for accuracy and alignment with curriculum standards.",
     });
+    expect(settings.profile.aiDeclaration).toMatch(/DO\s*003|DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(settings.profile.aiDeclaration).toMatch(/Annex A/i);
+    expect(settings.profile.aiDeclaration).toContain("{aiTool}");
+    expect(settings.profile.aiDeclaration).toMatch(/auxiliary|drafting/i);
+    expect(settings.profile.aiDeclaration).toMatch(/review|validat/i);
+    expect(settings.profile.aiDeclaration).toMatch(/no confidential learner/i);
     expect(settings.ai).toEqual({
       aiProvider: "openai-compatible",
       apiKey: "",
       baseUrl: "https://api.openai.com/v1",
       modelId: "",
     });
+  });
+
+  it("loads existing saved settings files cleanly when profile.aiDeclaration is custom or omitted", async () => {
+    const dataDir = await makeTempDir();
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "settings.json"),
+      JSON.stringify({
+        profile: { studentTeacherName: "LEGACY TEACHER" },
+        ai: { aiProvider: "ollama", modelId: "qwen2.5" },
+      }),
+      "utf8",
+    );
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+    });
+    const loaded = await engine.getSettings();
+    expect(loaded.profile.studentTeacherName).toBe("LEGACY TEACHER");
+    expect(loaded.profile.aiDeclaration).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(loaded.ai.aiProvider).toBe("ollama");
+    expect(loaded.ai.modelId).toBe("qwen2.5");
   });
 
   it("persists updated Teacher Profile and AI provider settings to local disk across engine instances", async () => {

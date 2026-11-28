@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { FieldError, fieldBorderClass } from "../components/FieldError";
+import { DEFAULT_AI_DECLARATION_TEMPLATE } from "../engine/lessonHelpers";
 import { AI_PROVIDERS, formatModelOptionLabel } from "../engine/providers";
 import { TLE_COMPONENTS, type GuroMateSettings } from "../engine/types";
 import { COMPONENT_SHORT_LABELS } from "../hooks/useCurriculumWorkspace";
@@ -164,7 +165,7 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
               </p>
             </div>
             <span className="px-gutter-sm py-gutter-xs rounded-full bg-surface-variant text-on-surface-variant font-label text-label-sm">
-              DO 3 s. 2026 Compliant
+              DO 003, s. 2026 Compliant
             </span>
           </div>
 
@@ -204,23 +205,44 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
           </div>
 
           <div className="flex flex-col gap-gutter-xs pt-gutter-xs">
-            <label
-              htmlFor={`${baseId}-aiDeclaration`}
-              className="font-label text-label-md text-on-surface"
-            >
-              DO 3 s. 2026 Annex A — Declaration of AI Use{" "}
-              <span aria-hidden="true">*</span>
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-gutter-xs">
+              <label
+                htmlFor={`${baseId}-aiDeclaration`}
+                className="font-label text-label-md text-on-surface"
+              >
+                DO 003, s. 2026 Annex A — Declaration of AI Use (Default
+                Template) <span aria-hidden="true">*</span>
+              </label>
+              {settings.profile.aiDeclaration.trim() !==
+                DEFAULT_AI_DECLARATION_TEMPLATE && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateProfileField(
+                      "aiDeclaration",
+                      DEFAULT_AI_DECLARATION_TEMPLATE,
+                    )
+                  }
+                  className="text-label-sm font-label text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary rounded-sm"
+                >
+                  Reset to DO 003 Default
+                </button>
+              )}
+            </div>
             <span
               id={`${baseId}-aiDeclaration-hint`}
               className="font-body text-body-sm text-on-surface-variant"
             >
-              Included in exported DLL and DLP headers.
+              Use{" "}
+              <code className="font-mono text-mono-md">{"{aiTool}"}</code> to
+              auto-insert the active AI provider and model on new DLLs and DLPs;
+              also used as fallback for older saved lessons on{" "}
+              <code className="font-mono text-mono-md">.docx</code> export.
             </span>
             <textarea
               id={`${baseId}-aiDeclaration`}
               name="aiDeclaration"
-              rows={2}
+              rows={3}
               required
               value={settings.profile.aiDeclaration}
               className={inputClass(Boolean(fieldErrors.aiDeclaration))}

@@ -322,6 +322,9 @@ export function normalizeEditedDll(dll: DailyLessonLog): DailyLessonLog {
     learningAreas,
     gradeAndSection,
     references: dll.references.trim(),
+    ...(typeof dll.aiDeclaration === "string"
+      ? { aiDeclaration: dll.aiDeclaration.trim() }
+      : {}),
     promptNotes: dll.promptNotes.trim(),
     intentions: {
       learningCompetencies: dll.intentions.learningCompetencies
@@ -349,6 +352,9 @@ export function renderDllMarkdown(dll: DailyLessonLog): string {
     `- **Grade Level and Section:** ${dll.gradeAndSection}`,
     "- **No. of Sessions:** 5",
     `- **References:** ${dll.references || "—"}`,
+    ...(dll.aiDeclaration?.trim()
+      ? [`- **Declaration of AI Use:** ${dll.aiDeclaration.trim()}`]
+      : []),
     "",
     "## Intentions",
     "",
