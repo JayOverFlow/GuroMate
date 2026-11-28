@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { MAX_REFERENCE_MATERIAL_CHARS } from "./lessonHelpers";
+import {
+  MAX_REFERENCE_FILE_BYTES,
+  MAX_REFERENCE_MATERIAL_CHARS,
+} from "./lessonHelpers";
 import type {
   ReferenceMaterialExtractInput,
   ReferenceMaterialExtractResult,
@@ -9,7 +12,7 @@ import { readZipEntry } from "./zip";
 
 export class ReferenceMaterialError extends Error {}
 
-export const MAX_REFERENCE_FILE_BYTES = 10 * 1024 * 1024;
+export { MAX_REFERENCE_FILE_BYTES };
 export const SUPPORTED_REFERENCE_EXTENSIONS = [".txt", ".docx", ".pdf"] as const;
 const PDF_EXTRACT_TIMEOUT_MS = 15_000;
 

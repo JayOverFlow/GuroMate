@@ -524,6 +524,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
       };
     });
     setSessionConfigs(nextSessions);
+    setBlueprint(null);
     syncActiveSessionErrors(nextSessions);
   }
 
@@ -531,6 +532,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     sessionNumber: SessionNumber,
     competencyId: string,
   ) {
+    setBlueprint(null);
     setSessionConfigs((prev) =>
       prev.map((cfg) =>
         cfg.sessionNumber === sessionNumber
@@ -560,6 +562,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
         : cfg,
     );
     setSessionConfigs(nextSessions);
+    setBlueprint(null);
     syncActiveSessionErrors(nextSessions);
   }
 
@@ -567,6 +570,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     sessionNumber: SessionNumber,
     reason: string,
   ) {
+    setBlueprint(null);
     setSessionConfigs((prev) =>
       prev.map((cfg) =>
         cfg.sessionNumber === sessionNumber

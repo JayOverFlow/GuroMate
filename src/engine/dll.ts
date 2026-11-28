@@ -1,5 +1,6 @@
 import {
   FORMATIVE_ASSESSMENT_LABELS,
+  buildFallbackObjectives,
   cleanObjectiveBullets,
   dedupeOrdered,
   formatClassroomContextPromptBlock,
@@ -7,6 +8,7 @@ import {
   formatCompetencyLines,
   formatLearningAreas,
   formatReferenceMaterialPromptBlock,
+  hasMatchingCompetencyIds,
   normalizeBlueprintActivityOptions,
   normalizeBlueprintAssessmentOptions,
   normalizeClassroomContext,
@@ -513,12 +515,7 @@ export function assembleDllBlueprint(params: {
         : "";
     const primaryTopic = comps[0]?.contentTopic.trim() || "the target topic";
     const learningObjectives =
-      rawObjectives ||
-      [
-        `• Explain the core concepts and principles of ${primaryTopic} accurately.`,
-        `• Demonstrate a guided practical task applying ${primaryTopic} following safety standards.`,
-        `• Express appreciation for responsible, collaborative practices in ${primaryTopic}.`,
-      ].join("\n");
+      rawObjectives || buildFallbackObjectives(primaryTopic);
 
     const normalizedActivities = normalizeBlueprintActivityOptions({
       rawOptions: ai.activityOptions,
@@ -552,6 +549,19 @@ export function assembleDllBlueprint(params: {
     references,
     sessions,
   };
+}
+
+function isMatchingDllSessionBlueprint(
+  bp: DllSessionBlueprint | undefined,
+  cfg: DllSessionConfig,
+  comps: readonly CurriculumCompetency[],
+): bp is DllSessionBlueprint {
+  if (!bp || bp.mode !== cfg.mode || bp.mode !== "instructional") {
+    return false;
+  }
+  const expectedIds =
+    comps.length > 0 ? comps.map((c) => c.id) : cfg.competencyIds;
+  return hasMatchingCompetencyIds(bp.competencyIds, expectedIds);
 }
 
 function resolveBlueprintSessionSelections(bp: DllSessionBlueprint | undefined): {
@@ -636,9 +646,10 @@ export function buildDllPrompt(params: {
     const comps = params.sessionCompetencies.get(cfg.sessionNumber) ?? [];
     const compDetails = formatCompetencyLines(comps);
     const cueLines = progressionCues.get(cfg.sessionNumber)?.promptLines ?? [];
-    const bpSel = resolveBlueprintSessionSelections(
-      blueprintBySession.get(cfg.sessionNumber),
-    );
+    const bpCandidate = blueprintBySession.get(cfg.sessionNumber);
+    const bpSel = isMatchingDllSessionBlueprint(bpCandidate, cfg, comps)
+      ? resolveBlueprintSessionSelections(bpCandidate)
+      : {};
     const bpLines =
       params.blueprint && Object.keys(bpSel).length > 0
         ? [
@@ -780,9 +791,10 @@ export function assembleGeneratedSessions(
 
     const ai = aiBySession.get(cfg.sessionNumber) ?? {};
     const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-    const bpSel = resolveBlueprintSessionSelections(
-      bpBySession.get(cfg.sessionNumber),
-    );
+    const bpCandidate = bpBySession.get(cfg.sessionNumber);
+    const bpSel = isMatchingDllSessionBlueprint(bpCandidate, cfg, comps)
+      ? resolveBlueprintSessionSelections(bpCandidate)
+      : {};
     return {
       sessionNumber: cfg.sessionNumber,
       mode: "instructional" as const,

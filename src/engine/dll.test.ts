@@ -1479,4 +1479,140 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     );
     expect(exportedRepaired.buffer.length).toBeGreaterThan(0);
   });
+
+  it("skips stale Lesson Blueprint session locks when a Session's competencies or mode changed before generateDll", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        if (req.prompt.includes("Create an editable 5-Session Lesson Blueprint")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Stale ICT Blueprint Title",
+              references: "MATATAG TLE 7 ICT CG",
+              sessions: [1, 2, 3, 4].map((n) => ({
+                sessionNumber: n,
+                progressionFocus: `Stale ICT Stage ${n}`,
+                learningObjectives: [
+                  `• Stale ICT Objective A ${n}.`,
+                  `• Stale ICT Objective B ${n}.`,
+                  `• Stale ICT Objective C ${n}.`,
+                ].join("\n"),
+                activityOptions: [
+                  {
+                    id: `s${n}-ict-1`,
+                    title: `Stale ICT Activity ${n}`,
+                    summary: `Stale ICT summary ${n}.`,
+                    source: "bow",
+                    recommended: true,
+                  },
+                  {
+                    id: `s${n}-ict-2`,
+                    title: `Stale ICT Alt ${n}`,
+                    summary: `Alt summary ${n}.`,
+                    source: "authentic",
+                    recommended: false,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "demo-rubric",
+                    preview: `Stale ICT rubric ${n}.`,
+                    recommended: true,
+                  },
+                ],
+              })),
+            }),
+          };
+        }
+
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Fresh Mixed ICT & FCS Week",
+            references: "MATATAG TLE 7 CG",
+            sessions: [1, 2, 3, 4, 5].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: [
+                `• Fresh AI Objective A for Session ${n}.`,
+                `• Fresh AI Objective B for Session ${n}.`,
+                `• Fresh AI Objective C for Session ${n}.`,
+              ].join("\n"),
+              preLesson: `Pre-lesson activity: “Fresh Hook ${n}”`,
+              lessonFlow: `Fresh Activity ${n}: Guided practice.`,
+              learningResources:
+                "• Lab kit\n• Emergency/offline backup: Printed visual cards",
+              integrationAndContextualization: "Barangay link.",
+              formativeAssessment:
+                "Exit Ticket with help cards for feedback and visual accommodations.",
+              extendedLearningOpportunities: `Home reflection ${n}.`,
+            })),
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const fcs = (await engine.listCurriculum({ gradeLevel: 7, component: "FCS" }))[0]!;
+
+    const staleBlueprint = await engine.planDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: [
+        { sessionNumber: 1, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 2, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 3, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 4, mode: "instructional", competencyIds: [ict.id] },
+        {
+          sessionNumber: 5,
+          mode: "non-instructional",
+          competencyIds: [],
+          nonInstructionalReason: "Holiday",
+        },
+      ],
+    });
+
+    // Mutate Session 1 to FCS and Session 5 to instructional FCS, while keeping Session 2 ICT unchanged
+    const created = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: [
+        { sessionNumber: 1, mode: "instructional", competencyIds: [fcs.id] },
+        { sessionNumber: 2, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 3, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 4, mode: "instructional", competencyIds: [ict.id] },
+        { sessionNumber: 5, mode: "instructional", competencyIds: [fcs.id] },
+      ],
+      blueprint: staleBlueprint,
+    });
+
+    const genPrompt = requests[1]!.prompt;
+    expect(genPrompt).not.toContain("Stale ICT Activity 1");
+    expect(genPrompt).toContain("Stale ICT Activity 2");
+
+    // Session 1 (competency changed) skipped stale ICT blueprint lock
+    expect(created.sessions[0].learningObjectives).toContain(
+      "Fresh AI Objective A for Session 1",
+    );
+    expect(created.sessions[0].selectedActivityTitle).toBeUndefined();
+    expect(created.sessions[0].selectedAssessmentType).toBeUndefined();
+
+    // Session 2 (unchanged ICT) preserved valid blueprint lock
+    expect(created.sessions[1].learningObjectives).toContain(
+      "Stale ICT Objective A 2",
+    );
+    expect(created.sessions[1].selectedActivityTitle).toBe("Stale ICT Activity 2");
+    expect(created.sessions[1].selectedAssessmentType).toBe("demo-rubric");
+
+    // Session 5 (switched from non-instructional to instructional) used fresh AI content
+    expect(created.sessions[4].learningObjectives).toContain(
+      "Fresh AI Objective A for Session 5",
+    );
+    expect(created.sessions[4].selectedActivityTitle).toBeUndefined();
+  });
 });

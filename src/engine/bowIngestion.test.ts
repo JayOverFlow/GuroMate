@@ -803,7 +803,7 @@ describe("mergeBowIntoCatalog", () => {
       contentTopic: "ICT",
       contentStandard: "CS",
       performanceStandard: "PS",
-      learningCompetency: "Unmatched Grade 7 BoW competency.",
+      learningCompetency: "Evaluate an unmatched Grade 7 BoW competency.",
       suggestedActivities: "- Extra Activity",
       suggestedPerformanceTasks: "",
       sourceDocument: "Grade 7/[G7] TLE_ ICT.pdf",

@@ -236,7 +236,7 @@ export function SettingsWorkspace({ onSettingsSaved }: SettingsWorkspaceProps) {
               Use{" "}
               <code className="font-mono text-mono-md">{"{aiTool}"}</code> to
               auto-insert the active AI provider and model on new DLLs and DLPs;
-              also used as fallback for older saved lessons on{" "}
+              also used as fallback for older saved DLLs and DLPs on{" "}
               <code className="font-mono text-mono-md">.docx</code> export.
             </span>
             <textarea

@@ -20,6 +20,63 @@ import {
 } from "./types";
 
 export const MAX_REFERENCE_MATERIAL_CHARS = 10_000;
+export const MAX_REFERENCE_FILE_BYTES = 10 * 1024 * 1024;
+
+export const DOMAIN_PREFIX_PATTERN =
+  /^(?:[•\-*]\s*|\d+[.)]\s*)?(?:cognitive|psychomotor|affective)\s*(?:domain)?\s*[:\-–—]\s*/i;
+
+export const ASSESSMENT_TYPE_PATTERNS: Record<FormativeAssessmentType, RegExp> = {
+  "exit-ticket":
+    /\b(exit\s*ticket|exit\s*slip|reflection\s*slip|3-2-1|one-minute\s+paper)\b/i,
+  checklist: /\b(checklist|observation|skill\s+check)\b/i,
+  "demo-rubric":
+    /\b(rubric|performance\s*\/?\s*demo|performance\s+task|demonstration\s+(?:rubric|criteria)|scoring\s+criteria)\b/i,
+  worksheet: /\b(worksheet|activity\s+sheet|graphic\s+organizer|practice\s+sheet)\b/i,
+  "short-quiz":
+    /\b(quiz|multiple[- ]choice|identification|true\s+or\s+false|matching\s+type|short\s+answer)\b/i,
+};
+
+const ASSESSMENT_INFERENCE_ORDER: ReadonlyArray<FormativeAssessmentType> = [
+  "demo-rubric",
+  "checklist",
+  "worksheet",
+  "short-quiz",
+  "exit-ticket",
+];
+
+/** Infers a DO 8, s. 2015 Formative Assessment type from free text, or undefined if none matches. */
+export function inferAssessmentTypeFromText(
+  text: string,
+): FormativeAssessmentType | undefined {
+  for (const type of ASSESSMENT_INFERENCE_ORDER) {
+    if (ASSESSMENT_TYPE_PATTERNS[type].test(text)) {
+      return type;
+    }
+  }
+  return undefined;
+}
+
+/** Builds a fallback 3-bullet SMART Learning Objectives list when AI omits objectives during planning. */
+export function buildFallbackObjectives(topic: string): string {
+  const cleanTopic = topic.trim() || "the target topic";
+  return [
+    `• Explain the core concepts and principles of ${cleanTopic} accurately.`,
+    `• Demonstrate a guided practical task applying ${cleanTopic} following safety standards.`,
+    `• Express appreciation for responsible, collaborative practices in ${cleanTopic}.`,
+  ].join("\n");
+}
+
+/** Checks whether two Learning Competency ID lists represent the same set of competencies. */
+export function hasMatchingCompetencyIds(
+  a: readonly string[],
+  b: readonly string[],
+): boolean {
+  const normA = dedupeOrdered(a.map((id) => id.trim()).filter(Boolean));
+  const normB = dedupeOrdered(b.map((id) => id.trim()).filter(Boolean));
+  if (normA.length !== normB.length) return false;
+  const setB = new Set(normB);
+  return normA.every((id) => setB.has(id));
+}
 
 export const DEFAULT_CLASSROOM_CONTEXT: ClassroomContext = {
   periodMinutes: 60,
@@ -78,10 +135,7 @@ export function cleanObjectiveBullets(raw: string): string {
       const trimmed = line.trim();
       if (!trimmed) return "";
       const withoutBullet = trimmed.replace(/^(?:[•\-*]\s*|\d+[.)]\s*)/, "");
-      const withoutPrefix = withoutBullet.replace(
-        /^(?:cognitive|psychomotor|affective)\s*(?:domain)?\s*[:\-–—]\s*/i,
-        "",
-      );
+      const withoutPrefix = withoutBullet.replace(DOMAIN_PREFIX_PATTERN, "");
       return `• ${withoutPrefix.trim()}`;
     })
     .filter(Boolean)
@@ -107,6 +161,14 @@ export interface RawBlueprintAssessmentOption {
   recommended?: unknown;
 }
 
+function nextUniqueActivityId(idPrefix: string, usedIds: Set<string>): string {
+  let index = 1;
+  while (usedIds.has(`${idPrefix}-act-${index}`)) {
+    index += 1;
+  }
+  return `${idPrefix}-act-${index}`;
+}
+
 /** Normalizes 2–3 concrete Lesson Blueprint activity options and guarantees exactly one recommended pick. */
 export function normalizeBlueprintActivityOptions(params: {
   rawOptions: unknown;
@@ -128,10 +190,10 @@ export function normalizeBlueprintActivityOptions(params: {
         typeof raw.summary === "string" ? normalizeSingleLine(raw.summary) : "";
       const rawId =
         typeof raw.id === "string" ? normalizeSingleLine(raw.id) : "";
-      const baseId = rawId || `${params.idPrefix}-act-${parsed.length + 1}`;
-      const id = usedIds.has(baseId)
-        ? `${params.idPrefix}-act-${parsed.length + 1}`
-        : baseId;
+      const id =
+        rawId && !usedIds.has(rawId)
+          ? rawId
+          : nextUniqueActivityId(params.idPrefix, usedIds);
       usedIds.add(id);
       const source =
         raw.source === "bow" || raw.source === "authentic"
@@ -173,8 +235,7 @@ export function normalizeBlueprintActivityOptions(params: {
 
   for (const fallback of fallbacks) {
     if (parsed.length >= 2) break;
-    const id = `${params.idPrefix}-act-${parsed.length + 1}`;
-    if (usedIds.has(id)) continue;
+    const id = nextUniqueActivityId(params.idPrefix, usedIds);
     usedIds.add(id);
     parsed.push({
       id,
