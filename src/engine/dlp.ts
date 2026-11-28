@@ -1,5 +1,6 @@
 import {
   FORMATIVE_ASSESSMENT_LABELS,
+  buildFallbackObjectives,
   cleanObjectiveBullets,
   dedupeOrdered,
   formatClassroomContextPromptBlock,
@@ -8,6 +9,8 @@ import {
   formatLearningAreas,
   formatPeriodDuration,
   formatReferenceMaterialPromptBlock,
+  hasMatchingCompetencyIds,
+  inferAssessmentTypeFromText,
   normalizeBlueprintActivityOptions,
   normalizeBlueprintAssessmentOptions,
   normalizeClassroomContext,
@@ -149,23 +152,6 @@ function extractActivityTitleFromFlow(lessonFlow: string): string {
   return single.length > 72 ? `${single.slice(0, 71).trimEnd()}…` : single;
 }
 
-function inferAssessmentTypeFromText(text: string): FormativeAssessmentType {
-  const lower = text.toLowerCase();
-  if (/\brubric\b|performance\s*\/?\s*demo|performance\s+task/.test(lower)) {
-    return "demo-rubric";
-  }
-  if (/\bchecklist\b|\bobservation\b|\bskill\s+check/.test(lower)) {
-    return "checklist";
-  }
-  if (/\bworksheet\b|activity\s+sheet|graphic\s+organizer/.test(lower)) {
-    return "worksheet";
-  }
-  if (/\bquiz\b|multiple[- ]choice|\bidentification\b|true\s+or\s+false/.test(lower)) {
-    return "short-quiz";
-  }
-  return "exit-ticket";
-}
-
 /** Extracts deterministic parent DLL Session locks so derived DLPs never drift. */
 export function resolveDerivedSessionLocks(
   session: DllSessionPlan,
@@ -193,7 +179,7 @@ export function resolveDerivedSessionLocks(
     session.selectedAssessmentType &&
     FORMATIVE_ASSESSMENT_TYPES.includes(session.selectedAssessmentType)
       ? session.selectedAssessmentType
-      : inferAssessmentTypeFromText(session.formativeAssessment);
+      : (inferAssessmentTypeFromText(session.formativeAssessment) ?? "exit-ticket");
 
   const assessmentPreview =
     session.selectedAssessmentPreview?.trim() ||
@@ -215,12 +201,35 @@ export function resolveDerivedSessionLocks(
   };
 }
 
+/** Verifies that a DLP Lesson Blueprint matches the current request mode, source DLL session, and competencies. */
+export function isMatchingDlpBlueprint(
+  blueprint: DlpLessonBlueprint | undefined,
+  resolved: ResolvedDlpContext,
+): blueprint is DlpLessonBlueprint {
+  if (!blueprint) return false;
+  if (resolved.derivedSession) {
+    return (
+      blueprint.mode === "derive" &&
+      blueprint.sourceDllId === resolved.sourceDllId &&
+      blueprint.sourceSessionNumber === resolved.sourceSessionNumber &&
+      hasMatchingCompetencyIds(blueprint.competencyIds, resolved.competencyIds)
+    );
+  }
+  return (
+    blueprint.mode === "scratch" &&
+    hasMatchingCompetencyIds(blueprint.competencyIds, resolved.competencyIds)
+  );
+}
+
 /** Resolves effective locked instructional choices for DLP generation (strict parent DLL lock in derive mode; teacher-approved blueprint in scratch mode). */
 export function resolveDlpGenerationLocks(params: {
   resolved: ResolvedDlpContext;
   blueprint?: DlpLessonBlueprint;
 }): ResolvedDlpLocks {
-  const { resolved, blueprint } = params;
+  const { resolved } = params;
+  const blueprint = isMatchingDlpBlueprint(params.blueprint, resolved)
+    ? params.blueprint
+    : undefined;
 
   if (resolved.derivedSession) {
     const parentLocks = resolveDerivedSessionLocks(
@@ -555,11 +564,22 @@ export function assembleDlpBlueprint(params: {
       idPrefix: `dlp-s${resolved.derivedSession.sessionNumber}`,
       competencies: resolved.competencies,
     });
+    const normalizedTitle = locks.activityTitle.trim().toLowerCase();
+    const matchingAiOption = normalizedAiActs.options.find(
+      (opt) => opt.title.trim().toLowerCase() === normalizedTitle,
+    );
+    const hasBowActivities = resolved.competencies.some((c) =>
+      Boolean(c.budgetOfWork?.suggestedActivities.trim()),
+    );
+    const lockedSource: BlueprintActivityOption["source"] =
+      hasBowActivities &&
+      (matchingAiOption?.source === "bow" ||
+        /\bbow\b|budget of work/i.test(locks.activityTitle))
+        ? "bow"
+        : "derived";
+
     const supplemental: BlueprintActivityOption[] = normalizedAiActs.options
-      .filter(
-        (opt) =>
-          opt.title.trim().toLowerCase() !== locks.activityTitle.trim().toLowerCase(),
-      )
+      .filter((opt) => opt.title.trim().toLowerCase() !== normalizedTitle)
       .slice(0, 2)
       .map((opt) => ({ ...opt, recommended: false }));
 
@@ -568,7 +588,7 @@ export function assembleDlpBlueprint(params: {
         id: lockedId,
         title: locks.activityTitle,
         summary: locks.activitySummary,
-        source: "bow",
+        source: lockedSource,
         recommended: true,
       },
       ...supplemental,
@@ -595,11 +615,7 @@ export function assembleDlpBlueprint(params: {
       (typeof aiPayload.learningObjectives === "string"
         ? cleanObjectiveBullets(aiPayload.learningObjectives)
         : "") ||
-      [
-        `• Explain the core concepts and principles of ${primaryTopic} accurately.`,
-        `• Demonstrate a guided practical task applying ${primaryTopic} following safety standards.`,
-        `• Express appreciation for responsible, collaborative practices in ${primaryTopic}.`,
-      ].join("\n");
+      buildFallbackObjectives(primaryTopic);
 
     return {
       mode: "derive",
@@ -632,12 +648,7 @@ export function assembleDlpBlueprint(params: {
       ? cleanObjectiveBullets(aiPayload.learningObjectives)
       : "";
   const learningObjectives =
-    rawObjectives ||
-    [
-      `• Explain the core concepts and principles of ${primaryTopic} accurately.`,
-      `• Demonstrate a guided practical task applying ${primaryTopic} following safety standards.`,
-      `• Express appreciation for responsible, collaborative practices in ${primaryTopic}.`,
-    ].join("\n");
+    rawObjectives || buildFallbackObjectives(primaryTopic);
 
   const normalizedActivities = normalizeBlueprintActivityOptions({
     rawOptions: aiPayload.activityOptions,

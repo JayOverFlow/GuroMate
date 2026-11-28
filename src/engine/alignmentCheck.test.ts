@@ -292,6 +292,19 @@ describe("DO 016 Deterministic Alignment Check", () => {
         "Guide learners during this 60-minute period without explicit tags.",
       ),
     ).toBeNull();
+    expect(
+      extractSectionAllocatedMinutes(
+        "(20 min) Performance / Demo Rubric with accommodations: allow 5 minutes extra time, 10 minutes extended time, or 5 mins additional time.",
+      ),
+    ).toBe(20);
+    expect(
+      extractSectionAllocatedMinutes(
+        "Time: 10 mins — Opening routine\n15 minutes: Guided lab\n• 5 mins — Synthesis\nAccommodations: extra 5 minutes for learners needing support.",
+      ),
+    ).toBe(30);
+    expect(
+      extractSectionAllocatedMinutes("(1 hr 30 min) Extended workshop practicum."),
+    ).toBe(90);
   });
 
   it("passes all hard and soft checks for a compliant 2-hour DLP with paired activities and blank student cells on Integration/Extended", () => {
@@ -390,5 +403,118 @@ describe("DO 016 Deterministic Alignment Check", () => {
     expect(fidelityWarn?.message).toMatch(/Learning Objectives/i);
     expect(fidelityWarn?.message).toMatch(/Paired Workstation Crimping Lab/i);
     expect(fidelityWarn?.message).toMatch(/Performance \/ Demo Rubric/i);
+  });
+
+  it("does not inflate DLP pacing total with incidental accommodation durations like extra or extended time", () => {
+    const dlp = makeCompliantDlp({
+      formativeAssessment: {
+        teacherActivity:
+          "(20 min) Performance / Demo Rubric scoring T568B accuracy and OHS/PPE checks. Raise help cards for guidance and teacher feedback. Accommodations: allow 5 minutes extra time and 10 minutes extended time with visual cue cards.",
+        studentActivity:
+          "(20 min) Complete cable testing using rubric, raise help cards as needed, and use extended time if required.",
+      },
+    });
+
+    const result = evaluateDlpAlignment(dlp);
+
+    expect(result.passed).toBe(true);
+    const pacing = result.items.find((i) => i.code === "dlp-pacing");
+    expect(pacing?.severity).toBe("pass");
+    expect(pacing?.message).toContain("120 min");
+  });
+
+  it("checks key parent Learning Resources fidelity on derived DLPs and warns when key parent resources are dropped", () => {
+    const parentSession = makeCompliantDllSession(2, {
+      selectedActivityTitle: "Paired Workstation Crimping Lab",
+      selectedAssessmentType: "demo-rubric",
+      learningObjectives: [
+        "• Identify the 8-wire T568B color sequence with 100% accuracy.",
+        "• Terminate a straight-through RJ45 cable observing OHS/PPE checks.",
+        "• Demonstrate cooperative safety habits during paired lab work.",
+      ].join("\n"),
+      learningResources:
+        "• RJ45 crimping tool, LAN tester, and UTP cable\n• Emergency/offline backup: Printed color-code wall chart",
+    });
+
+    const preservedDlp = makeCompliantDlp({
+      sourceDllId: "dll-parent01",
+      sourceSessionNumber: 2,
+    });
+    const preservedResult = evaluateDlpAlignment(preservedDlp, { parentSession });
+    expect(preservedResult.passed).toBe(true);
+    const preservedFidelity = preservedResult.items.find(
+      (i) => i.code === "dll-dlp-fidelity",
+    );
+    expect(preservedFidelity?.severity).toBe("pass");
+    expect(preservedFidelity?.message).toMatch(/Learning Resources/i);
+
+    const droppedResourcesDlp = makeCompliantDlp({
+      sourceDllId: "dll-parent01",
+      sourceSessionNumber: 2,
+      learningResources: {
+        teacherActivity:
+          "• Whiteboard markers and slide deck\n• Emergency/offline backup: Printed lecture handout",
+        studentActivity:
+          "• Notebooks and ballpens\n• Emergency/offline backup: Paper summary sheet",
+      },
+    });
+    const droppedResult = evaluateDlpAlignment(droppedResourcesDlp, {
+      parentSession,
+    });
+    expect(droppedResult.structuralValid).toBe(true);
+    expect(droppedResult.passed).toBe(false);
+    const droppedFidelity = droppedResult.items.find(
+      (i) => i.code === "dll-dlp-fidelity",
+    );
+    expect(droppedFidelity?.severity).toBe("warning");
+    expect(droppedFidelity?.message).toMatch(/Learning Resources/i);
+  });
+
+  it("infers activity and Formative Assessment type for legacy or direct-generated parent DLL sessions lacking explicit metadata", () => {
+    const legacyParentSession = makeCompliantDllSession(3, {
+      selectedActivityTitle: undefined,
+      selectedActivitySummary: undefined,
+      selectedAssessmentType: undefined,
+      selectedAssessmentPreview: undefined,
+      learningObjectives: [
+        "• Identify the 8-wire T568B color sequence with 100% accuracy.",
+        "• Terminate a straight-through RJ45 cable observing OHS/PPE checks.",
+        "• Demonstrate cooperative safety habits during paired lab work.",
+      ].join("\n"),
+      lessonFlow:
+        "Paired Workstation Crimping Lab: Model safe stripping, guide pairs through RJ45 termination, and test continuity.",
+      learningResources:
+        "• RJ45 crimping tool, LAN tester, and UTP cable\n• Emergency/offline backup: Printed color-code wall chart",
+      formativeAssessment:
+        "Observation / Skill Checklist verifying wiring accuracy and OHS/PPE compliance with help cards and visual accommodations.",
+    });
+
+    const driftedDlp = makeCompliantDlp({
+      sourceDllId: "dll-legacy01",
+      sourceSessionNumber: 3,
+      selectedActivityTitle: undefined,
+      selectedAssessmentType: undefined,
+      lessonFlow: {
+        teacherActivity:
+          "(85 min) Deliver pure slideshow lecture on computer history (45 min); silent textbook reading (40 min).",
+        studentActivity:
+          "(85 min) Listen to lecture and read textbook silently.",
+      },
+      formativeAssessment: {
+        teacherActivity:
+          "(20 min) 5-item multiple-choice quiz with answer key. Learners raise help cards for feedback. Accommodations: oral response and visual cues.",
+        studentActivity: "(20 min) Complete the multiple-choice quiz independently.",
+      },
+    });
+
+    const result = evaluateDlpAlignment(driftedDlp, {
+      parentSession: legacyParentSession,
+    });
+
+    expect(result.passed).toBe(false);
+    const fidelityWarn = result.items.find((i) => i.code === "dll-dlp-fidelity");
+    expect(fidelityWarn?.severity).toBe("warning");
+    expect(fidelityWarn?.message).toMatch(/Paired Workstation Crimping Lab/i);
+    expect(fidelityWarn?.message).toMatch(/Observation \/ Skill Checklist/i);
   });
 });

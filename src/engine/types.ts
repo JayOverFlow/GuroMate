@@ -216,7 +216,7 @@ export interface BlueprintActivityOption {
   id: string;
   title: string;
   summary: string;
-  source?: "bow" | "authentic";
+  source?: "bow" | "authentic" | "derived";
   recommended: boolean;
 }
 

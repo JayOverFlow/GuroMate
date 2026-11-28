@@ -1,7 +1,12 @@
+import { resolveDerivedSessionLocks } from "./dlp";
 import {
+  ASSESSMENT_TYPE_PATTERNS,
   DEFAULT_CLASSROOM_CONTEXT,
+  DOMAIN_PREFIX_PATTERN,
   FORMATIVE_ASSESSMENT_LABELS,
   cleanObjectiveBullets,
+  hasMatchingCompetencyIds,
+  inferAssessmentTypeFromText,
 } from "./lessonHelpers";
 import type {
   AlignmentCheckItem,
@@ -11,12 +16,8 @@ import type {
   DllLessonBlueprint,
   DllSessionPlan,
   DlpLessonBlueprint,
-  FormativeAssessmentType,
   SessionNumber,
 } from "./types";
-
-const DOMAIN_PREFIX_PATTERN =
-  /^(?:[•\-*]\s*|\d+[.)]\s*)?(?:cognitive|psychomotor|affective)\s*(?:domain)?\s*[:\-–—]/i;
 
 const EMERGENCY_RESOURCE_PATTERN =
   /\b(emergency|emergencies|offline|backup|back-up|fallback|alternative|alternatives|no[- ]power|power outage|brownout|blackout|contingency|no[- ]internet|without internet|without power|without projector|printed?\s+(?:backup|copy|copies|handout|handouts|cards?|sheets?|worksheets?)|chalkboard\s+(?:backup|alternative|diagram)|manila\s+paper\s+(?:backup|alternative))\b/i;
@@ -26,17 +27,6 @@ const FEEDBACK_HELP_SEEKING_PATTERN =
 
 const ACCOMMODATION_PATTERN =
   /\b(accommodat(?:ion|ions|e|ing)|differentiated|differentiation|varied\s+response|oral\s+(?:response|option|explanation)|visual\s+(?:support|supports|aid|aids|cue|cues|card|cards)|auditory\s+(?:support|supports|aid|aids)|small[- ]group|extended\s+time|extra\s+time|bilingual|tagalog|filipino|scaffolding|scaffolded|large[- ]print|peer[- ]assisted|buddy\s+system|assistive|inclusive\s+(?:option|format|support)|demonstrate\s+orally|sentence\s+starters?)\b/i;
-
-const ASSESSMENT_TYPE_PATTERNS: Record<FormativeAssessmentType, RegExp> = {
-  "exit-ticket":
-    /\b(exit\s*ticket|exit\s*slip|reflection\s*slip|3-2-1|one-minute\s+paper)\b/i,
-  checklist: /\b(checklist|observation|skill\s+check)\b/i,
-  "demo-rubric":
-    /\b(rubric|performance\s*\/?\s*demo|performance\s+task|demonstration\s+(?:rubric|criteria)|scoring\s+criteria)\b/i,
-  worksheet: /\b(worksheet|activity\s+sheet|graphic\s+organizer|practice\s+sheet)\b/i,
-  "short-quiz":
-    /\b(quiz|multiple[- ]choice|identification|true\s+or\s+false|matching\s+type|short\s+answer)\b/i,
-};
 
 const STOP_WORDS = new Set([
   "with",
@@ -54,6 +44,44 @@ const STOP_WORDS = new Set([
   "lesson",
   "based",
 ]);
+
+const RESOURCE_BOILERPLATE_WORDS = new Set([
+  ...STOP_WORDS,
+  "emergency",
+  "emergencies",
+  "offline",
+  "backup",
+  "fallback",
+  "alternative",
+  "alternatives",
+  "resource",
+  "resources",
+  "material",
+  "materials",
+  "learning",
+  "classroom",
+  "teacher",
+  "student",
+  "students",
+  "learners",
+  "learner",
+  "printed",
+  "primary",
+  "available",
+  "inclusive",
+  "equipment",
+  "tools",
+  "tool",
+  "items",
+  "supplies",
+  "none",
+]);
+
+const ACCOMMODATION_DURATION_AFTER =
+  /^\s*(?:extra|extended|additional|more)\s+time\b|^\s*(?:period|class|session|block|lab\s+period|shop\s+period)\b/i;
+
+const ACCOMMODATION_DURATION_BEFORE =
+  /\b(?:extra|extended|additional)\s+(?:time\s*(?:of\s*)?)?$/i;
 
 function splitNonEmptyLines(text: string): string[] {
   return text
@@ -90,32 +118,71 @@ function textReflectsTitle(text: string, title: string): boolean {
   return matched >= Math.ceil(keywords.length * 0.5);
 }
 
+function extractKeyResourceKeywords(parentResources: string): string[] {
+  const seen = new Set<string>();
+  const words = parentResources
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !RESOURCE_BOILERPLATE_WORDS.has(w));
+  const out: string[] = [];
+  for (const word of words) {
+    if (!seen.has(word)) {
+      seen.add(word);
+      out.push(word);
+    }
+  }
+  return out;
+}
+
 interface TimeMatch {
   minutes: number;
   index: number;
   endIndex: number;
 }
 
+const DURATION_BODY =
+  "(?:(\\d+(?:\\.\\d+)?)\\s*(?:hrs?|hours?)(?:\\s*(\\d+)\\s*(?:mins?|minutes?))?|(\\d+)\\s*-?\\s*(?:mins?|minutes?)\\b)";
+
+const STRUCTURAL_DURATION_PATTERN = new RegExp(
+  [
+    `[\\(\\[]\\s*${DURATION_BODY}\\s*[\\)\\]]`,
+    `\\b(?:time|duration|pacing|allotment|total)\\s*[:\\-–—]\\s*${DURATION_BODY}`,
+    `(?:^|[\\n;])\\s*(?:[•\\-*]\\s*)?${DURATION_BODY}\\s*[:\\-–—]`,
+  ].join("|"),
+  "gi",
+);
+
 /**
- * Deterministically extracts allocated minutes for a single DLP section.
- * Avoids double-counting when a section starts with an outer total followed by matching sub-phase durations
- * (e.g., "(85 min) Key points (20 min); demo (55 min); synthesis (10 min).").
+ * Deterministically extracts structural allocated minutes for a single DLP section.
+ * Matches structural phase/section timing allocations (parenthesized `(10 mins)`, labeled `Time: 10 mins`,
+ * or heading/bullet prefixes like `10 minutes —`) while ignoring incidental prose durations inside
+ * learner accommodations (e.g., `"5 minutes extra time"`, `"10 minutes extended time"`).
  */
 export function extractSectionAllocatedMinutes(text: string): number | null {
   if (!text.trim()) return null;
 
-  const pattern =
-    /(?:(\d+(?:\.\d+)?)\s*(?:hrs?|hours?)(?:\s*(\d+)\s*(?:mins?|minutes?))?|(\d+)\s*-?\s*(?:mins?|minutes?)\b)(?!\s*(?:period|class|session|block|lab\s+period|shop\s+period)\b)/gi;
-
   const matches: TimeMatch[] = [];
-  for (const match of text.matchAll(pattern)) {
+  for (const match of text.matchAll(STRUCTURAL_DURATION_PATTERN)) {
     const idx = match.index ?? 0;
-    const rawHours = match[1];
-    const rawExtraMins = match[2];
-    const rawMins = match[3];
+    const endIdx = idx + match[0].length;
+    const before = text.slice(Math.max(0, idx - 28), idx);
+    const after = text.slice(endIdx, endIdx + 32);
+    if (
+      ACCOMMODATION_DURATION_BEFORE.test(before) ||
+      ACCOMMODATION_DURATION_AFTER.test(after)
+    ) {
+      continue;
+    }
+
+    const rawHours = match[1] ?? match[4] ?? match[7];
+    const rawExtraMins = match[2] ?? match[5] ?? match[8];
+    const rawMins = match[3] ?? match[6] ?? match[9];
     let minutes = 0;
     if (rawHours !== undefined) {
-      minutes = Math.round(Number(rawHours) * 60) + (rawExtraMins ? Number(rawExtraMins) : 0);
+      minutes =
+        Math.round(Number(rawHours) * 60) +
+        (rawExtraMins ? Number(rawExtraMins) : 0);
     } else if (rawMins !== undefined) {
       minutes = Number(rawMins);
     }
@@ -123,7 +190,7 @@ export function extractSectionAllocatedMinutes(text: string): number | null {
       matches.push({
         minutes,
         index: idx,
-        endIndex: idx + match[0].length,
+        endIndex: endIdx,
       });
     }
   }
@@ -135,8 +202,7 @@ export function extractSectionAllocatedMinutes(text: string): number | null {
   const restSum = matches.slice(1).reduce((acc, m) => acc + m.minutes, 0);
   const prefixBeforeFirst = text.slice(0, first.index).trim();
   const isLeadingHeader =
-    prefixBeforeFirst.length <= 28 &&
-    !/[.!?]/.test(prefixBeforeFirst);
+    prefixBeforeFirst.length <= 28 && !/[.!?]/.test(prefixBeforeFirst);
 
   if (isLeadingHeader && first.minutes === restSum) {
     return first.minutes;
@@ -144,8 +210,8 @@ export function extractSectionAllocatedMinutes(text: string): number | null {
 
   const last = matches[matches.length - 1]!;
   const prevSum = matches.slice(0, -1).reduce((acc, m) => acc + m.minutes, 0);
-  const beforeLast = text.slice(Math.max(0, last.index - 20), last.index);
-  if (/\btotal\b/i.test(beforeLast) && last.minutes === prevSum) {
+  const lastSpan = text.slice(Math.max(0, last.index - 20), last.endIndex);
+  if (/\btotal\b/i.test(lastSpan) && last.minutes === prevSum) {
     return last.minutes;
   }
 
@@ -245,14 +311,17 @@ export function evaluateDllAlignment(
   }
 
   // 2. Soft Check: 3-Bullet SMART Learning Objectives (+ Approved Lesson Blueprint alignment)
-  const blueprintBySession = new Map<SessionNumber, string>();
+  const blueprintBySession = new Map<
+    SessionNumber,
+    { learningObjectives: string; competencyIds: string[] }
+  >();
   if (options.blueprint) {
     for (const bpSession of options.blueprint.sessions) {
       if (bpSession.mode === "instructional" && bpSession.learningObjectives.trim()) {
-        blueprintBySession.set(
-          bpSession.sessionNumber,
-          bpSession.learningObjectives,
-        );
+        blueprintBySession.set(bpSession.sessionNumber, {
+          learningObjectives: bpSession.learningObjectives,
+          competencyIds: bpSession.competencyIds,
+        });
       }
     }
   }
@@ -278,11 +347,12 @@ export function evaluateDllAlignment(
         message: `Session ${session.sessionNumber} includes a domain-label prefix (Cognitive/Psychomotor/Affective); remove domain prefixes per DO 016 format.`,
       });
     }
-    const expectedObjectives = blueprintBySession.get(session.sessionNumber);
+    const expectedBp = blueprintBySession.get(session.sessionNumber);
     if (
-      expectedObjectives &&
+      expectedBp &&
+      hasMatchingCompetencyIds(expectedBp.competencyIds, session.competencyIds) &&
       normalizeObjectivesForCompare(session.learningObjectives) !==
-        normalizeObjectivesForCompare(expectedObjectives)
+        normalizeObjectivesForCompare(expectedBp.learningObjectives)
     ) {
       objectiveWarnings.push({
         code: "objectives",
@@ -574,6 +644,7 @@ export function evaluateDlpAlignment(
   // 6. Soft Check: Strict Derived DLL -> DLP Fidelity
   if (dlp.sourceDllId && options.parentSession) {
     const parent = options.parentSession;
+    const parentLocks = resolveDerivedSessionLocks(parent, []);
     const driftIssues: string[] = [];
 
     if (
@@ -586,7 +657,10 @@ export function evaluateDlpAlignment(
       );
     }
 
-    const parentActivity = parent.selectedActivityTitle?.trim();
+    const parentActivity =
+      parent.selectedActivityTitle?.trim() || parent.lessonFlow.trim()
+        ? parentLocks.activityTitle
+        : "";
     if (parentActivity) {
       const dlpFlowCombined = `${dlp.lessonFlow.teacherActivity}\n${dlp.lessonFlow.studentActivity}`;
       const metaMismatch =
@@ -600,7 +674,9 @@ export function evaluateDlpAlignment(
       }
     }
 
-    const parentAssessmentType = parent.selectedAssessmentType;
+    const parentAssessmentType =
+      parent.selectedAssessmentType ??
+      inferAssessmentTypeFromText(parent.formativeAssessment);
     if (parentAssessmentType) {
       const expectedLabel = FORMATIVE_ASSESSMENT_LABELS[parentAssessmentType];
       const metaMismatch =
@@ -613,6 +689,26 @@ export function evaluateDlpAlignment(
         driftIssues.push(
           `Formative Assessment does not reflect parent DLL Session ${parent.sessionNumber} chosen type (${expectedLabel}).`,
         );
+      }
+    }
+
+    if (parent.learningResources.trim()) {
+      const parentResourceKeywords = extractKeyResourceKeywords(
+        parent.learningResources,
+      );
+      if (parentResourceKeywords.length > 0) {
+        const lowerResources = combinedResources.toLowerCase();
+        const missingKeywords = parentResourceKeywords.filter(
+          (kw) => !lowerResources.includes(kw),
+        );
+        const matchedCount = parentResourceKeywords.length - missingKeywords.length;
+        const minExpected = Math.ceil(parentResourceKeywords.length * 0.35);
+        if (matchedCount < minExpected) {
+          const sampleMissing = missingKeywords.slice(0, 4).join(", ");
+          driftIssues.push(
+            `Learning Resources dropped key materials from parent DLL Session ${parent.sessionNumber} (missing: ${sampleMissing}).`,
+          );
+        }
       }
     }
 
@@ -630,7 +726,7 @@ export function evaluateDlpAlignment(
         label: "DLL → DLP Derivation Fidelity",
         severity: "pass",
         sessionNumber: parent.sessionNumber,
-        message: `Derived DLP matches parent DLL Session ${parent.sessionNumber} Learning Objectives, activity, and Formative Assessment.`,
+        message: `Derived DLP matches parent DLL Session ${parent.sessionNumber} Learning Objectives, activity, key Learning Resources, and Formative Assessment.`,
       });
     }
   }

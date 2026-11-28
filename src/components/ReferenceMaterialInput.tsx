@@ -1,12 +1,14 @@
 import { useRef, useState, type ChangeEvent } from "react";
-import { MAX_REFERENCE_MATERIAL_CHARS } from "../engine/lessonHelpers";
+import {
+  MAX_REFERENCE_FILE_BYTES,
+  MAX_REFERENCE_MATERIAL_CHARS,
+} from "../engine/lessonHelpers";
 import type { ReferenceMaterialExtractResult } from "../engine/types";
 import { readErrorMessage } from "../workspaces/lessonViewHelpers";
 
 const INPUT_CLASS =
   "w-full px-gutter-sm py-gutter-xs rounded bg-surface-container-lowest border border-outline-variant text-body-md text-on-surface placeholder:text-on-surface-variant focus-visible:outline-2 focus-visible:outline-primary focus:border-primary";
 
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -59,7 +61,7 @@ export function ReferenceMaterialInput({
     setExtractError(null);
     setExtractInfo(null);
 
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (file.size > MAX_REFERENCE_FILE_BYTES) {
       setExtractError(
         `"${file.name}" exceeds the 10 MB file limit. Try a smaller file or paste key excerpts directly.`,
       );

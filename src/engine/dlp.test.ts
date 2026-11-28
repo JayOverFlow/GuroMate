@@ -1538,4 +1538,218 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     const exported = await repairEngine.exportDlpDocx(savedFixed.id);
     expect(exported.buffer.length).toBeGreaterThan(0);
   });
+
+  it("does not mislabel non-BoW derived DLP locked activities with source 'bow'", async () => {
+    const dataDir = await makeTempDir();
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Custom Non-BoW Week",
+              references: "MATATAG CG",
+              sessions: [1, 2, 3, 4, 5].map((n) => ({
+                sessionNumber: n,
+                learningObjectives: [
+                  `• Identify concept ${n}.`,
+                  `• Practice skill ${n}.`,
+                  `• Value safety ${n}.`,
+                ].join("\n"),
+                preLesson: `Pre-lesson ${n}`,
+                lessonFlow: `Authentic Lab Station ${n}: Guided pair practice.`,
+                learningResources:
+                  "• Lab kit\n• Emergency/offline backup: Printed visual cards",
+                integrationAndContextualization: "Barangay link.",
+                formativeAssessment:
+                  "Observation / Skill Checklist with help cards and visual accommodations.",
+                extendedLearningOpportunities: "Home check.",
+              })),
+            }),
+          };
+        }
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Derived Non-BoW DLP Blueprint",
+            references: "MATATAG CG",
+            progressionFocus: "Expanded Session 1",
+            learningObjectives: "• Obj 1\n• Obj 2\n• Obj 3",
+            activityOptions: [
+              {
+                id: "dlp-act-1",
+                title: "Authentic Lab Station 1",
+                summary: "Guided pair practice.",
+                source: "authentic",
+                recommended: true,
+              },
+            ],
+            assessmentOptions: [
+              {
+                type: "checklist",
+                preview: "Skill checklist.",
+                recommended: true,
+              },
+            ],
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const nonBowComp = await engine.saveCustomCompetency({
+      gradeLevels: [11],
+      quarters: [1],
+      component: "SHS_CORE",
+      sector: "Effective Communication",
+      contentTopic: "Workplace Notices",
+      contentStandard: "CS",
+      performanceStandard: "PS",
+      learningCompetency: "Draft clear workplace advisories.",
+      budgetOfWork: {
+        term: "First Term",
+        weekRange: "1",
+        suggestedActivities: "",
+        suggestedPerformanceTasks: "",
+      },
+    });
+
+    const parentDll = await engine.generateDll({
+      gradeAndSection: "Grade 11 - Mabini",
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [nonBowComp.id],
+      })),
+    });
+
+    const derivedBlueprint = await engine.planDlp({
+      mode: "derive",
+      dllId: parentDll.id,
+      sessionNumber: 1,
+    });
+
+    const lockedActivity = derivedBlueprint.activityOptions.find(
+      (opt) => opt.id === derivedBlueprint.selectedActivityId,
+    );
+    expect(lockedActivity?.title).toBe("Authentic Lab Station 1");
+    expect(lockedActivity?.source).not.toBe("bow");
+    expect(lockedActivity?.source).toBe("derived");
+  });
+
+  it("skips stale DLP Lesson Blueprint locks when requested competencies or mode no longer match", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        if (req.prompt.includes("single-session Lesson Blueprint")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Stale ICT Blueprint DLP",
+              references: "MATATAG TLE 7 ICT CG",
+              progressionFocus: "Stale ICT Focus",
+              learningObjectives: [
+                "• Stale ICT Objective 1.",
+                "• Stale ICT Objective 2.",
+                "• Stale ICT Objective 3.",
+              ].join("\n"),
+              activityOptions: [
+                {
+                  id: "dlp-act-1",
+                  title: "Stale ICT Activity",
+                  summary: "Stale ICT activity summary.",
+                  source: "bow",
+                  recommended: true,
+                },
+              ],
+              assessmentOptions: [
+                {
+                  type: "demo-rubric",
+                  preview: "Stale ICT rubric preview.",
+                  recommended: true,
+                },
+              ],
+            }),
+          };
+        }
+
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Fresh FCS Grooming DLP",
+            references: "MATATAG TLE 7 FCS CG",
+            learningObjectives: [
+              "• Fresh FCS Objective 1.",
+              "• Fresh FCS Objective 2.",
+              "• Fresh FCS Objective 3.",
+            ].join("\n"),
+            preLesson: {
+              teacherActivity: "(10 min) Routine, well-being, hook, and objectives.",
+              studentActivity: "(10 min) Join routine and read objectives.",
+            },
+            lessonFlow: {
+              teacherActivity: "(35 min) Fresh FCS Activity: Model safe tool care.",
+              studentActivity: "(35 min) Practice safe tool care in pairs.",
+            },
+            learningResources: {
+              teacherActivity:
+                "• Grooming kit\n• Emergency/offline backup: Printed chart",
+              studentActivity:
+                "• Tray\n• Emergency/offline backup: Paper cards",
+            },
+            integrationAndContextualization: {
+              teacherActivity: "Local barangay salon hygiene link.",
+              studentActivity: "",
+            },
+            formativeAssessment: {
+              teacherActivity:
+                "(15 min) Observation checklist with help cards for feedback and visual accommodations.",
+              studentActivity: "(15 min) Complete checklist and raise help cards.",
+            },
+            extendedLearningOpportunities: {
+              teacherActivity: "Home hygiene checklist.",
+              studentActivity: "",
+            },
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const fcs = (await engine.listCurriculum({ gradeLevel: 7, component: "FCS" }))[0]!;
+
+    const staleBlueprint = await engine.planDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Rizal",
+      competencyIds: [ict.id],
+    });
+
+    const created = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Rizal",
+      competencyIds: [fcs.id],
+      blueprint: staleBlueprint,
+    });
+
+    const genPrompt = requests[1]!.prompt;
+    expect(genPrompt).not.toContain("Stale ICT Activity");
+    expect(genPrompt).not.toContain("Stale ICT Objective 1");
+
+    expect(created.lessonTitle).toBe("Fresh FCS Grooming DLP");
+    expect(created.intentions.learningObjectives).toContain("Fresh FCS Objective 1");
+    expect(created.intentions.learningObjectives).not.toContain("Stale ICT Objective");
+    expect(created.selectedActivityTitle).toBeUndefined();
+    expect(created.selectedAssessmentType).toBeUndefined();
+    expect(created.alignmentCheck?.passed).toBe(true);
+  });
 });

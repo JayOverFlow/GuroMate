@@ -968,7 +968,6 @@ const COMPETENCY_ACTION_VERBS = new Set([
   "trace",
   "troubleshoot",
   "understand",
-  "unmatched",
   "use",
   "utilize",
   "value",

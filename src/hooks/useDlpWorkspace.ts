@@ -440,20 +440,29 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
       return;
     }
     syncedDeriveDllIdRef.current = selectedSourceDll.id;
-    if (selectedSourceDll.classroomContext) {
-      setClassroomContext({ ...selectedSourceDll.classroomContext });
-      setPeriodDraft(String(selectedSourceDll.classroomContext.periodMinutes));
-      setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
-    }
-    if (selectedSourceDll.referenceMaterial) {
-      setReferenceSourceLabel(
-        selectedSourceDll.referenceMaterial.sourceLabel ?? "",
-      );
-      setReferenceText(selectedSourceDll.referenceMaterial.text);
-    }
+    // Always overwrite so a previous DLL's context/reference never leaks into this one.
+    applyLessonContext(
+      selectedSourceDll.classroomContext,
+      selectedSourceDll.referenceMaterial,
+    );
   }, [builderMode, selectedSourceDll]);
 
+  function applyLessonContext(
+    context: ClassroomContext | undefined,
+    reference: { sourceLabel?: string; text: string } | undefined,
+  ) {
+    const next = context ?? DEFAULT_CLASSROOM_CONTEXT;
+    setClassroomContext({ ...next });
+    setPeriodDraft(String(next.periodMinutes));
+    setFieldErrors((prev) => updateFieldError(prev, "periodMinutes", undefined));
+    setReferenceSourceLabel(reference?.sourceLabel ?? "");
+    setReferenceText(reference?.text ?? "");
+  }
+
   function selectBuilderMode(mode: BuilderMode) {
+    if (builderMode === "derive" && mode !== "derive") {
+      applyLessonContext(undefined, undefined);
+    }
     setBuilderMode(mode);
     setBlueprint(null);
     interactedFieldsRef.current.clear();
@@ -538,6 +547,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
       ? selectedCompetencyIds
       : [...selectedCompetencyIds, pickedCompetencyId];
     setSelectedCompetencyIds(nextIds);
+    setBlueprint(null);
     if (fieldErrors.selectedCompetencyIds) {
       validateField("selectedCompetencyIds", {
         selectedCompetencyIds: nextIds,
@@ -548,6 +558,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   function removeScratchCompetency(id: string) {
     interactedFieldsRef.current.add("selectedCompetencyIds");
     setSelectedCompetencyIds((prev) => prev.filter((item) => item !== id));
+    setBlueprint(null);
   }
 
   function requestRemoveScratchCompetency(id: string) {

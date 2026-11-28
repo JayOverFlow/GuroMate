@@ -154,6 +154,11 @@ export function SessionBlueprintCard({
                       BoW
                     </span>
                   )}
+                  {option.source === "derived" && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label text-label-sm">
+                      Parent DLL
+                    </span>
+                  )}
                 </div>
                 <p className="font-body text-body-sm text-on-surface-variant">
                   {option.summary}

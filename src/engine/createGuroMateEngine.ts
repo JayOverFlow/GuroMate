@@ -30,6 +30,7 @@ import {
   assembleDlpBlueprint,
   buildDlpPlanPrompt,
   buildDlpPrompt,
+  isMatchingDlpBlueprint,
   normalizeActivityPair,
   normalizeEditedDlp,
   parseAiDlpBlueprintPayload,
@@ -82,6 +83,7 @@ import {
   type AiConnectionCheckResult,
   type AiModelListResult,
   type AiProviderSettings,
+  type AlignmentCheckResult,
   type BudgetOfWorkInfo,
   type ClassSection,
   type ClassSectionInput,
@@ -883,6 +885,83 @@ export function createGuroMateEngine(
     ].join("\n");
   }
 
+  /**
+   * Generates a lesson, then runs at most one targeted repair call, and only when the
+   * first response is unparseable or fails hard structural checks.
+   */
+  async function generateWithSingleRepair<P, L>(params: {
+    systemInstruction: string;
+    prompt: string;
+    aiSettings: AiProviderSettings;
+    parse: (text: string) => P;
+    build: (parsed: P, responseModel: string | undefined, previous?: L) => L;
+    evaluate: (lesson: L, autoRepaired: boolean) => AlignmentCheckResult;
+  }): Promise<L & { alignmentCheck: AlignmentCheckResult }> {
+    const { systemInstruction, prompt, aiSettings, parse, build, evaluate } = params;
+    const initialAiResult = await aiAdapter.generateText({
+      systemInstruction,
+      prompt,
+      settings: aiSettings,
+    });
+
+    let initialParsed: P | null = null;
+    let initialParseError: unknown = null;
+    try {
+      initialParsed = parse(initialAiResult.text);
+    } catch (err) {
+      initialParseError = err;
+    }
+
+    if (initialParsed === null) {
+      const parseReason =
+        initialParseError instanceof Error
+          ? initialParseError.message
+          : "AI response was not valid JSON.";
+      const repairAiResult = await aiAdapter.generateText({
+        systemInstruction,
+        prompt: buildStructuralRepairPrompt(prompt, [parseReason]),
+        settings: aiSettings,
+      });
+      const repaired = build(
+        parse(repairAiResult.text),
+        repairAiResult.model ?? initialAiResult.model,
+      );
+      return { ...repaired, alignmentCheck: evaluate(repaired, true) };
+    }
+
+    const initial = build(initialParsed, initialAiResult.model);
+    const initialCheck = evaluate(initial, false);
+    if (initialCheck.structuralValid) {
+      return { ...initial, alignmentCheck: initialCheck };
+    }
+
+    const repairAiResult = await aiAdapter.generateText({
+      systemInstruction,
+      prompt: buildStructuralRepairPrompt(
+        prompt,
+        summarizeStructuralErrors(initialCheck),
+      ),
+      settings: aiSettings,
+    });
+
+    let repairedParsed: P | null = null;
+    try {
+      repairedParsed = parse(repairAiResult.text);
+    } catch {
+      repairedParsed = null;
+    }
+    if (repairedParsed === null) {
+      return { ...initial, alignmentCheck: { ...initialCheck, autoRepaired: true } };
+    }
+
+    const repaired = build(
+      repairedParsed,
+      repairAiResult.model ?? initialAiResult.model,
+      initial,
+    );
+    return { ...repaired, alignmentCheck: evaluate(repaired, true) };
+  }
+
   function mergeRepairedDllSessions(
     initial: DailyLessonLog["sessions"],
     repaired: DailyLessonLog["sessions"],
@@ -1011,87 +1090,17 @@ export function createGuroMateEngine(
       };
     };
 
-    const initialAiResult = await aiAdapter.generateText({
+    const dll = await generateWithSingleRepair({
       systemInstruction: DLL_SYSTEM_INSTRUCTION,
       prompt,
-      settings: settings.ai,
+      aiSettings: settings.ai,
+      parse: parseAiDllPayload,
+      build: (parsed, model, previous?: DailyLessonLog) =>
+        buildCandidateDll(parsed, model, previous?.sessions),
+      evaluate: (lesson, autoRepaired) =>
+        evaluateDllAlignment(lesson, { blueprint: input.blueprint, autoRepaired }),
     });
-
-    let initialParsed: ReturnType<typeof parseAiDllPayload> | null = null;
-    let initialParseError: unknown = null;
-    try {
-      initialParsed = parseAiDllPayload(initialAiResult.text);
-    } catch (err) {
-      initialParseError = err;
-    }
-
-    if (!initialParsed) {
-      // Single targeted auto-repair retry for malformed/unparseable JSON
-      const parseReason =
-        initialParseError instanceof Error
-          ? initialParseError.message
-          : "AI response was not valid JSON.";
-      const repairAiResult = await aiAdapter.generateText({
-        systemInstruction: DLL_SYSTEM_INSTRUCTION,
-        prompt: buildStructuralRepairPrompt(prompt, [parseReason]),
-        settings: settings.ai,
-      });
-      const repairedParsed = parseAiDllPayload(repairAiResult.text);
-      const repairedCandidate = buildCandidateDll(
-        repairedParsed,
-        repairAiResult.model ?? initialAiResult.model,
-      );
-      const alignmentCheck = evaluateDllAlignment(repairedCandidate, {
-        blueprint: input.blueprint,
-        autoRepaired: true,
-      });
-      return dllStore.prepend({ ...repairedCandidate, alignmentCheck });
-    }
-
-    const initialCandidate = buildCandidateDll(initialParsed, initialAiResult.model);
-    const initialCheck = evaluateDllAlignment(initialCandidate, {
-      blueprint: input.blueprint,
-      autoRepaired: false,
-    });
-
-    if (initialCheck.structuralValid) {
-      return dllStore.prepend({ ...initialCandidate, alignmentCheck: initialCheck });
-    }
-
-    // Single targeted auto-repair retry for missing required structural fields
-    const repairAiResult = await aiAdapter.generateText({
-      systemInstruction: DLL_SYSTEM_INSTRUCTION,
-      prompt: buildStructuralRepairPrompt(
-        prompt,
-        summarizeStructuralErrors(initialCheck),
-      ),
-      settings: settings.ai,
-    });
-
-    let repairedParsed: ReturnType<typeof parseAiDllPayload> | null = null;
-    try {
-      repairedParsed = parseAiDllPayload(repairAiResult.text);
-    } catch {
-      repairedParsed = null;
-    }
-
-    if (!repairedParsed) {
-      return dllStore.prepend({
-        ...initialCandidate,
-        alignmentCheck: { ...initialCheck, autoRepaired: true },
-      });
-    }
-
-    const repairedCandidate = buildCandidateDll(
-      repairedParsed,
-      repairAiResult.model ?? initialAiResult.model,
-      initialCandidate.sessions,
-    );
-    const finalCheck = evaluateDllAlignment(repairedCandidate, {
-      blueprint: input.blueprint,
-      autoRepaired: true,
-    });
-    return dllStore.prepend({ ...repairedCandidate, alignmentCheck: finalCheck });
+    return dllStore.prepend(dll);
   }
 
   function buildDocxFilename(
@@ -1237,9 +1246,13 @@ export function createGuroMateEngine(
         : resolved.inheritedReferenceMaterial,
     );
 
+    const effectiveBlueprint = isMatchingDlpBlueprint(input.blueprint, resolved)
+      ? input.blueprint
+      : undefined;
+
     const locks = resolveDlpGenerationLocks({
       resolved,
-      blueprint: input.blueprint,
+      blueprint: effectiveBlueprint,
     });
 
     const prompt = buildDlpPrompt({
@@ -1253,7 +1266,7 @@ export function createGuroMateEngine(
       competencies: resolved.competencies,
       learningCompetencies: resolved.learningCompetencies,
       derivedSession: resolved.derivedSession,
-      blueprint: input.blueprint,
+      blueprint: effectiveBlueprint,
       locks,
     });
     const settings = await getSettings();
@@ -1294,7 +1307,7 @@ export function createGuroMateEngine(
           : {}),
         competencyIds: resolved.competencyIds,
         lessonTitle:
-          input.blueprint?.lessonTitle.trim() ||
+          effectiveBlueprint?.lessonTitle.trim() ||
           input.lessonTitle?.trim() ||
           (typeof parsed.lessonTitle === "string" && parsed.lessonTitle.trim()) ||
           previous?.lessonTitle ||
@@ -1302,7 +1315,7 @@ export function createGuroMateEngine(
         learningAreas: resolved.learningAreas,
         gradeAndSection: resolved.gradeAndSection,
         references: resolveLessonReferences(
-          input.blueprint?.references.trim() || resolved.references,
+          effectiveBlueprint?.references.trim() || resolved.references,
           parsed.references,
           resolved.competencies,
         ),
@@ -1366,89 +1379,20 @@ export function createGuroMateEngine(
       };
     };
 
-    const initialAiResult = await aiAdapter.generateText({
+    const dlp = await generateWithSingleRepair({
       systemInstruction: DLP_SYSTEM_INSTRUCTION,
       prompt,
-      settings: settings.ai,
+      aiSettings: settings.ai,
+      parse: parseAiDlpPayload,
+      build: buildCandidateDlp,
+      evaluate: (lesson, autoRepaired) =>
+        evaluateDlpAlignment(lesson, {
+          blueprint: effectiveBlueprint,
+          parentSession: resolved.derivedSession,
+          autoRepaired,
+        }),
     });
-
-    let initialParsed: ReturnType<typeof parseAiDlpPayload> | null = null;
-    let initialParseError: unknown = null;
-    try {
-      initialParsed = parseAiDlpPayload(initialAiResult.text);
-    } catch (err) {
-      initialParseError = err;
-    }
-
-    if (!initialParsed) {
-      const parseReason =
-        initialParseError instanceof Error
-          ? initialParseError.message
-          : "AI response was not valid JSON.";
-      const repairAiResult = await aiAdapter.generateText({
-        systemInstruction: DLP_SYSTEM_INSTRUCTION,
-        prompt: buildStructuralRepairPrompt(prompt, [parseReason]),
-        settings: settings.ai,
-      });
-      const repairedParsed = parseAiDlpPayload(repairAiResult.text);
-      const repairedCandidate = buildCandidateDlp(
-        repairedParsed,
-        repairAiResult.model ?? initialAiResult.model,
-      );
-      const alignmentCheck = evaluateDlpAlignment(repairedCandidate, {
-        blueprint: input.blueprint,
-        parentSession: resolved.derivedSession,
-        autoRepaired: true,
-      });
-      return dlpStore.prepend({ ...repairedCandidate, alignmentCheck });
-    }
-
-    const initialCandidate = buildCandidateDlp(initialParsed, initialAiResult.model);
-    const initialCheck = evaluateDlpAlignment(initialCandidate, {
-      blueprint: input.blueprint,
-      parentSession: resolved.derivedSession,
-      autoRepaired: false,
-    });
-
-    if (initialCheck.structuralValid) {
-      return dlpStore.prepend({ ...initialCandidate, alignmentCheck: initialCheck });
-    }
-
-    // Single targeted auto-repair retry for missing required structural/paired fields
-    const repairAiResult = await aiAdapter.generateText({
-      systemInstruction: DLP_SYSTEM_INSTRUCTION,
-      prompt: buildStructuralRepairPrompt(
-        prompt,
-        summarizeStructuralErrors(initialCheck),
-      ),
-      settings: settings.ai,
-    });
-
-    let repairedParsed: ReturnType<typeof parseAiDlpPayload> | null = null;
-    try {
-      repairedParsed = parseAiDlpPayload(repairAiResult.text);
-    } catch {
-      repairedParsed = null;
-    }
-
-    if (!repairedParsed) {
-      return dlpStore.prepend({
-        ...initialCandidate,
-        alignmentCheck: { ...initialCheck, autoRepaired: true },
-      });
-    }
-
-    const repairedCandidate = buildCandidateDlp(
-      repairedParsed,
-      repairAiResult.model ?? initialAiResult.model,
-      initialCandidate,
-    );
-    const finalCheck = evaluateDlpAlignment(repairedCandidate, {
-      blueprint: input.blueprint,
-      parentSession: resolved.derivedSession,
-      autoRepaired: true,
-    });
-    return dlpStore.prepend({ ...repairedCandidate, alignmentCheck: finalCheck });
+    return dlpStore.prepend(dlp);
   }
 
   async function exportDlpDocx(id: string) {
