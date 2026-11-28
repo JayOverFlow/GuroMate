@@ -37,6 +37,7 @@ import {
   type DllLessonBlueprint,
   type DllSessionBlueprint,
   type DllSessionConfig,
+  type DlpLessonBlueprint,
   type FormativeAssessmentType,
   type GenerateDllInput,
   type GenerateDlpInput,
@@ -44,6 +45,7 @@ import {
   type GradeLevel,
   type GuroMateEngine,
   type PlanDllInput,
+  type PlanDlpInput,
   type QuarterNumber,
   type Quiz,
   type QuizItemCounts,
@@ -300,6 +302,38 @@ function parsePlanDllBody(body: unknown): PlanDllInput {
   };
 }
 
+function parseBlueprintActivityOptions(raw: unknown): BlueprintActivityOption[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isRecord).map((opt) => ({
+    id: typeof opt.id === "string" ? opt.id : "",
+    title: typeof opt.title === "string" ? opt.title : "",
+    summary: typeof opt.summary === "string" ? opt.summary : "",
+    ...(opt.source === "bow" || opt.source === "authentic"
+      ? { source: opt.source }
+      : {}),
+    recommended: opt.recommended === true,
+  }));
+}
+
+function parseBlueprintAssessmentOptions(
+  raw: unknown,
+): BlueprintAssessmentOption[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isRecord)
+    .filter(
+      (opt) =>
+        typeof opt.type === "string" &&
+        FORMATIVE_ASSESSMENT_TYPES.includes(opt.type as FormativeAssessmentType),
+    )
+    .map((opt) => ({
+      type: opt.type as FormativeAssessmentType,
+      label: typeof opt.label === "string" ? opt.label : "",
+      preview: typeof opt.preview === "string" ? opt.preview : "",
+      recommended: opt.recommended === true,
+    }));
+}
+
 function parseDllBlueprint(raw: unknown): DllLessonBlueprint | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!isRecord(raw) || !Array.isArray(raw.sessions) || raw.sessions.length !== 5) {
@@ -319,40 +353,10 @@ function parseDllBlueprint(raw: unknown): DllLessonBlueprint | undefined {
       : SESSION_NUMBERS[idx]!;
     const mode =
       entry.mode === "non-instructional" ? "non-instructional" : "instructional";
-    const activityOptions: BlueprintActivityOption[] = Array.isArray(
-      entry.activityOptions,
-    )
-      ? entry.activityOptions
-          .filter(isRecord)
-          .map((opt) => ({
-            id: typeof opt.id === "string" ? opt.id : "",
-            title: typeof opt.title === "string" ? opt.title : "",
-            summary: typeof opt.summary === "string" ? opt.summary : "",
-            ...(opt.source === "bow" || opt.source === "authentic"
-              ? { source: opt.source }
-              : {}),
-            recommended: opt.recommended === true,
-          }))
-      : [];
-    const assessmentOptions: BlueprintAssessmentOption[] = Array.isArray(
+    const activityOptions = parseBlueprintActivityOptions(entry.activityOptions);
+    const assessmentOptions = parseBlueprintAssessmentOptions(
       entry.assessmentOptions,
-    )
-      ? entry.assessmentOptions
-          .filter(isRecord)
-          .filter(
-            (opt) =>
-              typeof opt.type === "string" &&
-              FORMATIVE_ASSESSMENT_TYPES.includes(
-                opt.type as FormativeAssessmentType,
-              ),
-          )
-          .map((opt) => ({
-            type: opt.type as FormativeAssessmentType,
-            label: typeof opt.label === "string" ? opt.label : "",
-            preview: typeof opt.preview === "string" ? opt.preview : "",
-            recommended: opt.recommended === true,
-          }))
-      : [];
+    );
     const selectedAssessmentType =
       typeof entry.selectedAssessmentType === "string" &&
       FORMATIVE_ASSESSMENT_TYPES.includes(
@@ -402,6 +406,68 @@ function parseDllBlueprint(raw: unknown): DllLessonBlueprint | undefined {
   };
 }
 
+function parseDlpBlueprint(raw: unknown): DlpLessonBlueprint | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isRecord(raw)) {
+    throw new HttpError(400, "blueprint must be a JSON object.");
+  }
+
+  const activityOptions = parseBlueprintActivityOptions(raw.activityOptions);
+  const assessmentOptions = parseBlueprintAssessmentOptions(
+    raw.assessmentOptions,
+  );
+  const selectedAssessmentType: FormativeAssessmentType =
+    typeof raw.selectedAssessmentType === "string" &&
+    FORMATIVE_ASSESSMENT_TYPES.includes(
+      raw.selectedAssessmentType as FormativeAssessmentType,
+    )
+      ? (raw.selectedAssessmentType as FormativeAssessmentType)
+      : (assessmentOptions.find((opt) => opt.recommended)?.type ??
+        assessmentOptions[0]?.type ??
+        "exit-ticket");
+
+  const rawSessionNum = Number(raw.sourceSessionNumber);
+  const sourceSessionNumber = SESSION_NUMBERS.includes(
+    rawSessionNum as SessionNumber,
+  )
+    ? (rawSessionNum as SessionNumber)
+    : undefined;
+
+  return {
+    mode: raw.mode === "derive" ? "derive" : "scratch",
+    ...(typeof raw.sourceDllId === "string" && raw.sourceDllId.trim()
+      ? { sourceDllId: raw.sourceDllId }
+      : {}),
+    ...(sourceSessionNumber ? { sourceSessionNumber } : {}),
+    lessonTitle: typeof raw.lessonTitle === "string" ? raw.lessonTitle : "",
+    references: typeof raw.references === "string" ? raw.references : "",
+    competencyIds: Array.isArray(raw.competencyIds)
+      ? raw.competencyIds.filter((s): s is string => typeof s === "string")
+      : [],
+    components: Array.isArray(raw.components)
+      ? raw.components.filter(
+          (c): c is TleComponent =>
+            typeof c === "string" && TLE_COMPONENTS.includes(c as TleComponent),
+        )
+      : [],
+    progressionFocus:
+      typeof raw.progressionFocus === "string" ? raw.progressionFocus : "",
+    learningObjectives:
+      typeof raw.learningObjectives === "string" ? raw.learningObjectives : "",
+    activityOptions,
+    selectedActivityId:
+      typeof raw.selectedActivityId === "string" ? raw.selectedActivityId : "",
+    assessmentOptions,
+    selectedAssessmentType,
+    ...(typeof raw.inheritedLearningResources === "string"
+      ? { inheritedLearningResources: raw.inheritedLearningResources }
+      : {}),
+    ...(raw.lockedToParentSession === true
+      ? { lockedToParentSession: true }
+      : {}),
+  };
+}
+
 function parseGenerateDllBody(body: unknown): GenerateDllInput {
   if (!isRecord(body)) {
     throw new HttpError(400, "DLL generation payload must be a JSON object.");
@@ -414,9 +480,9 @@ function parseGenerateDllBody(body: unknown): GenerateDllInput {
   };
 }
 
-function parseGenerateDlpBody(body: unknown): GenerateDlpInput {
+function parsePlanDlpBody(body: unknown): PlanDlpInput {
   if (!isRecord(body)) {
-    throw new HttpError(400, "DLP generation payload must be a JSON object.");
+    throw new HttpError(400, "DLP planning payload must be a JSON object.");
   }
   const classroomContext = parseClassroomContext(body.classroomContext);
   const referenceMaterial = parseReferenceMaterial(body.referenceMaterial);
@@ -446,6 +512,18 @@ function parseGenerateDlpBody(body: unknown): GenerateDlpInput {
       ? body.competencyIds.filter((s): s is string => typeof s === "string")
       : [],
     ...optional,
+  };
+}
+
+function parseGenerateDlpBody(body: unknown): GenerateDlpInput {
+  if (!isRecord(body)) {
+    throw new HttpError(400, "DLP generation payload must be a JSON object.");
+  }
+  const base = parsePlanDlpBody(body);
+  const blueprint = parseDlpBlueprint(body.blueprint);
+  return {
+    ...base,
+    ...(blueprint ? { blueprint } : {}),
   };
 }
 
@@ -698,6 +776,12 @@ export function createGuroMateMiddleware(
 
       if (req.method === "GET" && urlPath === "/api/dlps") {
         sendJson(res, 200, await engine.listDlps());
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/api/dlps/plan") {
+        const input = parsePlanDlpBody(await readJsonBody(req));
+        sendJson(res, 200, await engine.planDlp(input));
         return;
       }
 

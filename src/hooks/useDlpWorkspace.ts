@@ -17,6 +17,8 @@ import type {
   DeliveryModality,
   DlpActivityPair,
   DlpIntentions,
+  DlpLessonBlueprint,
+  FormativeAssessmentType,
   SessionNumber,
 } from "../engine/types";
 import {
@@ -176,6 +178,8 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
   const [selectedCompetencyIds, setSelectedCompetencyIds] = useState<string[]>(
     [],
   );
+  const [blueprint, setBlueprint] = useState<DlpLessonBlueprint | null>(null);
+  const [planning, setPlanning] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
   const [fieldErrors, setFieldErrors] = useState<
@@ -211,6 +215,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     setReferenceText(fresh.referenceText);
     setPromptNotes(fresh.promptNotes);
     setSelectedCompetencyIds(fresh.selectedCompetencyIds);
+    setBlueprint(null);
     setPickedCompetencyId(fresh.pickedCompetencyId);
     syncedDeriveDllIdRef.current = "";
     interactedFieldsRef.current.clear();
@@ -272,6 +277,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     if (!initialLaunchTarget) return;
     setSelectedDlpId("");
     setViewMode("edit");
+    setBlueprint(null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
     if (initialLaunchTarget.mode === "derive") {
@@ -432,8 +438,19 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
 
   function selectBuilderMode(mode: BuilderMode) {
     setBuilderMode(mode);
+    setBlueprint(null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
+  }
+
+  function selectDeriveDllId(id: string) {
+    setDeriveDllId(id);
+    setBlueprint(null);
+  }
+
+  function selectDeriveSessionNumber(sessionNumber: SessionNumber) {
+    setDeriveSessionNumber(sessionNumber);
+    setBlueprint(null);
   }
 
   function validateField(
@@ -523,9 +540,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     });
   }
 
-  async function handleGenerate(event: FormEvent) {
-    event.preventDefault();
-    setStatus(null);
+  function validateBuilderBeforeRequest(): boolean {
     for (const field of DLP_BUILDER_FIELDS) {
       interactedFieldsRef.current.add(field);
     }
@@ -537,6 +552,7 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     });
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
+      setStatus(null);
       const firstInvalid = DLP_BUILDER_FIELDS.find((field) =>
         Boolean(errors[field]),
       );
@@ -545,57 +561,131 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
           ?.querySelector<HTMLElement>(`[data-field="${firstInvalid}"]`)
           ?.focus();
       }
-      return;
+      return false;
     }
     interactedFieldsRef.current.clear();
     setFieldErrors({});
+    return true;
+  }
+
+  function buildDlpRequestPayload() {
+    const resolvedPeriod =
+      parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
+    const nextContext: ClassroomContext = {
+      ...classroomContext,
+      periodMinutes: resolvedPeriod,
+    };
+    const referenceMaterial = referenceText.trim()
+      ? {
+          ...(referenceSourceLabel.trim()
+            ? { sourceLabel: referenceSourceLabel.trim() }
+            : {}),
+          text: referenceText,
+        }
+      : builderMode === "derive"
+        ? { text: "" }
+        : undefined;
+
+    return builderMode === "derive"
+      ? {
+          mode: "derive" as const,
+          dllId: deriveDllId,
+          sessionNumber: deriveSessionNumber,
+          lessonTitle,
+          references,
+          classroomContext: nextContext,
+          referenceMaterial,
+          promptNotes,
+        }
+      : {
+          mode: "scratch" as const,
+          lessonTitle,
+          gradeAndSection,
+          references,
+          classroomContext: nextContext,
+          ...(referenceMaterial ? { referenceMaterial } : {}),
+          promptNotes,
+          competencyIds: selectedCompetencyIds,
+        };
+  }
+
+  async function handlePlanLesson(event?: FormEvent) {
+    event?.preventDefault();
+    if (!validateBuilderBeforeRequest()) return;
+
+    setStatus(null);
+    setPlanning(true);
+    try {
+      const res = await fetch("/api/dlps/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildDlpRequestPayload()),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const planned = (await res.json()) as DlpLessonBlueprint;
+      setBlueprint(planned);
+      setStatus({
+        tone: "success",
+        text: planned.lockedToParentSession
+          ? `Lesson Blueprint locked to parent DLL Session ${planned.sourceSessionNumber}. Review the inherited plan, then click Approve & Generate DLP.`
+          : "Lesson Blueprint ready. Review or tweak objectives, activity, and formative assessment, then click Approve & Generate DLP.",
+      });
+    } catch (err) {
+      setStatus({
+        tone: "error",
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  function updateBlueprintTitle(title: string) {
+    setBlueprint((prev) => (prev ? { ...prev, lessonTitle: title } : prev));
+  }
+
+  function updateBlueprintObjectives(learningObjectives: string) {
+    setBlueprint((prev) =>
+      prev && !prev.lockedToParentSession
+        ? { ...prev, learningObjectives }
+        : prev,
+    );
+  }
+
+  function selectBlueprintActivity(activityId: string) {
+    setBlueprint((prev) =>
+      prev && !prev.lockedToParentSession
+        ? { ...prev, selectedActivityId: activityId }
+        : prev,
+    );
+  }
+
+  function selectBlueprintAssessment(assessmentType: FormativeAssessmentType) {
+    setBlueprint((prev) =>
+      prev && !prev.lockedToParentSession
+        ? { ...prev, selectedAssessmentType: assessmentType }
+        : prev,
+    );
+  }
+
+  async function handleApproveAndGenerate() {
+    if (!validateBuilderBeforeRequest()) return;
+
+    setStatus(null);
     setGenerating(true);
     try {
-      const resolvedPeriod =
-        parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
-      const nextContext: ClassroomContext = {
-        ...classroomContext,
-        periodMinutes: resolvedPeriod,
-      };
-      const referenceMaterial = referenceText.trim()
-        ? {
-            ...(referenceSourceLabel.trim()
-              ? { sourceLabel: referenceSourceLabel.trim() }
-              : {}),
-            text: referenceText,
-          }
-        : builderMode === "derive"
-          ? { text: "" }
-          : undefined;
-      const payload =
-        builderMode === "derive"
-          ? {
-              mode: "derive" as const,
-              dllId: deriveDllId,
-              sessionNumber: deriveSessionNumber,
-              lessonTitle,
-              references,
-              classroomContext: nextContext,
-              referenceMaterial,
-              promptNotes,
-            }
-          : {
-              mode: "scratch" as const,
-              lessonTitle,
-              gradeAndSection,
-              references,
-              classroomContext: nextContext,
-              ...(referenceMaterial ? { referenceMaterial } : {}),
-              promptNotes,
-              competencyIds: selectedCompetencyIds,
-            };
+      const payload = buildDlpRequestPayload();
       const res = await fetch("/api/dlps/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          ...(blueprint ? { blueprint } : {}),
+        }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const created = (await res.json()) as DailyLessonPlan;
+      setBlueprint(null);
       setDlps((prev) => [created, ...prev]);
       setSelectedDlpId(created.id);
       setViewMode("edit");
@@ -737,9 +827,9 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     builderMode,
     selectBuilderMode,
     deriveDllId,
-    setDeriveDllId,
+    setDeriveDllId: selectDeriveDllId,
     deriveSessionNumber,
-    setDeriveSessionNumber,
+    setDeriveSessionNumber: selectDeriveSessionNumber,
     lessonTitle,
     setLessonTitle,
     gradeAndSection,
@@ -760,6 +850,8 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     promptNotes,
     setPromptNotes,
     selectedCompetencyIds,
+    blueprint,
+    planning,
     generating,
     pickedCompetencyId,
     setPickedCompetencyId,
@@ -772,7 +864,12 @@ export function useDlpWorkspace(options: UseDlpWorkspaceOptions = {}) {
     validateField,
     addScratchCompetency,
     requestRemoveScratchCompetency,
-    handleGenerate,
+    handlePlanLesson,
+    updateBlueprintTitle,
+    updateBlueprintObjectives,
+    selectBlueprintActivity,
+    selectBlueprintAssessment,
+    handleApproveAndGenerate,
     updateDraftHeader,
     updateDraftIntentions,
     updateDraftActivity,

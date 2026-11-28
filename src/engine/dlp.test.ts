@@ -134,16 +134,28 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
 
     const systemInstruction = requests[0]!.systemInstruction ?? "";
     expect(systemInstruction).toContain("ILAW Framework");
+    expect(systemInstruction).toMatch(/DepEd Order No\.\s*016,\s*s\.\s*2026/i);
+    expect(systemInstruction).toMatch(/Learning Design Principles/i);
+    expect(systemInstruction).toMatch(/MATATAG.*4Is.*4Cs.*4Es/i);
+    expect(systemInstruction).toMatch(/DepEd Order No\.\s*8,\s*s\.\s*2015/i);
     expect(systemInstruction).toMatch(/4As.*5Es.*DepEd DO 42/i);
     expect(systemInstruction).toMatch(/Teacher's Activity.*Student's Activity/i);
+    expect(systemInstruction).toMatch(/minute-by-minute/i);
     expect(systemInstruction).toMatch(/3.*SMART/i);
     expect(systemInstruction).toMatch(/Cognitive.*Psychomotor.*Affective/i);
     expect(systemInstruction).toContain("• ");
     expect(systemInstruction).toMatch(/greet.*prayer.*attendance/i);
+    expect(systemInstruction).toMatch(/well-being/i);
     expect(systemInstruction).toMatch(/verbatim|restate/i);
+    expect(systemInstruction).toMatch(/guide questions.*expected student/i);
+    expect(systemInstruction).toMatch(/OHS\/PPE|OSH\/PPE/i);
+    expect(systemInstruction).toMatch(/emergency\/offline/i);
     expect(systemInstruction).toMatch(/line-by-line/i);
     expect(systemInstruction).toMatch(/N\/A/);
-    expect(systemInstruction).toMatch(/5-item multiple-choice quiz/i);
+    expect(systemInstruction).toMatch(/Answer Key|scoring criteria/i);
+    expect(systemInstruction).toMatch(/help-seeking|ask for guidance/i);
+    expect(systemInstruction).toMatch(/accommodations/i);
+    expect(systemInstruction).not.toMatch(/Default to a 5-item multiple-choice quiz/i);
     expect(systemInstruction).toContain("Prompt Notes");
     expect(systemInstruction).toContain("Learner Context");
     expect(systemInstruction).toContain("Reflections");
@@ -285,7 +297,9 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(dlpRequest.systemInstruction).toContain("Daily Lesson Plan (DLP)");
     expect(dlpRequest.systemInstruction).toContain("ILAW Framework");
     expect(dlpRequest.systemInstruction).toMatch(/greet.*prayer.*attendance/i);
-    expect(dlpRequest.systemInstruction).toMatch(/5-item multiple-choice quiz/i);
+    expect(dlpRequest.systemInstruction).toMatch(/well-being/i);
+    expect(dlpRequest.systemInstruction).toMatch(/DepEd Order No\.\s*8,\s*s\.\s*2015/i);
+    expect(dlpRequest.systemInstruction).not.toMatch(/Default to a 5-item multiple-choice quiz/i);
 
     const edited = await engine.saveDlp({
       ...derived,
@@ -899,5 +913,460 @@ describe("GuroMateEngine Daily Lesson Plan (DLP)", () => {
     expect(legacyTables[0]![7]![1]).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
     expect(legacyTables[0]![7]![1]).toContain("Anthropic (claude-sonnet-4-5)");
     expect(legacyTables[0]![7]![1]).not.toContain("{aiTool}");
+  });
+
+  it("plans a scratch single-session Lesson Blueprint via planDlp and locks Step 2 generateDlp strictly to teacher-edited objectives, activity, formative assessment, and 2-hour pacing", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        if (req.prompt.includes("single-session Lesson Blueprint")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "2-Hour T568B Cable Crimping Practicum",
+              references: "MATATAG TLE 7 ICT CG & BoW",
+              progressionFocus: "Hands-on 2-hour lab mastery of RJ45 crimping",
+              learningObjectives:
+                "• Cognitive: Recall the 8-wire T568B color-code sequence with 100% accuracy.\n• Psychomotor: Crimp a functional straight-through UTP cable observing OHS/PPE practices.\n• Affective: Practice patience and shared care for lab crimping tools.",
+              activityOptions: [
+                {
+                  id: "dlp-act-1",
+                  title: "Guided T568B Color-Code Sorting",
+                  summary: "Pairs sort colored wire strips before crimping.",
+                  source: "bow",
+                  recommended: true,
+                },
+                {
+                  id: "dlp-act-2",
+                  title: "Paired Workstation Crimping & LAN Continuity Relay",
+                  summary: "Pairs follow modeled OHS steps to strip, arrange, crimp, and test cables.",
+                  source: "authentic",
+                  recommended: true,
+                },
+              ],
+              assessmentOptions: [
+                {
+                  type: "demo-rubric",
+                  preview: "3-criterion rubric scoring T568B pinout accuracy, crimp quality, and OHS compliance.",
+                  recommended: true,
+                },
+                {
+                  type: "checklist",
+                  preview: "6-step peer and teacher observation checklist during cable termination.",
+                  recommended: false,
+                },
+              ],
+            }),
+            model: "mock-dlp-plan-model",
+          };
+        }
+
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Ignored AI Title",
+            references: "MATATAG TLE 7 ICT CG",
+            learningObjectives: "• AI paraphrased objective that must be overridden.",
+            preLesson: {
+              teacherActivity:
+                "(15 min) Greet class, ask a student to lead the prayer, check attendance and learner well-being, show a faulty cable hook, and share the 3 Learning Objectives verbatim.",
+              studentActivity:
+                "(15 min) Respond to greeting, join prayer, share well-being check-in, answer the hook question, and read the objectives aloud.",
+            },
+            lessonFlow: {
+              teacherActivity:
+                "(85 min) Present T568B pinout points (20 min); ask guide questions; model OHS/PPE checks and step-by-step crimping (15 min); facilitate Paired Workstation Crimping & LAN Continuity Relay (40 min); lead share-back and synthesis (10 min).",
+              studentActivity:
+                "(85 min) Take notes on T568B pinout, answer guide questions, put on safety glasses, perform paired cable crimping and LAN testing, and share troubleshooting insights.",
+            },
+            learningResources: {
+              teacherActivity:
+                "• Crimping tools, LAN tester, projector\n• Emergency/offline backup: Printed T568B color-code chart and chalkboard diagram",
+              studentActivity:
+                "• UTP cable, RJ45 plugs, safety goggles\n• Emergency/offline backup: Laminated color-code practice strips",
+            },
+            integrationAndContextualization: {
+              teacherActivity: "Connect structured cabling to barangay office and school computer lab networks.",
+              studentActivity: "",
+            },
+            formativeAssessment: {
+              teacherActivity:
+                "(20 min) Observation / Skill Checklist (6 steps) with scoring criteria and Answer Key; invite learners to raise help cards for feedback; offer oral/visual checklist accommodations.",
+              studentActivity:
+                "(20 min) Demonstrate cable termination while checked against the checklist and use help cards if guidance is needed.",
+            },
+            extendedLearningOpportunities: {
+              teacherActivity: "Sketch a safe cable routing plan for a home or barangay workstation.",
+              studentActivity: "",
+            },
+          }),
+          model: "mock-dlp-gen-model",
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ictComp = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const classroomContext = {
+      periodMinutes: 120,
+      facility: "computer-lab" as const,
+      modality: "face-to-face" as const,
+    };
+    const referenceMaterial = {
+      sourceLabel: "TESDA CSS NC II Excerpt.txt",
+      text: "Verify T568B order (WO-O-WG-B-WB-G-WBr-Br) and wear safety eyewear when trimming UTP conductors.",
+    };
+
+    const blueprint = await engine.planDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Rizal",
+      competencyIds: [ictComp.id],
+      classroomContext,
+      referenceMaterial,
+      promptNotes: "40 learners sharing 20 crimping tools in pairs.",
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.systemInstruction).toMatch(/DepEd Order No\.\s*016/i);
+    expect(requests[0]!.systemInstruction).toMatch(/Lesson Blueprint/i);
+    expect(requests[0]!.prompt).toContain("120 minutes");
+    expect(requests[0]!.prompt).toContain("TESDA CSS NC II Excerpt.txt");
+
+    expect(blueprint.mode).toBe("scratch");
+    expect(blueprint.lockedToParentSession).toBeFalsy();
+    expect(blueprint.lessonTitle).toBe("2-Hour T568B Cable Crimping Practicum");
+    expect(blueprint.learningObjectives).not.toMatch(/\b(Cognitive|Psychomotor|Affective)\s*:/i);
+    expect(blueprint.learningObjectives.split("\n")).toHaveLength(3);
+    expect(blueprint.activityOptions.length).toBeGreaterThanOrEqual(2);
+    expect(blueprint.activityOptions.length).toBeLessThanOrEqual(3);
+    const recActs = blueprint.activityOptions.filter((a) => a.recommended);
+    expect(recActs).toHaveLength(1);
+    expect(blueprint.selectedActivityId).toBe(recActs[0]!.id);
+    expect(blueprint.assessmentOptions.map((o) => o.type)).toEqual([
+      "exit-ticket",
+      "checklist",
+      "demo-rubric",
+      "worksheet",
+      "short-quiz",
+    ]);
+    for (const opt of blueprint.assessmentOptions) {
+      expect(opt.label.trim().length).toBeGreaterThan(0);
+      expect(opt.preview.trim().length).toBeGreaterThan(0);
+    }
+    expect(blueprint.assessmentOptions.filter((o) => o.recommended)).toHaveLength(1);
+    expect(blueprint.selectedAssessmentType).toBe("demo-rubric");
+
+    // Step 2: Teacher edits objectives, swaps activity & assessment, edits title, approves & generates DLP
+    const editedObjectives = [
+      "• Identify the 8-wire T568B pinout sequence with 100% accuracy.",
+      "• Terminate a working straight-through RJ45 cable following OHS/PPE checks.",
+      "• Demonstrate responsible teamwork and tool stewardship in the computer lab.",
+    ].join("\n");
+
+    const approvedBlueprint = {
+      ...blueprint,
+      lessonTitle: "Approved 2-Hour RJ45 Crimping DLP",
+      learningObjectives: editedObjectives,
+      selectedActivityId: "dlp-act-2",
+      selectedAssessmentType: "checklist" as const,
+    };
+
+    const created = await engine.generateDlp({
+      mode: "scratch",
+      gradeAndSection: "Grade 7 - Rizal",
+      competencyIds: [ictComp.id],
+      classroomContext,
+      referenceMaterial,
+      promptNotes: "40 learners sharing 20 crimping tools in pairs.",
+      blueprint: approvedBlueprint,
+    });
+
+    expect(requests).toHaveLength(2);
+    const genPrompt = requests[1]!.prompt;
+    expect(genPrompt).toContain("Approved Lesson Blueprint");
+    expect(genPrompt).toContain("Paired Workstation Crimping & LAN Continuity Relay");
+    expect(genPrompt).toContain("Observation / Skill Checklist");
+    expect(genPrompt).toContain("120 minutes");
+
+    expect(created.lessonTitle).toBe("Approved 2-Hour RJ45 Crimping DLP");
+    expect(created.intentions.learningObjectives).toBe(editedObjectives);
+    expect(created.selectedActivityTitle).toBe(
+      "Paired Workstation Crimping & LAN Continuity Relay",
+    );
+    expect(created.selectedAssessmentType).toBe("checklist");
+    expect(created.classroomContext).toEqual(classroomContext);
+
+    // Reload from disk and verify persisted blueprint metadata
+    const engine2 = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+    const reloaded = await engine2.getDlp(created.id);
+    expect(reloaded.selectedActivityTitle).toBe(
+      "Paired Workstation Crimping & LAN Continuity Relay",
+    );
+    expect(reloaded.selectedAssessmentType).toBe("checklist");
+    expect(reloaded.intentions.learningObjectives).toBe(editedObjectives);
+
+    // Export .docx preserves paired layout and leaves Learner Context + Reflections blank
+    const exported = await engine2.exportDlpDocx(created.id);
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+    const docXml = readZipEntry(exported.buffer, "word/document.xml").toString("utf8");
+    const tables = extractTableCellTexts(docXml);
+    expect(tables[0]![0]![1]).toBe("Approved 2-Hour RJ45 Crimping DLP");
+    expect(tables[1]![2]![1]).toContain("Terminate a working straight-through RJ45 cable");
+    expect(tables[1]![3]![1]).toBe("");
+    expect(tables[4]![3]![1]).toBe("");
+    expect(tables[4]![3]![2]).toBe("");
+  });
+
+  it("strictly locks derived DLP planning and generation to parent DLL Session objectives, chosen activity, chosen Formative Assessment type, and key resources without drifting", async () => {
+    const dataDir = await makeTempDir();
+    const requests: AiGenerateRequest[] = [];
+
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText(req) {
+        requests.push(req);
+        if (req.prompt.includes("Create an editable 5-Session Lesson Blueprint")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "ICT Lab Maintenance Week",
+              references: "MATATAG TLE 7 ICT CG & BoW",
+              sessions: [1, 2, 3, 4].map((n) => ({
+                sessionNumber: n,
+                progressionFocus: `Session ${n} stage`,
+                learningObjectives: [
+                  `• Explain maintenance step ${n} clearly.`,
+                  `• Execute preventive check ${n} safely with PPE.`,
+                  `• Value disciplined tool housekeeping ${n}.`,
+                ].join("\n"),
+                activityOptions: [
+                  {
+                    id: `s${n}-a`,
+                    title: `Parent DLL Activity ${n}`,
+                    summary: `Hands-on preventive check station ${n}.`,
+                    source: "bow",
+                    recommended: true,
+                  },
+                  {
+                    id: `s${n}-b`,
+                    title: `Backup Activity ${n}`,
+                    summary: `Alternative review ${n}.`,
+                    source: "authentic",
+                    recommended: false,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "demo-rubric",
+                    preview: `3-criterion lab rubric for Session ${n}.`,
+                    recommended: n === 2,
+                  },
+                  {
+                    type: "exit-ticket",
+                    preview: `Exit slip for Session ${n}.`,
+                    recommended: n !== 2,
+                  },
+                ],
+              })),
+            }),
+          };
+        }
+        if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+          return {
+            text: JSON.stringify({
+              lessonTitle: "ICT Lab Maintenance Week",
+              references: "MATATAG TLE 7 ICT CG & BoW",
+              sessions: [1, 2, 3, 4].map((n) => ({
+                sessionNumber: n,
+                learningObjectives: `• AI obj ${n}`,
+                preLesson: `Pre-lesson ${n}`,
+                lessonFlow: `Parent DLL Activity ${n}: Modeled OHS steps followed by paired practice.`,
+                learningResources: `• Anti-static wrist strap and compressed air\n• Emergency/offline backup: Printed safety checklist`,
+                integrationAndContextualization: `Local repair shop link ${n}.`,
+                formativeAssessment: `Performance / Demo Rubric: Evaluate Session ${n} with help cards and accommodations.`,
+                extendedLearningOpportunities: `Home safety audit ${n}.`,
+              })),
+            }),
+          };
+        }
+        if (req.prompt.includes("single-session Lesson Blueprint")) {
+          // Intentionally return drifted AI suggestions to verify strict parent DLL locking!
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Expanded Session 2 Preventive Maintenance DLP",
+              references: "MATATAG TLE 7 ICT CG & BoW",
+              progressionFocus: "Detailed demonstration teaching expansion of Session 2",
+              learningObjectives:
+                "• Drifted Cognitive Objective that MUST NOT override parent DLL.\n• Drifted Psychomotor Objective.\n• Drifted Affective Objective.",
+              activityOptions: [
+                {
+                  id: "drifted-act",
+                  title: "Unrelated Lecture Drift",
+                  summary: "Pure lecture that contradicts parent DLL Session 2.",
+                  source: "authentic",
+                  recommended: true,
+                },
+              ],
+              assessmentOptions: [
+                {
+                  type: "short-quiz",
+                  preview: "Drifted quiz that contradicts parent DLL demo-rubric.",
+                  recommended: true,
+                },
+                {
+                  type: "demo-rubric",
+                  preview: "Expanded 3-criterion rubric matching Session 2 lab demo.",
+                  recommended: false,
+                },
+              ],
+            }),
+          };
+        }
+
+        return {
+          text: JSON.stringify({
+            lessonTitle: "Expanded Session 2 Preventive Maintenance DLP",
+            references: "MATATAG TLE 7 ICT CG & BoW",
+            learningObjectives: "• Drifted DLP objective that MUST be locked to parent DLL.",
+            preLesson: {
+              teacherActivity: "(15 min) Opening routine, well-being check, hook, and verbatim objectives.",
+              studentActivity: "(15 min) Join routine, check-in, and read objectives.",
+            },
+            lessonFlow: {
+              teacherActivity: "(85 min) Expand Parent DLL Activity 2 with OHS/PPE checks and guide questions.",
+              studentActivity: "(85 min) Follow OHS steps and complete paired preventive check.",
+            },
+            learningResources: {
+              teacherActivity:
+                "• Anti-static wrist strap and compressed air\n• Emergency/offline backup: Printed safety checklist",
+              studentActivity:
+                "• Anti-static wrist strap, brush\n• Emergency/offline backup: Printed checklist",
+            },
+            integrationAndContextualization: {
+              teacherActivity: "Local repair shop link 2.",
+              studentActivity: "",
+            },
+            formativeAssessment: {
+              teacherActivity:
+                "(20 min) Performance / Demo Rubric with scoring criteria, help-seeking cue cards, and accommodations.",
+              studentActivity: "(20 min) Demonstrate preventive check and consult rubric criteria.",
+            },
+            extendedLearningOpportunities: {
+              teacherActivity: "Home safety audit 2.",
+              studentActivity: "",
+            },
+          }),
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    const ictComp = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const dllSessions = [
+      { sessionNumber: 1 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      { sessionNumber: 2 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      { sessionNumber: 3 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      { sessionNumber: 4 as const, mode: "instructional" as const, competencyIds: [ictComp.id] },
+      {
+        sessionNumber: 5 as const,
+        mode: "non-instructional" as const,
+        competencyIds: [],
+        nonInstructionalReason: "School Holiday",
+      },
+    ];
+    const dllBlueprint = await engine.planDll({
+      gradeAndSection: "Grade 7 - Bonifacio",
+      classroomContext: {
+        periodMinutes: 120,
+        facility: "shop-workshop",
+        modality: "face-to-face",
+      },
+      sessions: dllSessions,
+    });
+    const parentDll = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Bonifacio",
+      classroomContext: {
+        periodMinutes: 120,
+        facility: "shop-workshop",
+        modality: "face-to-face",
+      },
+      sessions: dllSessions,
+      blueprint: dllBlueprint,
+    });
+    const parentSession2 = parentDll.sessions[1]!;
+
+    // Reject deriving blueprint from non-instructional session
+    await expect(
+      engine.planDlp({
+        mode: "derive",
+        dllId: parentDll.id,
+        sessionNumber: 5,
+      }),
+    ).rejects.toThrow(/non-instructional/i);
+
+    // Step 1: Plan derived DLP from Session 2
+    const derivedBlueprint = await engine.planDlp({
+      mode: "derive",
+      dllId: parentDll.id,
+      sessionNumber: 2,
+    });
+
+    expect(derivedBlueprint.mode).toBe("derive");
+    expect(derivedBlueprint.sourceDllId).toBe(parentDll.id);
+    expect(derivedBlueprint.sourceSessionNumber).toBe(2);
+    expect(derivedBlueprint.lockedToParentSession).toBe(true);
+    expect(derivedBlueprint.learningObjectives).toBe(parentSession2.learningObjectives);
+    const chosenAct = derivedBlueprint.activityOptions.find(
+      (o) => o.id === derivedBlueprint.selectedActivityId,
+    );
+    expect(chosenAct?.title).toBe("Parent DLL Activity 2");
+    expect(chosenAct?.recommended).toBe(true);
+    expect(derivedBlueprint.selectedAssessmentType).toBe("demo-rubric");
+    expect(
+      derivedBlueprint.assessmentOptions.find((o) => o.recommended)?.type,
+    ).toBe("demo-rubric");
+    expect(derivedBlueprint.inheritedLearningResources).toContain("Anti-static wrist strap");
+
+    // Step 2: Generate derived DLP — even if blueprint is tampered with, strict DLL->DLP lock holds!
+    const tamperedBlueprint = {
+      ...derivedBlueprint,
+      learningObjectives: "• Attempted objective drift",
+      selectedActivityId: "drifted-act",
+      selectedAssessmentType: "short-quiz" as const,
+    };
+    const derivedDlp = await engine.generateDlp({
+      mode: "derive",
+      dllId: parentDll.id,
+      sessionNumber: 2,
+      blueprint: tamperedBlueprint,
+    });
+
+    const genReq = requests[requests.length - 1]!;
+    expect(genReq.prompt).toContain("Parent DLL Activity 2");
+    expect(genReq.prompt).toContain("Performance / Demo Rubric");
+    expect(genReq.prompt).toContain("Anti-static wrist strap");
+    expect(genReq.prompt).toContain("120 minutes");
+    expect(genReq.prompt).toMatch(/STRICTLY LOCKED|LOCKED/i);
+
+    expect(derivedDlp.sourceDllId).toBe(parentDll.id);
+    expect(derivedDlp.sourceSessionNumber).toBe(2);
+    expect(derivedDlp.intentions.learningObjectives).toBe(parentSession2.learningObjectives);
+    expect(derivedDlp.selectedActivityTitle).toBe("Parent DLL Activity 2");
+    expect(derivedDlp.selectedAssessmentType).toBe("demo-rubric");
+    expect(derivedDlp.classroomContext?.periodMinutes).toBe(120);
   });
 });

@@ -1588,4 +1588,386 @@ describe("guroMateVitePlugin HTTP middleware", () => {
       expect(tables[4]![2]![col]).toBe("");
     }
   });
+
+  it("serves two-step DLP planning (POST /api/dlps/plan -> editable Lesson Blueprint -> POST /api/dlps/generate) in both scratch and derive modes with strict DLL->DLP locking, 2-hour pacing, persistence, and .docx export", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-dlp-plan-"));
+    tempDirs.push(dataDir);
+    const seenPrompts: string[] = [];
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          seenPrompts.push(req.prompt);
+          if (req.prompt.includes("Create an editable 5-Session Lesson Blueprint")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "HTTP Parent ICT Lab Week",
+                references: "MATATAG TLE 7 ICT CG",
+                sessions: [1, 2, 3, 4, 5].map((n) => ({
+                  sessionNumber: n,
+                  progressionFocus: `Parent stage ${n}`,
+                  learningObjectives: [
+                    `• Explain parent ICT principle ${n}.`,
+                    `• Demonstrate parent lab procedure ${n} safely.`,
+                    `• Practice responsible teamwork ${n}.`,
+                  ].join("\n"),
+                  activityOptions: [
+                    {
+                      id: `p-s${n}-a`,
+                      title: `Parent Shop Station ${n}`,
+                      summary: `Guided hands-on station for Session ${n}.`,
+                      source: "bow",
+                      recommended: true,
+                    },
+                    {
+                      id: `p-s${n}-b`,
+                      title: `Parent Alt Activity ${n}`,
+                      summary: `Alternative activity ${n}.`,
+                      source: "authentic",
+                      recommended: false,
+                    },
+                  ],
+                  assessmentOptions: [
+                    {
+                      type: "demo-rubric",
+                      preview: `3-criterion lab rubric for Session ${n}.`,
+                      recommended: true,
+                    },
+                    {
+                      type: "exit-ticket",
+                      preview: `Exit slip ${n}.`,
+                      recommended: false,
+                    },
+                  ],
+                })),
+              }),
+              model: "mock-http-dlp-model",
+            };
+          }
+          if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "HTTP Parent ICT Lab Week",
+                references: "MATATAG TLE 7 ICT CG",
+                sessions: [1, 2, 3, 4, 5].map((n) => ({
+                  sessionNumber: n,
+                  learningObjectives: `• AI parent obj ${n}`,
+                  preLesson: `Pre ${n}`,
+                  lessonFlow: `Parent Shop Station ${n}: Guided demo and paired lab.`,
+                  learningResources: `• Multimeter and breadboard\n• Emergency/offline backup: Printed circuit cards`,
+                  integrationAndContextualization: `Barangay electronics shop link ${n}.`,
+                  formativeAssessment: `Performance / Demo Rubric: Score Session ${n} with help cards and accommodations.`,
+                  extendedLearningOpportunities: `Home safety checklist ${n}.`,
+                })),
+              }),
+              model: "mock-http-dlp-model",
+            };
+          }
+          if (req.prompt.includes("single-session Lesson Blueprint")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "HTTP Planned 2-Hour DLP",
+                references: "MATATAG TLE 7 ICT CG",
+                progressionFocus: "Single-session 2-hour demonstration teaching",
+                learningObjectives:
+                  "• Cognitive: Identify key hardware tools accurately.\n• Psychomotor: Assemble the test setup observing OHS/PPE.\n• Affective: Value safe tool handling with classmates.",
+                activityOptions: [
+                  {
+                    id: "http-dlp-a",
+                    title: "Guided Tool Identification Walk",
+                    summary: "Pairs inspect labeled tools and safety cards.",
+                    source: "bow",
+                    recommended: true,
+                  },
+                  {
+                    id: "http-dlp-b",
+                    title: "Hands-On Bench Assembly Relay",
+                    summary: "Pairs execute step-by-step bench assembly with OHS checks.",
+                    source: "authentic",
+                    recommended: false,
+                  },
+                ],
+                assessmentOptions: [
+                  {
+                    type: "checklist",
+                    preview: "Observation checklist verifying OHS steps and accuracy.",
+                    recommended: true,
+                  },
+                  {
+                    type: "worksheet",
+                    preview: "Structured troubleshooting worksheet with key.",
+                    recommended: false,
+                  },
+                ],
+              }),
+              model: "mock-http-dlp-model",
+            };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "Ignored AI DLP Title",
+              references: "MATATAG TLE 7 ICT CG",
+              learningObjectives: "• Ignored AI objective",
+              preLesson: {
+                teacherActivity: "(15 min) Opening routine, well-being check, hook, and verbatim objectives.",
+                studentActivity: "(15 min) Join routine, check-in, and read objectives aloud.",
+              },
+              lessonFlow: {
+                teacherActivity: "(85 min) Present key points (20 min); guide questions; OHS/PPE demo and hands-on lab (55 min); synthesis (10 min).",
+                studentActivity: "(85 min) Answer guide questions, wear PPE, execute lab steps, and share takeaways.",
+              },
+              learningResources: {
+                teacherActivity: "• Multimeter, slides\n• Emergency/offline backup: Printed circuit diagrams",
+                studentActivity: "• Breadboard, worksheet\n• Emergency/offline backup: Paper schematic cards",
+              },
+              integrationAndContextualization: {
+                teacherActivity: "Connect to local barangay repair technicians.",
+                studentActivity: "",
+              },
+              formativeAssessment: {
+                teacherActivity: "(20 min) Ready-to-use rubric/worksheet items with Answer Key, help-seeking cards, and visual/oral accommodations.",
+                studentActivity: "(20 min) Complete assessment and raise help cards when needed.",
+              },
+              extendedLearningOpportunities: {
+                teacherActivity: "Audit home extension cords for OHS compliance.",
+                studentActivity: "",
+              },
+            }),
+            model: "mock-http-dlp-model",
+          };
+        },
+      },
+    });
+
+    const middleware = createGuroMateMiddleware(engine);
+    const server = createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 404;
+        res.end("Not Found");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    // Invalid plan payload returns 400
+    const badPlanRes = await fetch(`${baseUrl}/api/dlps/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "scratch", gradeAndSection: "", competencyIds: [] }),
+    });
+    expect(badPlanRes.status).toBe(400);
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const twoHourContext = {
+      periodMinutes: 120,
+      facility: "shop-workshop",
+      modality: "face-to-face",
+    };
+
+    // 1. Scratch two-step flow over HTTP
+    const scratchPlanRes = await fetch(`${baseUrl}/api/dlps/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "scratch",
+        gradeAndSection: "Grade 7 - Rizal",
+        classroomContext: twoHourContext,
+        referenceMaterial: {
+          sourceLabel: "TESDA OHS Guide.txt",
+          text: "Always disconnect power and wear insulated gloves before continuity testing.",
+        },
+        competencyIds: [ict.id],
+      }),
+    });
+    expect(scratchPlanRes.status).toBe(200);
+    const scratchBp = (await scratchPlanRes.json()) as {
+      mode: string;
+      lessonTitle: string;
+      learningObjectives: string;
+      activityOptions: Array<{ id: string; title: string; recommended: boolean }>;
+      selectedActivityId: string;
+      assessmentOptions: Array<{ type: string; label: string; preview: string; recommended: boolean }>;
+      selectedAssessmentType: string;
+    };
+    expect(scratchBp.mode).toBe("scratch");
+    expect(scratchBp.selectedActivityId).toBe("http-dlp-a");
+    expect(scratchBp.selectedAssessmentType).toBe("checklist");
+    expect(scratchBp.assessmentOptions).toHaveLength(5);
+
+    const editedScratchObjectives = [
+      "• Identify four circuit testing tools accurately.",
+      "• Assemble and test a safe bench setup following OHS/PPE rules.",
+      "• Value cooperative lab safety with teammates.",
+    ].join("\n");
+    const approvedScratchBp = {
+      ...scratchBp,
+      lessonTitle: "Approved HTTP 2-Hour Bench DLP",
+      learningObjectives: editedScratchObjectives,
+      selectedActivityId: "http-dlp-b",
+      selectedAssessmentType: "worksheet",
+    };
+
+    const scratchGenRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "scratch",
+        gradeAndSection: "Grade 7 - Rizal",
+        classroomContext: twoHourContext,
+        competencyIds: [ict.id],
+        blueprint: approvedScratchBp,
+      }),
+    });
+    expect(scratchGenRes.status).toBe(201);
+    const createdScratch = (await scratchGenRes.json()) as {
+      id: string;
+      lessonTitle: string;
+      selectedActivityTitle?: string;
+      selectedAssessmentType?: string;
+      classroomContext?: { periodMinutes: number };
+      intentions: { learningObjectives: string };
+    };
+    expect(createdScratch.lessonTitle).toBe("Approved HTTP 2-Hour Bench DLP");
+    expect(createdScratch.intentions.learningObjectives).toBe(editedScratchObjectives);
+    expect(createdScratch.selectedActivityTitle).toBe("Hands-On Bench Assembly Relay");
+    expect(createdScratch.selectedAssessmentType).toBe("worksheet");
+    expect(createdScratch.classroomContext?.periodMinutes).toBe(120);
+
+    // 2. Derive two-step flow over HTTP with strict parent DLL Session locking
+    const dllSessions = [1, 2, 3, 4, 5].map((n) => ({
+      sessionNumber: n,
+      mode: "instructional",
+      competencyIds: [ict.id],
+    }));
+    const dllPlanRes = await fetch(`${baseUrl}/api/dlls/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "Grade 7 - Bonifacio",
+        classroomContext: twoHourContext,
+        sessions: dllSessions,
+      }),
+    });
+    const dllBp = await dllPlanRes.json();
+    const dllGenRes = await fetch(`${baseUrl}/api/dlls/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "Grade 7 - Bonifacio",
+        classroomContext: twoHourContext,
+        sessions: dllSessions,
+        blueprint: dllBp,
+      }),
+    });
+    expect(dllGenRes.status).toBe(201);
+    const parentDll = (await dllGenRes.json()) as {
+      id: string;
+      sessions: Array<{
+        sessionNumber: number;
+        learningObjectives: string;
+        selectedActivityTitle?: string;
+        selectedAssessmentType?: string;
+      }>;
+    };
+    const parentSession3 = parentDll.sessions[2]!;
+
+    const derivePlanRes = await fetch(`${baseUrl}/api/dlps/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "derive",
+        dllId: parentDll.id,
+        sessionNumber: 3,
+      }),
+    });
+    expect(derivePlanRes.status).toBe(200);
+    const deriveBp = (await derivePlanRes.json()) as {
+      mode: string;
+      sourceDllId?: string;
+      sourceSessionNumber?: number;
+      lockedToParentSession?: boolean;
+      learningObjectives: string;
+      activityOptions: Array<{ id: string; title: string; recommended: boolean }>;
+      selectedActivityId: string;
+      selectedAssessmentType: string;
+      inheritedLearningResources?: string;
+    };
+    expect(deriveBp.mode).toBe("derive");
+    expect(deriveBp.sourceDllId).toBe(parentDll.id);
+    expect(deriveBp.sourceSessionNumber).toBe(3);
+    expect(deriveBp.lockedToParentSession).toBe(true);
+    expect(deriveBp.learningObjectives).toBe(parentSession3.learningObjectives);
+    expect(
+      deriveBp.activityOptions.find((a) => a.id === deriveBp.selectedActivityId)?.title,
+    ).toBe("Parent Shop Station 3");
+    expect(deriveBp.selectedAssessmentType).toBe("demo-rubric");
+    expect(deriveBp.inheritedLearningResources).toContain("Multimeter and breadboard");
+
+    const deriveGenRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "derive",
+        dllId: parentDll.id,
+        sessionNumber: 3,
+        blueprint: {
+          ...deriveBp,
+          lessonTitle: "Derived Session 3 2-Hour DLP",
+          selectedAssessmentType: "short-quiz", // must be overridden by strict parent lock
+        },
+      }),
+    });
+    expect(deriveGenRes.status).toBe(201);
+    const createdDerived = (await deriveGenRes.json()) as {
+      id: string;
+      sourceDllId?: string;
+      sourceSessionNumber?: number;
+      lessonTitle: string;
+      selectedActivityTitle?: string;
+      selectedAssessmentType?: string;
+      classroomContext?: { periodMinutes: number };
+      intentions: { learningObjectives: string };
+    };
+    expect(createdDerived.sourceDllId).toBe(parentDll.id);
+    expect(createdDerived.sourceSessionNumber).toBe(3);
+    expect(createdDerived.lessonTitle).toBe("Derived Session 3 2-Hour DLP");
+    expect(createdDerived.intentions.learningObjectives).toBe(
+      parentSession3.learningObjectives,
+    );
+    expect(createdDerived.selectedActivityTitle).toBe("Parent Shop Station 3");
+    expect(createdDerived.selectedAssessmentType).toBe("demo-rubric");
+    expect(createdDerived.classroomContext?.periodMinutes).toBe(120);
+
+    // Persistence via GET /api/dlps/:id and paired .docx export with blank Learner Context & Reflections
+    const getDerivedRes = await fetch(
+      `${baseUrl}/api/dlps/${encodeURIComponent(createdDerived.id)}`,
+    );
+    expect(getDerivedRes.status).toBe(200);
+    expect(await getDerivedRes.json()).toMatchObject({
+      id: createdDerived.id,
+      selectedActivityTitle: "Parent Shop Station 3",
+      selectedAssessmentType: "demo-rubric",
+    });
+
+    const docxRes = await fetch(
+      `${baseUrl}/api/dlps/${encodeURIComponent(createdDerived.id)}/docx`,
+    );
+    expect(docxRes.status).toBe(200);
+    const docXml = readZipEntry(
+      Buffer.from(await docxRes.arrayBuffer()),
+      "word/document.xml",
+    ).toString("utf8");
+    const tables = extractTableCellTexts(docXml);
+    expect(tables[0]![0]![1]).toBe("Derived Session 3 2-Hour DLP");
+    expect(tables[1]![2]![1]).toContain("Demonstrate parent lab procedure 3 safely.");
+    expect(tables[1]![3]![1]).toBe("");
+    expect(tables[4]![3]![1]).toBe("");
+    expect(tables[4]![3]![2]).toBe("");
+    expect(seenPrompts.at(-1)).toContain("120 minutes");
+    expect(seenPrompts.at(-1)).toContain("Multimeter and breadboard");
+  });
 });
