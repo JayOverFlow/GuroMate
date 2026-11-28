@@ -332,6 +332,15 @@ describe("isDllDraftDirty", () => {
     const editedSession = structuredClone(saved);
     editedSession.sessions[2].lessonFlow = "Updated Session 3 flow";
     expect(isDllDraftDirty(saved, editedSession)).toBe(true);
+
+    const emptyLegacyDeclaration = structuredClone(saved);
+    emptyLegacyDeclaration.aiDeclaration = "";
+    expect(isDllDraftDirty(saved, emptyLegacyDeclaration)).toBe(false);
+
+    const editedDeclaration = structuredClone(saved);
+    editedDeclaration.aiDeclaration =
+      "Declaration of AI Use (DO 003, s. 2026 Annex A): Reviewed by teacher.";
+    expect(isDllDraftDirty(saved, editedDeclaration)).toBe(true);
   });
 });
 
@@ -404,6 +413,15 @@ describe("isDlpDraftDirty", () => {
     editedStudentActivity.formativeAssessment.studentActivity =
       "Complete 5-item formative check";
     expect(isDlpDraftDirty(saved, editedStudentActivity)).toBe(true);
+
+    const emptyLegacyDeclaration = structuredClone(saved);
+    emptyLegacyDeclaration.aiDeclaration = "";
+    expect(isDlpDraftDirty(saved, emptyLegacyDeclaration)).toBe(false);
+
+    const editedDeclaration = structuredClone(saved);
+    editedDeclaration.aiDeclaration =
+      "Declaration of AI Use (DO 003, s. 2026 Annex A): Reviewed by teacher.";
+    expect(isDlpDraftDirty(saved, editedDeclaration)).toBe(true);
   });
 });
 

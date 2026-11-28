@@ -320,6 +320,9 @@ export function normalizeEditedDlp(dlp: DailyLessonPlan): DailyLessonPlan {
     references: dlp.references.trim(),
     ...(classroomContext ? { classroomContext } : {}),
     ...(referenceMaterial ? { referenceMaterial } : {}),
+    ...(typeof dlp.aiDeclaration === "string"
+      ? { aiDeclaration: dlp.aiDeclaration.trim() }
+      : {}),
     promptNotes: dlp.promptNotes.trim(),
     intentions: {
       learningCompetencies: dlp.intentions.learningCompetencies
@@ -394,6 +397,9 @@ export function renderDlpMarkdown(dlp: DailyLessonPlan): string {
       : []),
     ...(dlp.sourceDllId
       ? [`- **Derived From:** ${dlp.sourceDllId} (Session ${dlp.sourceSessionNumber})`]
+      : []),
+    ...(dlp.aiDeclaration?.trim()
+      ? [`- **Declaration of AI Use:** ${dlp.aiDeclaration.trim()}`]
       : []),
     "",
     "## Intentions",

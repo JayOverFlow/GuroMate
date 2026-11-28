@@ -1,10 +1,12 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createGuroMateEngine } from "../engine/createGuroMateEngine";
+import { extractTableCellTexts } from "../engine/dllDocx";
+import { readZipEntry } from "../engine/zip";
 import { createGuroMateMiddleware } from "./guroMateVitePlugin";
 
 describe("guroMateVitePlugin HTTP middleware", () => {
@@ -1078,9 +1080,6 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     expect(capturedPrompts[1]).toContain("120 minutes (2 hrs)");
     expect(capturedPrompts[1]).toContain("Check grounding wrist strap");
 
-    const { readZipEntry } = await import("../engine/zip");
-    const { extractTableCellTexts } = await import("../engine/dllDocx");
-
     const dllDocxRes = await fetch(`${baseUrl}/api/dlls/${encodeURIComponent(createdDll.id)}/docx`);
     const dllDocXml = readZipEntry(Buffer.from(await dllDocxRes.arrayBuffer()), "word/document.xml").toString("utf8");
     const dllTables = extractTableCellTexts(dllDocXml);
@@ -1099,5 +1098,251 @@ describe("guroMateVitePlugin HTTP middleware", () => {
     expect(dlpTables[4]![3]![2]).toBe("");
     expect(dlpDocXml).not.toContain("Check grounding wrist strap");
     expect(dlpDocXml).not.toContain("Extra troubleshooting cue.");
+  });
+
+  it("auto-populates DO 003 Annex A Declaration of AI Use with active AI model info, persists per-lesson edits, preserves legacy compatibility, and injects exact Table 0 Row 7 Col 1 XML cells over HTTP", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "guromate-http-do003-"));
+    tempDirs.push(dataDir);
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: {
+        async generateText(req) {
+          if (req.prompt.includes("Daily Lesson Log (DLL)")) {
+            return {
+              text: JSON.stringify({
+                lessonTitle: "DO 003 HTTP DLL",
+                references: "MATATAG TLE 7 CG",
+                sessions: [1, 2, 3, 4, 5].map((n) => ({
+                  sessionNumber: n,
+                  learningObjectives: `• Objective ${n}`,
+                  preLesson: `Pre ${n}`,
+                  lessonFlow: `Flow ${n}`,
+                  learningResources: `• Resource ${n}`,
+                  integrationAndContextualization: `Integration ${n}`,
+                  formativeAssessment: `Assessment ${n}`,
+                  extendedLearningOpportunities: `Extended ${n}`,
+                })),
+              }),
+              model: req.settings.modelId,
+            };
+          }
+          return {
+            text: JSON.stringify({
+              lessonTitle: "DO 003 HTTP DLP",
+              references: "MATATAG TLE 7 CG",
+              learningObjectives: "• Identify safe workplace habits.",
+              preLesson: { teacherActivity: "T Pre", studentActivity: "S Pre" },
+              lessonFlow: { teacherActivity: "T Flow", studentActivity: "S Flow" },
+              learningResources: { teacherActivity: "T Res", studentActivity: "S Res" },
+              integrationAndContextualization: { teacherActivity: "T Int", studentActivity: "" },
+              formativeAssessment: { teacherActivity: "T Ass", studentActivity: "S Ass" },
+              extendedLearningOpportunities: { teacherActivity: "T Ext", studentActivity: "" },
+            }),
+            model: req.settings.modelId,
+          };
+        },
+      },
+    });
+    const middleware = createGuroMateMiddleware(engine);
+    const server = createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 404;
+        res.end("Not Found");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    // Configure active OpenRouter provider & model via HTTP
+    const settingsRes = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ai: {
+          aiProvider: "openrouter",
+          apiKey: "or-key",
+          baseUrl: "https://openrouter.ai/api/v1",
+          modelId: "google/gemini-2.5-flash",
+        },
+      }),
+    });
+    expect(settingsRes.status).toBe(200);
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+
+    // 1. Generate DLL and verify auto-populated DO 003 Annex A declaration + .docx XML cell
+    const dllGenRes = await fetch(`${baseUrl}/api/dlls/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gradeAndSection: "Grade 7 - Rizal",
+        sessions: [1, 2, 3, 4, 5].map((n) => ({
+          sessionNumber: n,
+          mode: "instructional",
+          competencyIds: [ict.id],
+        })),
+      }),
+    });
+    expect(dllGenRes.status).toBe(201);
+    const createdDll = (await dllGenRes.json()) as {
+      id: string;
+      aiDeclaration?: string;
+    };
+    expect(createdDll.aiDeclaration).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(createdDll.aiDeclaration).toMatch(/Annex A/i);
+    expect(createdDll.aiDeclaration).toContain("OpenRouter (google/gemini-2.5-flash)");
+    expect(createdDll.aiDeclaration).toMatch(/auxiliary/i);
+    expect(createdDll.aiDeclaration).toMatch(/review|validat/i);
+    expect(createdDll.aiDeclaration).toMatch(/no confidential learner/i);
+
+    const dllAutoDocxRes = await fetch(
+      `${baseUrl}/api/dlls/${encodeURIComponent(createdDll.id)}/docx`,
+    );
+    expect(dllAutoDocxRes.status).toBe(200);
+    const dllAutoTables = extractTableCellTexts(
+      readZipEntry(
+        Buffer.from(await dllAutoDocxRes.arrayBuffer()),
+        "word/document.xml",
+      ).toString("utf8"),
+    );
+    expect(dllAutoTables[0]![7]![1]).toBe(createdDll.aiDeclaration);
+
+    // 2. Edit per-lesson DLL declaration via PUT and verify updated .docx Table 0 Row 7 Col 1
+    const editedDllDecl =
+      "Declaration of AI Use (DO 003, s. 2026 Annex A): Edited DLL declaration citing OpenRouter (google/gemini-2.5-flash); teacher-validated with no learner PII.";
+    const dllPutRes = await fetch(
+      `${baseUrl}/api/dlls/${encodeURIComponent(createdDll.id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...createdDll,
+          aiDeclaration: editedDllDecl,
+        }),
+      },
+    );
+    expect(dllPutRes.status).toBe(200);
+    const updatedDll = (await dllPutRes.json()) as { aiDeclaration?: string };
+    expect(updatedDll.aiDeclaration).toBe(editedDllDecl);
+
+    const dllEditedDocxRes = await fetch(
+      `${baseUrl}/api/dlls/${encodeURIComponent(createdDll.id)}/docx`,
+    );
+    const dllEditedTables = extractTableCellTexts(
+      readZipEntry(
+        Buffer.from(await dllEditedDocxRes.arrayBuffer()),
+        "word/document.xml",
+      ).toString("utf8"),
+    );
+    expect(dllEditedTables[0]![7]![1]).toBe(editedDllDecl);
+
+    // 3. Generate DLP, verify auto-populated DO 003 Annex A declaration, edit via PUT, verify .docx cell
+    const dlpGenRes = await fetch(`${baseUrl}/api/dlps/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "scratch",
+        gradeAndSection: "Grade 7 - Rizal",
+        competencyIds: [ict.id],
+      }),
+    });
+    expect(dlpGenRes.status).toBe(201);
+    const createdDlp = (await dlpGenRes.json()) as {
+      id: string;
+      aiDeclaration?: string;
+    };
+    expect(createdDlp.aiDeclaration).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(createdDlp.aiDeclaration).toContain("OpenRouter (google/gemini-2.5-flash)");
+
+    const editedDlpDecl =
+      "Declaration of AI Use (DO 003, s. 2026 Annex A): Edited DLP declaration citing OpenRouter (google/gemini-2.5-flash); teacher-validated with no learner PII.";
+    const dlpPutRes = await fetch(
+      `${baseUrl}/api/dlps/${encodeURIComponent(createdDlp.id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...createdDlp,
+          aiDeclaration: editedDlpDecl,
+        }),
+      },
+    );
+    expect(dlpPutRes.status).toBe(200);
+    expect(await dlpPutRes.json()).toMatchObject({ aiDeclaration: editedDlpDecl });
+
+    const dlpEditedDocxRes = await fetch(
+      `${baseUrl}/api/dlps/${encodeURIComponent(createdDlp.id)}/docx`,
+    );
+    const dlpEditedTables = extractTableCellTexts(
+      readZipEntry(
+        Buffer.from(await dlpEditedDocxRes.arrayBuffer()),
+        "word/document.xml",
+      ).toString("utf8"),
+    );
+    expect(dlpEditedTables[0]![7]![1]).toBe(editedDlpDecl);
+
+    // 4. Backward compatibility: legacy saved DLL & DLP lacking aiDeclaration + legacy settings.json fallback
+    const legacyDll = { ...createdDll, id: "dll-legacy-http" };
+    delete legacyDll.aiDeclaration;
+    const legacyDlp = { ...createdDlp, id: "dlp-legacy-http" };
+    delete legacyDlp.aiDeclaration;
+    await writeFile(
+      path.join(dataDir, "dlls.json"),
+      JSON.stringify([legacyDll], null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(dataDir, "dlps.json"),
+      JSON.stringify([legacyDlp], null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(dataDir, "settings.json"),
+      JSON.stringify(
+        {
+          profile: {
+            studentTeacherName: "LEGACY USER",
+            aiDeclaration:
+              "This lesson plan was developed using AI and subsequently reviewed for accuracy and alignment with curriculum standards.",
+          },
+          ai: {
+            aiProvider: "openrouter",
+            apiKey: "or-key",
+            baseUrl: "https://openrouter.ai/api/v1",
+            modelId: "google/gemini-2.5-flash",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const legacyDllDocxRes = await fetch(`${baseUrl}/api/dlls/dll-legacy-http/docx`);
+    expect(legacyDllDocxRes.status).toBe(200);
+    const legacyDllTables = extractTableCellTexts(
+      readZipEntry(
+        Buffer.from(await legacyDllDocxRes.arrayBuffer()),
+        "word/document.xml",
+      ).toString("utf8"),
+    );
+    expect(legacyDllTables[0]![7]![1]).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(legacyDllTables[0]![7]![1]).toContain("OpenRouter (google/gemini-2.5-flash)");
+    expect(legacyDllTables[0]![7]![1]).not.toContain("{aiTool}");
+
+    const legacyDlpDocxRes = await fetch(`${baseUrl}/api/dlps/dlp-legacy-http/docx`);
+    expect(legacyDlpDocxRes.status).toBe(200);
+    const legacyDlpTables = extractTableCellTexts(
+      readZipEntry(
+        Buffer.from(await legacyDlpDocxRes.arrayBuffer()),
+        "word/document.xml",
+      ).toString("utf8"),
+    );
+    expect(legacyDlpTables[0]![7]![1]).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(legacyDlpTables[0]![7]![1]).toContain("OpenRouter (google/gemini-2.5-flash)");
+    expect(legacyDlpTables[0]![7]![1]).not.toContain("{aiTool}");
   });
 });

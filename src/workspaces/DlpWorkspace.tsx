@@ -873,6 +873,33 @@ export function DlpWorkspace({
                     </div>
                   </div>
 
+                  <div className="flex flex-col gap-gutter-xs">
+                    <label
+                      htmlFor={`${baseId}-edit-ai-declaration`}
+                      className="font-label text-label-md text-on-surface"
+                    >
+                      Declaration of AI Use (DO 003, s. 2026 Annex A)
+                    </label>
+                    <span
+                      id={`${baseId}-edit-ai-declaration-hint`}
+                      className="font-body text-body-sm text-on-surface-variant"
+                    >
+                      Injected into the official ILAW header on .docx export.
+                      Leave blank to fall back to your Settings default.
+                    </span>
+                    <textarea
+                      id={`${baseId}-edit-ai-declaration`}
+                      rows={2}
+                      value={draftDlp.aiDeclaration ?? ""}
+                      placeholder="Auto-populated on generation; leave blank to use your Settings DO 003, s. 2026 Annex A default."
+                      aria-describedby={`${baseId}-edit-ai-declaration-hint`}
+                      onChange={(e) =>
+                        updateDraftHeader("aiDeclaration", e.target.value)
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter-md">
                     {DLP_INTENTIONS_LIST_FIELDS.map((field) => (
                       <div key={field.key} className="flex flex-col gap-gutter-xs">

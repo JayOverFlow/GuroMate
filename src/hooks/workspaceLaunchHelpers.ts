@@ -283,6 +283,7 @@ function serializeDllEditableState(dll: DailyLessonLog): string {
     gradeAndSection: dll.gradeAndSection,
     references: dll.references,
     classroomContext: dll.classroomContext ?? null,
+    aiDeclaration: dll.aiDeclaration ?? "",
     promptNotes: dll.promptNotes,
     intentions: {
       learningCompetencies: dll.intentions.learningCompetencies,
@@ -323,6 +324,7 @@ function serializeDlpEditableState(dlp: DailyLessonPlan): string {
     gradeAndSection: dlp.gradeAndSection,
     references: dlp.references,
     classroomContext: dlp.classroomContext ?? null,
+    aiDeclaration: dlp.aiDeclaration ?? "",
     promptNotes: dlp.promptNotes,
     intentions: {
       learningCompetencies: dlp.intentions.learningCompetencies,

@@ -1,4 +1,9 @@
-import type { DailyLessonLog, TeacherProfileSettings } from "./types";
+import { resolveExportAiDeclaration } from "./lessonHelpers";
+import type {
+  AiProviderSettings,
+  DailyLessonLog,
+  TeacherProfileSettings,
+} from "./types";
 
 interface Span {
   start: number;
@@ -206,7 +211,13 @@ export function injectDllIntoDocumentXml(
   documentXml: string,
   dll: DailyLessonLog,
   profile: TeacherProfileSettings,
+  aiSettings?: AiProviderSettings,
 ): string {
+  const aiDeclaration = resolveExportAiDeclaration(
+    dll.aiDeclaration,
+    profile,
+    aiSettings,
+  );
   const tableUpdates: Array<Map<string, (tc: string) => string>> = [
     // Table 0: Header metadata
     new Map([
@@ -217,7 +228,7 @@ export function injectDllIntoDocumentXml(
       ["4:1", (tc) => replaceCellText(tc, dll.gradeAndSection)],
       ["5:1", (tc) => replaceCellText(tc, "5")],
       ["6:1", (tc) => replaceCellText(tc, dll.references)],
-      ["7:1", (tc) => replaceCellText(tc, profile.aiDeclaration)],
+      ["7:1", (tc) => replaceCellText(tc, aiDeclaration)],
     ]),
     // Table 1: Intentions (Standards, per-session Learning Objectives, blank Learner Context)
     new Map([

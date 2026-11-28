@@ -242,6 +242,7 @@ export interface DailyLessonLog {
   references: string;
   classroomContext?: ClassroomContext;
   referenceMaterial?: ReferenceMaterial;
+  aiDeclaration?: string;
   promptNotes: string;
   intentions: DllIntentions;
   sessions: [
@@ -296,6 +297,7 @@ export interface DailyLessonPlan {
   references: string;
   classroomContext?: ClassroomContext;
   referenceMaterial?: ReferenceMaterial;
+  aiDeclaration?: string;
   promptNotes: string;
   intentions: DlpIntentions;
   preLesson: DlpActivityPair;

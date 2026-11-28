@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -713,7 +713,6 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(docXml).not.toContain("Shop / Workshop");
 
     // Backward compatibility: legacy saved DLL record lacking classroomContext still loads, saves, and exports cleanly
-    const { writeFile } = await import("node:fs/promises");
     const legacyRecord = { ...edited };
     delete legacyRecord.classroomContext;
     delete legacyRecord.referenceMaterial;
@@ -731,5 +730,115 @@ describe("GuroMateEngine Daily Lesson Log (DLL)", () => {
     expect(savedLegacy.classroomContext).toBeUndefined();
     const legacyDocx = await engine2.exportDllDocx(savedLegacy.id);
     expect(legacyDocx.buffer.subarray(0, 2).toString("ascii")).toBe("PK");
+  });
+
+  it("auto-populates DO 003 Annex A Declaration of AI Use on generated DLLs, persists per-lesson edits across Markdown and .docx, and falls back cleanly for legacy saved DLLs", async () => {
+    const dataDir = await makeTempDir();
+    const fakeAdapter: AiProviderAdapter = {
+      async generateText() {
+        return {
+          text: JSON.stringify({
+            lessonTitle: "DO 003 AI Declaration DLL",
+            references: "MATATAG TLE 7 CG",
+            sessions: [1, 2, 3, 4, 5].map((n) => ({
+              sessionNumber: n,
+              learningObjectives: `• Objective ${n}`,
+              preLesson: `Pre-Lesson ${n}`,
+              lessonFlow: `Lesson Flow ${n}`,
+              learningResources: `• Resource ${n}`,
+              integrationAndContextualization: `Integration ${n}`,
+              formativeAssessment: `Assessment ${n}`,
+              extendedLearningOpportunities: `Extended ${n}`,
+            })),
+          }),
+          model: "gemini-2.5-flash",
+        };
+      },
+    };
+
+    const engine = createGuroMateEngine({
+      dataDir,
+      templatesDir: process.cwd(),
+      aiAdapter: fakeAdapter,
+    });
+
+    await engine.saveSettings({
+      ai: {
+        aiProvider: "gemini",
+        apiKey: "gem-test-key",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        modelId: "gemini-2.5-flash",
+      },
+    });
+
+    const ict = (await engine.listCurriculum({ gradeLevel: 7, component: "ICT" }))[0]!;
+    const created = await engine.generateDll({
+      gradeAndSection: "Grade 7 - Rizal",
+      sessions: [1, 2, 3, 4, 5].map((n) => ({
+        sessionNumber: n as 1 | 2 | 3 | 4 | 5,
+        mode: "instructional" as const,
+        competencyIds: [ict.id],
+      })),
+    });
+
+    expect(created.aiDeclaration).toBeDefined();
+    expect(created.aiDeclaration).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(created.aiDeclaration).toMatch(/Annex A/i);
+    expect(created.aiDeclaration).toContain("Google Gemini (gemini-2.5-flash)");
+    expect(created.aiDeclaration).toMatch(/auxiliary/i);
+    expect(created.aiDeclaration).toMatch(/review|validat/i);
+    expect(created.aiDeclaration).toMatch(/no confidential learner/i);
+    expect(created.aiDeclaration).not.toContain("{aiTool}");
+
+    const generatedMd = await readFile(
+      path.join(dataDir, "dlls", `${created.id}.md`),
+      "utf8",
+    );
+    expect(generatedMd).toContain(`- **Declaration of AI Use:** ${created.aiDeclaration}`);
+
+    const customDeclaration =
+      "Declaration of AI Use (DO 003, s. 2026 Annex A): Drafted with Google Gemini (gemini-2.5-flash) and verified by teacher for Grade 7 ICT; zero learner PII shared.";
+    const edited = await engine.saveDll({
+      ...created,
+      aiDeclaration: `  ${customDeclaration}  `,
+    });
+    expect(edited.aiDeclaration).toBe(customDeclaration);
+
+    const editedMd = await readFile(
+      path.join(dataDir, "dlls", `${created.id}.md`),
+      "utf8",
+    );
+    expect(editedMd).toContain(`- **Declaration of AI Use:** ${customDeclaration}`);
+
+    const { readZipEntry } = await import("./zip");
+    const { extractTableCellTexts } = await import("./dllDocx");
+
+    const editedDocx = await engine.exportDllDocx(created.id);
+    const editedTables = extractTableCellTexts(
+      readZipEntry(editedDocx.buffer, "word/document.xml").toString("utf8"),
+    );
+    expect(editedTables[0]![7]![1]).toBe(customDeclaration);
+
+    // Legacy saved DLL without aiDeclaration falls back cleanly to DO 003 Annex A template with active AI tool
+    const legacyDll: Omit<DailyLessonLog, "aiDeclaration"> = {
+      ...created,
+      id: "dll-legacy-1",
+      lessonTitle: "Legacy Saved DLL",
+    };
+    delete (legacyDll as Partial<DailyLessonLog>).aiDeclaration;
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "dlls.json"),
+      JSON.stringify([legacyDll], null, 2),
+      "utf8",
+    );
+
+    const legacyDocx = await engine.exportDllDocx("dll-legacy-1");
+    const legacyTables = extractTableCellTexts(
+      readZipEntry(legacyDocx.buffer, "word/document.xml").toString("utf8"),
+    );
+    expect(legacyTables[0]![7]![1]).toMatch(/DepEd Order No\.\s*003,\s*s\.\s*2026/i);
+    expect(legacyTables[0]![7]![1]).toContain("Google Gemini (gemini-2.5-flash)");
+    expect(legacyTables[0]![7]![1]).not.toContain("{aiTool}");
   });
 });

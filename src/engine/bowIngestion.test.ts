@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeCatalogHealthReport,
+  formatCatalogHealthReport,
   mapGrade12TechProCluster,
   mergeBowIntoCatalog,
   normalizeBowTerm,
@@ -78,6 +80,53 @@ describe("mapGrade12TechProCluster", () => {
         "Maritime Transportation at the Support Level",
       ),
     ).toBe("IA");
+  });
+
+  it("maps Grade 12 Tech-Pro Agriculture and Fishery Arts (AFA) cluster names onto AFA without hijacking Hospitality FCS electives", () => {
+    expect(
+      mapGrade12TechProCluster(
+        "AGRICULTURE AND FISHERY ARTS",
+        "Agricultural Crops Production",
+      ),
+    ).toBe("AFA");
+    expect(
+      mapGrade12TechProCluster(
+        "AGRI-FISHERY ARTS",
+        "Aquaculture",
+      ),
+    ).toBe("AFA");
+    expect(
+      mapGrade12TechProCluster(
+        "AGRICULTURAL PRODUCTION TECHNOLOGIES",
+        "Animal Production (Poultry-Chicken)",
+      ),
+    ).toBe("AFA");
+    expect(
+      mapGrade12TechProCluster(
+        "FISHERIES AND AQUACULTURE",
+        "Fish Processing",
+      ),
+    ).toBe("AFA");
+    expect(
+      mapGrade12TechProCluster(
+        "AGRI-FISHERY AND FOOD PROCESSING",
+        "Food Processing",
+      ),
+    ).toBe("AFA");
+
+    // Hospitality & Tourism food electives remain FCS
+    expect(
+      mapGrade12TechProCluster(
+        "HOSPITALITY AND TOURISM",
+        "Food and Beverage Operations",
+      ),
+    ).toBe("FCS");
+    expect(
+      mapGrade12TechProCluster(
+        "HOSPITALITY AND TOURISM",
+        "Kitchen Operations",
+      ),
+    ).toBe("FCS");
   });
 });
 
@@ -294,6 +343,51 @@ describe("parseBowDocument — Grade 8 and Grade 9-10", () => {
       weekRange: "6",
       learningCompetency: "Discuss the principles of food preparation.",
     });
+  });
+
+  it("extracts Grade 8 ICT Suggested Performance Tasks cleanly when bullet starts at column 25 on the Suggested label line", () => {
+    const text = [
+      "                                 TECHNOLOGY AND LIVELIHOOD EDUCATION",
+      "                                                 ICT",
+      "                                               Grade 8",
+      "",
+      "                                                  Second Term",
+      "",
+      "Performance Standard    The learners create videos with graphics design in a safe and responsible manner.",
+      "",
+      "  Content Standard         ●\u200b Demonstrate an understanding of graphic design tools.",
+      "",
+      "  Week                    Learning Competency                                    Suggested Activities",
+      "",
+      "            Information and Communications Technology          ●\u200b Show & Tell: Solo Edition",
+      "               ●\u200b Presentation, Reflection and Critique             ○\u200b Present and reflect on personal graphic",
+      "   10                                                                  design projects.",
+      "",
+      "     Suggested           ●\u200b Individual Performance Task: My Digital Creation",
+      "",
+      "                                                                                                     Page 11 of 18",
+      "\fBudget of Work       Grade 8 | TLE: ICT",
+      "",
+      " Performance Tasks            ○\u200b Apply learned graphic design tools and techniques.",
+      "                         ●\u200b Group Performance Task: Team Design Showcase",
+      "                              ○\u200b Collaboratively produce a cohesive graphic project.",
+    ].join("\n");
+
+    const rows = parseBowDocument({
+      relativePath: "Grade 8/[G8] TLE_ ICT.pdf",
+      text,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.learningCompetency).toBe(
+      "Presentation, Reflection and Critique",
+    );
+    expect(rows[0]?.suggestedPerformanceTasks).toContain(
+      "Individual Performance Task: My Digital Creation",
+    );
+    expect(rows[0]?.suggestedPerformanceTasks).toContain(
+      "Group Performance Task: Team Design Showcase",
+    );
   });
 
   it("parses Grade 9-10 One-Term sector layout with Sector metadata and Suggested Activities", () => {
@@ -845,5 +939,424 @@ describe("mergeBowIntoCatalog", () => {
       (c) => c.id === "custom-teacher-01",
     );
     expect(customItem).toEqual(customWithBow);
+  });
+
+  it("rolls Grade 8 ICT multi-week sub-topic unpacking rows onto their parent CG competency without creating standalone duplicates while preserving genuinely unmatched competencies", () => {
+    const g8Cg: CurriculumCompetency[] = [
+      {
+        id: "cg-g8-ict-q1-05",
+        source: "built-in",
+        gradeLevels: [8],
+        quarters: [1],
+        quarterLabel: "Quarter I",
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        contentTopic: "Software Applications",
+        contentSubTopics: ["application software", "system software"],
+        contentStandard: "Demonstrate an understanding of software applications.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        competencyNumber: 5,
+        learningCompetency:
+          "familiarize themselves with appropriate software applications for specific tasks",
+      },
+      {
+        id: "cg-g8-ict-q1-06",
+        source: "built-in",
+        gradeLevels: [8],
+        quarters: [1],
+        quarterLabel: "Quarter I",
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        contentTopic: "Graphic Design Software",
+        contentSubTopics: ["software"],
+        contentStandard: "Demonstrate an understanding of graphic design tools.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        competencyNumber: 6,
+        learningCompetency:
+          "utilize graphic design tools for graphic production",
+      },
+    ];
+
+    const g8BowRows: ParsedBowRow[] = [
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "First Term",
+        weekRange: "6",
+        contentTopic: "First Term",
+        contentStandard: "Demonstrate an understanding of software applications.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency:
+          "Familiarize themselves with appropriate software applications for specific tasks.",
+        suggestedActivities: "- Software Explorer",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Ultimate Software Portfolio",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "First Term",
+        weekRange: "6",
+        contentTopic: "First Term",
+        contentStandard: "Demonstrate an understanding of software applications.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency: "Introduction to software.",
+        suggestedActivities: "- Software Explorer",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Ultimate Software Portfolio",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "First Term",
+        weekRange: "7",
+        contentTopic: "First Term",
+        contentStandard: "Demonstrate an understanding of software applications.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency: "System Software",
+        suggestedActivities: "- OS Detective",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Ultimate Software Portfolio",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "First Term",
+        weekRange: "8",
+        contentTopic: "First Term",
+        contentStandard: "Demonstrate an understanding of software applications.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency: "Application Software",
+        suggestedActivities: "- App Hunt",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Ultimate Software Portfolio",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "Second Term",
+        weekRange: "1",
+        contentTopic: "Second Term",
+        contentStandard: "Demonstrate an understanding of graphic design tools.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency:
+          "Utilize graphic design tools for graphic production.",
+        suggestedActivities: "- Design Detective",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Digital Creation",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "Second Term",
+        weekRange: "1",
+        contentTopic: "Second Term",
+        contentStandard: "Demonstrate an understanding of graphic design tools.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency: "Introduction to Graphic Design.",
+        suggestedActivities: "- Design Detective",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Digital Creation",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "Second Term",
+        weekRange: "2",
+        contentTopic: "Second Term",
+        contentStandard: "Demonstrate an understanding of graphic design tools.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency: "Working with text and typography.",
+        suggestedActivities: "- Typography Explorer",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Digital Creation",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+      {
+        gradeLevels: [8],
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        term: "Second Term",
+        weekRange: "3",
+        contentTopic: "Second Term",
+        contentStandard: "Demonstrate an understanding of graphic design tools.",
+        performanceStandard:
+          "The learners create videos with graphics design in a safe and responsible manner.",
+        learningCompetency: "Analyze emerging AI ethics in design.",
+        suggestedActivities: "- Ethics Debate",
+        suggestedPerformanceTasks: "- Individual Performance Task: My Digital Creation",
+        sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+      },
+    ];
+
+    const firstPass = mergeBowIntoCatalog(g8Cg, g8BowRows);
+
+    expect(firstPass.stats.matchedCgCount).toBe(2);
+    expect(firstPass.stats.standaloneAddedCount).toBe(1);
+    expect(firstPass.catalog).toHaveLength(3);
+
+    const q105 = firstPass.catalog.find((c) => c.id === "cg-g8-ict-q1-05");
+    expect(q105?.budgetOfWork?.weekRange).toBe("6 to 8");
+    expect(q105?.budgetOfWork?.suggestedActivities).toBe(
+      "- Software Explorer\n- OS Detective\n- App Hunt",
+    );
+    expect(q105?.contentSubTopics).toEqual([
+      "application software",
+      "system software",
+      "Introduction to software",
+    ]);
+
+    const q106 = firstPass.catalog.find((c) => c.id === "cg-g8-ict-q1-06");
+    expect(q106?.budgetOfWork?.weekRange).toBe("1 to 2");
+    expect(q106?.budgetOfWork?.suggestedActivities).toBe(
+      "- Design Detective\n- Typography Explorer",
+    );
+    expect(q106?.contentSubTopics).toEqual([
+      "software",
+      "Introduction to Graphic Design",
+      "Working with text and typography",
+    ]);
+
+    const standalone = firstPass.catalog.find((c) => c.id.startsWith("bow-"));
+    expect(standalone?.learningCompetency).toBe(
+      "Analyze emerging AI ethics in design.",
+    );
+
+    const secondPass = mergeBowIntoCatalog(firstPass.catalog, g8BowRows);
+    expect(secondPass.catalog).toEqual(firstPass.catalog);
+    expect(secondPass.stats).toEqual(firstPass.stats);
+  });
+});
+
+describe("catalog health report", () => {
+  it("computes deterministic counts and sorted affected documents across built-in competencies while excluding custom entries and expected Grade 11-12 standalone rows", () => {
+    const sampleCatalog: CurriculumCompetency[] = [
+      // Healthy matched Grade 7 CG item
+      {
+        id: "cg-g7-ict-q1-01",
+        source: "built-in",
+        gradeLevels: [7],
+        quarters: [1],
+        quarterLabel: "Quarter I",
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        contentTopic: "Sectors of ICT",
+        contentSubTopics: [],
+        contentStandard: "Demonstrate an understanding of ICT sectors.",
+        performanceStandard: "Convert number systems.",
+        competencyNumber: 1,
+        learningCompetency: "Analyze the various sectors of ICT.",
+        budgetOfWork: {
+          term: "First Term",
+          weekRange: "1 to 3",
+          suggestedActivities: "- ICT Sector Research Map",
+          suggestedPerformanceTasks: "- Binary Conversion Challenge",
+          sourceDocument: "Grade 7/[G7] TLE_ ICT.pdf",
+        },
+      },
+      // Grade 12 item missing CS, PS, Suggested Activities, and Suggested Performance Tasks (expected Grade 12 standalone -> NOT unmatched)
+      {
+        id: "bow-g12-ict-dotnet-one-term-01",
+        source: "built-in",
+        gradeLevels: [12],
+        quarters: [],
+        quarterLabel: "One-Term",
+        component: "ICT",
+        sector: "Computer Programming (.Net Technology)",
+        sectorDescription: "ICT SUPPORT AND COMPUTER PROGRAMMING TECHNOLOGIES",
+        contentTopic: "Computer Programming (.Net Technology)",
+        contentSubTopics: [],
+        contentStandard: "",
+        performanceStandard: "   ",
+        competencyNumber: 1,
+        learningCompetency: "Build a .Net console application.",
+        budgetOfWork: {
+          term: "One-Term",
+          weekRange: "1",
+          suggestedActivities: "",
+          suggestedPerformanceTasks: "",
+          sourceDocument: "Grade 12/[G12] Computer Programming (.Net Technology).pdf",
+        },
+      },
+      // Grade 11 SHS Core item with standards, empty activities/tasks (expected Grade 11 standalone -> NOT unmatched)
+      {
+        id: "bow-g11-shs-core-general-mathematics-first-term-01",
+        source: "built-in",
+        gradeLevels: [11],
+        quarters: [],
+        quarterLabel: "First Term",
+        component: "SHS_CORE",
+        sector: "General Mathematics",
+        sectorDescription: null,
+        contentTopic: "Number and Algebra",
+        contentSubTopics: [],
+        contentStandard: "Knowledge of business and finance.",
+        performanceStandard: "Prepare accurate payrolls.",
+        competencyNumber: 1,
+        learningCompetency: "Calculate weekly wages.",
+        budgetOfWork: {
+          term: "First Term",
+          weekRange: "1",
+          suggestedActivities: "",
+          suggestedPerformanceTasks: "",
+          sourceDocument: "Grade 11/[G11] General Mathematics.pdf",
+        },
+      },
+      // Unmatched Grade 8 standalone BoW row with activities but missing performance tasks and missing PS
+      {
+        id: "bow-g8-ict-general-second-term-01",
+        source: "built-in",
+        gradeLevels: [8],
+        quarters: [],
+        quarterLabel: "Second Term",
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        contentTopic: "Second Term",
+        contentSubTopics: [],
+        contentStandard: "Demonstrate an understanding of graphic design.",
+        performanceStandard: "",
+        competencyNumber: 1,
+        learningCompetency: "Analyze emerging AI ethics in design.",
+        budgetOfWork: {
+          term: "Second Term",
+          weekRange: "3",
+          suggestedActivities: "- Ethics Debate",
+          suggestedPerformanceTasks: "",
+          sourceDocument: "Grade 8/[G8] TLE_ ICT.pdf",
+        },
+      },
+      // Custom teacher competency missing fields -> must be ignored by built-in health report
+      {
+        id: "custom-teacher-01",
+        source: "custom",
+        gradeLevels: [8],
+        quarters: [1],
+        quarterLabel: "Quarter I",
+        component: "ICT",
+        sector: null,
+        sectorDescription: null,
+        contentTopic: "Custom",
+        contentSubTopics: [],
+        contentStandard: "",
+        performanceStandard: "",
+        competencyNumber: null,
+        learningCompetency: "Teacher custom competency",
+      },
+    ];
+
+    const report = computeCatalogHealthReport(sampleCatalog);
+
+    expect(report).toEqual({
+      totalBuiltIn: 4,
+      missingContentStandard: {
+        count: 1,
+        documents: [
+          {
+            document: "Grade 12/[G12] Computer Programming (.Net Technology).pdf",
+            count: 1,
+          },
+        ],
+      },
+      missingPerformanceStandard: {
+        count: 2,
+        documents: [
+          {
+            document: "Grade 12/[G12] Computer Programming (.Net Technology).pdf",
+            count: 1,
+          },
+          {
+            document: "Grade 8/[G8] TLE_ ICT.pdf",
+            count: 1,
+          },
+        ],
+      },
+      emptySuggestedActivities: {
+        count: 2,
+        documents: [
+          {
+            document: "Grade 11/[G11] General Mathematics.pdf",
+            count: 1,
+          },
+          {
+            document: "Grade 12/[G12] Computer Programming (.Net Technology).pdf",
+            count: 1,
+          },
+        ],
+      },
+      emptySuggestedPerformanceTasks: {
+        count: 3,
+        documents: [
+          {
+            document: "Grade 11/[G11] General Mathematics.pdf",
+            count: 1,
+          },
+          {
+            document: "Grade 12/[G12] Computer Programming (.Net Technology).pdf",
+            count: 1,
+          },
+          {
+            document: "Grade 8/[G8] TLE_ ICT.pdf",
+            count: 1,
+          },
+        ],
+      },
+      unmatchedBowRows: {
+        count: 1,
+        documents: [
+          {
+            document: "Grade 8/[G8] TLE_ ICT.pdf",
+            count: 1,
+          },
+        ],
+      },
+    });
+
+    const formatted = formatCatalogHealthReport(report);
+    expect(formatted).toContain("Catalog Health Report (4 built-in competencies):");
+    expect(formatted).toContain("Missing Content Standard: 1 across 1 document");
+    expect(formatted).toContain(
+      "  - Grade 12/[G12] Computer Programming (.Net Technology).pdf (1)",
+    );
+    expect(formatted).toContain("Missing Performance Standard: 2 across 2 documents");
+    expect(formatted).toContain("Empty Suggested Activities: 2 across 2 documents");
+    expect(formatted).toContain("Empty Suggested Performance Tasks: 3 across 3 documents");
+    expect(formatted).toContain("Unmatched Grade 7-10 BoW Rows: 1 across 1 document");
+
+    // Clean report formatting when everything is zero
+    const cleanFormatted = formatCatalogHealthReport(
+      computeCatalogHealthReport([sampleCatalog[0]!]),
+    );
+    expect(cleanFormatted).toContain("Missing Content Standard: 0");
+    expect(cleanFormatted).toContain("Missing Performance Standard: 0");
+    expect(cleanFormatted).toContain("Empty Suggested Activities: 0");
+    expect(cleanFormatted).toContain("Empty Suggested Performance Tasks: 0");
+    expect(cleanFormatted).toContain("Unmatched Grade 7-10 BoW Rows: 0");
   });
 });

@@ -1,10 +1,17 @@
-import {
-  GRADE_LEVELS,
-  TLE_COMPONENTS,
-  type CurriculumCompetency,
-  type GradeLevel,
-  type TleComponent,
+import type {
+  CurriculumCompetency,
+  GradeLevel,
+  TleComponent,
 } from "./types";
+
+const GRADE_LEVELS: readonly GradeLevel[] = [7, 8, 9, 10, 11, 12];
+const TLE_COMPONENTS: readonly TleComponent[] = [
+  "ICT",
+  "AFA",
+  "FCS",
+  "IA",
+  "SHS_CORE",
+];
 
 export interface GradeCoverageRow {
   gradeLevel: GradeLevel;

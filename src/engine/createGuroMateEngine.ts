@@ -42,6 +42,8 @@ import {
 import { injectDllIntoDocumentXml } from "./dllDocx";
 import { injectDlpIntoDocumentXml } from "./dlpDocx";
 import {
+  composeAiDeclaration,
+  DEFAULT_AI_DECLARATION_TEMPLATE,
   formatLearningAreas,
   normalizeClassroomContext,
   normalizeReferenceMaterial,
@@ -285,8 +287,7 @@ export const DEFAULT_SETTINGS: GuroMateSettings = {
     cooperatingTeacherName: "FERDINAND S. BALTAZAR",
     tleCoordinatorName: "LEA S. RESTA",
     academicHeadName: "NARIZA JANE M. TUMUNDONG",
-    aiDeclaration:
-      "This lesson plan was developed using AI and subsequently reviewed for accuracy and alignment with curriculum standards.",
+    aiDeclaration: DEFAULT_AI_DECLARATION_TEMPLATE,
   },
   ai: {
     aiProvider: "openai-compatible",
@@ -859,6 +860,11 @@ export function createGuroMateEngine(
       ),
       ...(classroomContext ? { classroomContext } : {}),
       ...(referenceMaterial ? { referenceMaterial } : {}),
+      aiDeclaration: composeAiDeclaration({
+        template: settings.profile.aiDeclaration,
+        aiSettings: settings.ai,
+        responseModel: aiResult.model,
+      }),
       promptNotes: input.promptNotes?.trim() ?? "",
       intentions: {
         learningCompetencies: resolved.learningCompetencies,
@@ -894,14 +900,18 @@ export function createGuroMateEngine(
     prefix: "DLL" | "DLP",
     id: string,
     lessonTitle: string,
-    inject: (docXml: string, profile: TeacherProfileSettings) => string,
+    inject: (
+      docXml: string,
+      profile: TeacherProfileSettings,
+      aiSettings: AiProviderSettings,
+    ) => string,
   ) {
     const settings = await getSettings();
     const templateBuf = await readFile(
       path.join(options.templatesDir, templateFilename),
     );
     const docXml = readZipEntry(templateBuf, "word/document.xml").toString("utf8");
-    const updatedXml = inject(docXml, settings.profile);
+    const updatedXml = inject(docXml, settings.profile, settings.ai);
     const buffer = replaceZipEntry(
       templateBuf,
       "word/document.xml",
@@ -920,7 +930,8 @@ export function createGuroMateEngine(
       "DLL",
       dll.id,
       dll.lessonTitle,
-      (docXml, profile) => injectDllIntoDocumentXml(docXml, dll, profile),
+      (docXml, profile, aiSettings) =>
+        injectDllIntoDocumentXml(docXml, dll, profile, aiSettings),
     );
   }
 
@@ -1003,6 +1014,11 @@ export function createGuroMateEngine(
       ),
       ...(classroomContext ? { classroomContext } : {}),
       ...(referenceMaterial ? { referenceMaterial } : {}),
+      aiDeclaration: composeAiDeclaration({
+        template: settings.profile.aiDeclaration,
+        aiSettings: settings.ai,
+        responseModel: aiResult.model,
+      }),
       promptNotes: input.promptNotes?.trim() ?? "",
       intentions: {
         learningCompetencies: resolved.learningCompetencies,
@@ -1038,7 +1054,8 @@ export function createGuroMateEngine(
       "DLP",
       dlp.id,
       dlp.lessonTitle,
-      (docXml, profile) => injectDlpIntoDocumentXml(docXml, dlp, profile),
+      (docXml, profile, aiSettings) =>
+        injectDlpIntoDocumentXml(docXml, dlp, profile, aiSettings),
     );
   }
 
