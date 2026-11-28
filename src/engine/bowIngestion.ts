@@ -31,7 +31,7 @@ export interface ParsedBowRow {
 
 /**
  * Maps a Grade 12 Technical-Professional (Tech-Pro) cluster and elective name
- * onto one of GuroMate's existing TLE Components (ICT, FCS, IA) per ADR-0003.
+ * onto one of GuroMate's existing TLE Components (ICT, AFA, FCS, IA) per ADR-0003.
  */
 export function mapGrade12TechProCluster(
   cluster: string,
@@ -72,6 +72,21 @@ export function mapGrade12TechProCluster(
     c.includes("industrial")
   ) {
     return "IA";
+  }
+
+  if (
+    c.includes("agri") ||
+    c.includes("fishery") ||
+    c.includes("fisheries") ||
+    c.includes("aquaculture") ||
+    c.includes("animal production") ||
+    c.includes("crop production") ||
+    c.includes("horticulture") ||
+    c.includes("forestry") ||
+    c.includes("food processing") ||
+    /\bafa\b/.test(c)
+  ) {
+    return "AFA";
   }
 
   throw new Error(
@@ -473,6 +488,9 @@ function splitThreeColLine(
   return { week: weekPart, lc: lcPart, act: actPart };
 }
 
+const PERF_TASK_LABEL_RE =
+  /^\s{0,16}(?:Suggested\s+Performance\s+Tasks?|Suggested|Performance\s+Tasks?)(?:\s{2,}(.*)|\s*)$/i;
+
 function parseTabularTerm(
   tableLines: string[],
   headerLine: string,
@@ -533,14 +551,7 @@ function parseTabularTerm(
 
   for (const rawBlock of rawBlocks) {
     // Detect Suggested Performance Tasks block (by left label OR Performance Task bullet header)
-    const hasPerfLabel = rawBlock.some((line) => {
-      const left = line.slice(0, 26).trim();
-      return (
-        /^Suggested$/i.test(left) ||
-        /^Performance\s+Tasks?$/i.test(left) ||
-        /^Suggested\s+Performance\s+Tasks?$/i.test(left)
-      );
-    });
+    const hasPerfLabel = rawBlock.some((line) => PERF_TASK_LABEL_RE.test(line));
     const hasPerfBullet = rawBlock.some((line) =>
       /^\s*[●•]\s*(?:Individual|Group)?\s*(?:Performance\s+Task|Task\s*-|Learning\s+Activity|Activity\s*:)/i.test(
         line,
@@ -551,12 +562,8 @@ function parseTabularTerm(
     if (inPerformanceTasks || hasPerfLabel || (!hasLeadingWeek && hasPerfBullet)) {
       inPerformanceTasks = true;
       for (const line of rawBlock) {
-        const left = line.slice(0, 24).trim();
-        const isLabelOnly =
-          /^Suggested$/i.test(left) ||
-          /^Performance\s+Tasks?$/i.test(left) ||
-          /^Suggested\s+Performance\s+Tasks?$/i.test(left);
-        const right = isLabelOnly ? line.slice(24).trim() : line.trim();
+        const labelMatch = line.match(PERF_TASK_LABEL_RE);
+        const right = labelMatch ? (labelMatch[1] ?? "").trim() : line.trim();
         if (right) perfTaskLines.push(right);
       }
       continue;
@@ -869,10 +876,160 @@ function buildBudgetOfWorkInfo(row: ParsedBowRow): BudgetOfWorkInfo {
   };
 }
 
+const COMPETENCY_ACTION_VERBS = new Set([
+  "analyze",
+  "apply",
+  "appreciate",
+  "assemble",
+  "assess",
+  "bake",
+  "calculate",
+  "check",
+  "cite",
+  "classify",
+  "clean",
+  "compare",
+  "compute",
+  "conceptualize",
+  "configure",
+  "construct",
+  "convert",
+  "cook",
+  "create",
+  "critique",
+  "cut",
+  "define",
+  "demonstrate",
+  "describe",
+  "design",
+  "determine",
+  "develop",
+  "differentiate",
+  "discuss",
+  "distinguish",
+  "draft",
+  "draw",
+  "embed",
+  "enumerate",
+  "evaluate",
+  "examine",
+  "execute",
+  "explain",
+  "explore",
+  "familiarize",
+  "follow",
+  "formulate",
+  "handle",
+  "harvest",
+  "identify",
+  "illustrate",
+  "inspect",
+  "install",
+  "interpret",
+  "label",
+  "layout",
+  "list",
+  "maintain",
+  "make",
+  "manage",
+  "market",
+  "measure",
+  "name",
+  "navigate",
+  "observe",
+  "operate",
+  "organize",
+  "outline",
+  "perform",
+  "plan",
+  "plant",
+  "practice",
+  "prepare",
+  "present",
+  "produce",
+  "promote",
+  "recite",
+  "recognize",
+  "recommend",
+  "record",
+  "reflect",
+  "repair",
+  "report",
+  "select",
+  "sell",
+  "serve",
+  "sew",
+  "show",
+  "solve",
+  "state",
+  "store",
+  "summarize",
+  "test",
+  "trace",
+  "troubleshoot",
+  "understand",
+  "unmatched",
+  "use",
+  "utilize",
+  "value",
+  "verify",
+  "write",
+]);
+
+function parseWeekBounds(
+  weekRange: string,
+): { start: number; end: number } | null {
+  const matches = weekRange.match(/\d+/g);
+  if (!matches || matches.length === 0) return null;
+  const nums = matches.map((m) => Number.parseInt(m, 10));
+  return {
+    start: Math.min(...nums),
+    end: Math.max(...nums),
+  };
+}
+
+function mergeWeekRanges(existing: string, incoming: string): string {
+  const a = parseWeekBounds(existing);
+  const b = parseWeekBounds(incoming);
+  if (!a || !b) return existing || incoming;
+  const start = Math.min(a.start, b.start);
+  const end = Math.max(a.end, b.end);
+  return start === end ? String(start) : `${start} to ${end}`;
+}
+
+function isSubTopicUnpackingPhrase(text: string): boolean {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 12) return false;
+  const firstWord = (words[0] ?? "").toLowerCase().replace(/[^a-z-]/g, "");
+  if (!firstWord || COMPETENCY_ACTION_VERBS.has(firstWord)) return false;
+  return true;
+}
+
+function appendSubTopicUnique(subTopics: string[], rawTopic: string): void {
+  const cleaned = rawTopic.trim().replace(/[.:\s]+$/, "");
+  const norm = normalizeForMatch(cleaned);
+  if (!norm) return;
+  if (subTopics.some((existing) => normalizeForMatch(existing) === norm)) {
+    return;
+  }
+  subTopics.push(cleaned);
+}
+
+interface ActiveCgMatch {
+  item: CurriculumCompetency;
+  sourceDocument: string;
+  gradeKey: string;
+  component: TleComponent;
+  sectorNorm: string;
+  term: BowTerm;
+  lastWeekEnd: number | null;
+}
+
 /**
  * Deterministically and idempotently merges parsed Budget of Work rows into
  * the curriculum catalog:
  * - Enriches matching Grade 7-10 CG competencies in place (preserving customNotes).
+ * - Rolls contiguous weekly sub-topic unpacking rows onto their parent matched CG competency.
  * - Adds unmatched Grade 7-10 BoW rows and all Grade 11-12 BoW rows as standalone
  *   built-in competencies with deterministic `bow-*` IDs.
  * - Preserves all existing custom competencies untouched.
@@ -899,16 +1056,20 @@ export function mergeBowIntoCatalog(
     .map((item) => ({ ...item }));
 
   const matchedCgIds = new Set<string>();
+  const activityChunksByCgId = new Map<string, string[]>();
   const unmatchedRows: ParsedBowRow[] = [];
+  let activeMatch: ActiveCgMatch | null = null;
 
   for (const row of parsedRows) {
     const canMatchCg = row.gradeLevels.every((g) => g <= 10);
     if (!canMatchCg) {
+      activeMatch = null;
       unmatchedRows.push(row);
       continue;
     }
 
     const rowSectorNorm = normalizeSectorForMatch(row.sector);
+    const rowGradeKey = row.gradeLevels.join("-");
     let bestItem: CurriculumCompetency | null = null;
     let bestScore = 0;
 
@@ -939,8 +1100,58 @@ export function mergeBowIntoCatalog(
 
     if (bestItem) {
       bestItem.budgetOfWork = buildBudgetOfWorkInfo(row);
+      const initialAct = row.suggestedActivities.trim();
+      activityChunksByCgId.set(bestItem.id, initialAct ? [initialAct] : []);
       matchedCgIds.add(bestItem.id);
+      activeMatch = {
+        item: bestItem,
+        sourceDocument: row.sourceDocument,
+        gradeKey: rowGradeKey,
+        component: row.component,
+        sectorNorm: rowSectorNorm,
+        term: row.term,
+        lastWeekEnd: parseWeekBounds(row.weekRange)?.end ?? null,
+      };
+      continue;
+    }
+
+    const rowBounds = parseWeekBounds(row.weekRange);
+    const canRollIntoActive =
+      activeMatch !== null &&
+      activeMatch.item.budgetOfWork !== undefined &&
+      activeMatch.sourceDocument === row.sourceDocument &&
+      activeMatch.gradeKey === rowGradeKey &&
+      activeMatch.component === row.component &&
+      activeMatch.sectorNorm === rowSectorNorm &&
+      activeMatch.term === row.term &&
+      activeMatch.lastWeekEnd !== null &&
+      rowBounds !== null &&
+      rowBounds.start >= activeMatch.lastWeekEnd &&
+      rowBounds.start <= activeMatch.lastWeekEnd + 1 &&
+      isSubTopicUnpackingPhrase(row.learningCompetency);
+
+    if (canRollIntoActive && activeMatch && rowBounds) {
+      const parent = activeMatch.item;
+      const bow = parent.budgetOfWork!;
+      bow.weekRange = mergeWeekRanges(bow.weekRange, row.weekRange);
+
+      const act = row.suggestedActivities.trim();
+      if (act) {
+        const chunks = activityChunksByCgId.get(parent.id) ?? [];
+        if (!chunks.includes(act)) {
+          chunks.push(act);
+          activityChunksByCgId.set(parent.id, chunks);
+          bow.suggestedActivities = chunks.join("\n");
+        }
+      }
+      if (!bow.suggestedPerformanceTasks && row.suggestedPerformanceTasks) {
+        bow.suggestedPerformanceTasks = row.suggestedPerformanceTasks;
+      }
+
+      appendSubTopicUnique(parent.contentSubTopics, row.learningCompetency);
+      activeMatch.lastWeekEnd = Math.max(activeMatch.lastWeekEnd!, rowBounds.end);
     } else {
+      activeMatch = null;
       unmatchedRows.push(row);
     }
   }
@@ -1003,4 +1214,137 @@ export function mergeBowIntoCatalog(
       totalCatalogCount: catalog.length,
     },
   };
+}
+
+export interface CatalogHealthDocumentCount {
+  document: string;
+  count: number;
+}
+
+export interface CatalogHealthBucket {
+  count: number;
+  documents: CatalogHealthDocumentCount[];
+}
+
+export interface CatalogHealthReport {
+  totalBuiltIn: number;
+  missingContentStandard: CatalogHealthBucket;
+  missingPerformanceStandard: CatalogHealthBucket;
+  emptySuggestedActivities: CatalogHealthBucket;
+  emptySuggestedPerformanceTasks: CatalogHealthBucket;
+  unmatchedBowRows: CatalogHealthBucket;
+}
+
+function toSortedHealthBucket(
+  countsByDoc: Map<string, number>,
+): CatalogHealthBucket {
+  const documents = [...countsByDoc.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([document, count]) => ({ document, count }));
+  const count = documents.reduce((sum, entry) => sum + entry.count, 0);
+  return { count, documents };
+}
+
+function recordHealthHit(countsByDoc: Map<string, number>, document: string): void {
+  countsByDoc.set(document, (countsByDoc.get(document) ?? 0) + 1);
+}
+
+/**
+ * Computes a deterministic catalog health report over built-in competencies
+ * flagging missing standards, empty BoW activity/task columns, and unmatched
+ * Grade 7-10 standalone BoW rows.
+ */
+export function computeCatalogHealthReport(
+  catalog: readonly CurriculumCompetency[],
+): CatalogHealthReport {
+  const missingCs = new Map<string, number>();
+  const missingPs = new Map<string, number>();
+  const emptyAct = new Map<string, number>();
+  const emptyPt = new Map<string, number>();
+  const unmatchedBow = new Map<string, number>();
+
+  let totalBuiltIn = 0;
+
+  for (const item of catalog) {
+    if (item.source !== "built-in") continue;
+    totalBuiltIn += 1;
+
+    const docLabel =
+      item.budgetOfWork?.sourceDocument?.trim() || "(Curriculum Guide)";
+
+    if (!item.contentStandard.trim()) {
+      recordHealthHit(missingCs, docLabel);
+    }
+    if (!item.performanceStandard.trim()) {
+      recordHealthHit(missingPs, docLabel);
+    }
+
+    if (item.budgetOfWork) {
+      const bowDocLabel =
+        item.budgetOfWork.sourceDocument?.trim() || "(Unknown BoW)";
+      if (!item.budgetOfWork.suggestedActivities.trim()) {
+        recordHealthHit(emptyAct, bowDocLabel);
+      }
+      if (!item.budgetOfWork.suggestedPerformanceTasks.trim()) {
+        recordHealthHit(emptyPt, bowDocLabel);
+      }
+    }
+
+    if (item.id.startsWith("bow-") && item.gradeLevels.every((g) => g <= 10)) {
+      recordHealthHit(unmatchedBow, docLabel);
+    }
+  }
+
+  return {
+    totalBuiltIn,
+    missingContentStandard: toSortedHealthBucket(missingCs),
+    missingPerformanceStandard: toSortedHealthBucket(missingPs),
+    emptySuggestedActivities: toSortedHealthBucket(emptyAct),
+    emptySuggestedPerformanceTasks: toSortedHealthBucket(emptyPt),
+    unmatchedBowRows: toSortedHealthBucket(unmatchedBow),
+  };
+}
+
+function formatHealthBucket(label: string, bucket: CatalogHealthBucket): string[] {
+  if (bucket.count === 0) {
+    return [`  ${label}: 0`];
+  }
+  const noun = bucket.documents.length === 1 ? "document" : "documents";
+  const lines = [
+    `  ${label}: ${bucket.count} across ${bucket.documents.length} ${noun}`,
+  ];
+  for (const doc of bucket.documents) {
+    lines.push(`    - ${doc.document} (${doc.count})`);
+  }
+  return lines;
+}
+
+/**
+ * Formats a CatalogHealthReport into a deterministic human-readable CLI report.
+ */
+export function formatCatalogHealthReport(report: CatalogHealthReport): string {
+  const lines = [
+    `Catalog Health Report (${report.totalBuiltIn} built-in competencies):`,
+    ...formatHealthBucket(
+      "Missing Content Standard",
+      report.missingContentStandard,
+    ),
+    ...formatHealthBucket(
+      "Missing Performance Standard",
+      report.missingPerformanceStandard,
+    ),
+    ...formatHealthBucket(
+      "Empty Suggested Activities",
+      report.emptySuggestedActivities,
+    ),
+    ...formatHealthBucket(
+      "Empty Suggested Performance Tasks",
+      report.emptySuggestedPerformanceTasks,
+    ),
+    ...formatHealthBucket(
+      "Unmatched Grade 7-10 BoW Rows",
+      report.unmatchedBowRows,
+    ),
+  ];
+  return lines.join("\n");
 }
