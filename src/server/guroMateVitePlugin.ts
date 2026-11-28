@@ -17,11 +17,15 @@ import {
   createGuroMateEngine,
 } from "../engine/createGuroMateEngine";
 import {
+  FORMATIVE_ASSESSMENT_TYPES,
   GRADE_LEVELS,
   QUARTERS,
   QUIZ_QUESTION_TYPES,
+  SESSION_NUMBERS,
   TLE_COMPONENTS,
   type AiProviderSettings,
+  type BlueprintActivityOption,
+  type BlueprintAssessmentOption,
   type ClassSectionInput,
   type ClassroomContext,
   type ClassroomFacility,
@@ -30,12 +34,16 @@ import {
   type DailyLessonLog,
   type DailyLessonPlan,
   type DeliveryModality,
+  type DllLessonBlueprint,
+  type DllSessionBlueprint,
   type DllSessionConfig,
+  type FormativeAssessmentType,
   type GenerateDllInput,
   type GenerateDlpInput,
   type GenerateQuizInput,
   type GradeLevel,
   type GuroMateEngine,
+  type PlanDllInput,
   type QuarterNumber,
   type Quiz,
   type QuizItemCounts,
@@ -248,9 +256,9 @@ function parseReferenceMaterial(raw: unknown): ReferenceMaterial | undefined {
   };
 }
 
-function parseGenerateDllBody(body: unknown): GenerateDllInput {
+function parsePlanDllBody(body: unknown): PlanDllInput {
   if (!isRecord(body)) {
-    throw new HttpError(400, "DLL generation payload must be a JSON object.");
+    throw new HttpError(400, "DLL planning payload must be a JSON object.");
   }
   const classroomContext = parseClassroomContext(body.classroomContext);
   const referenceMaterial = parseReferenceMaterial(body.referenceMaterial);
@@ -289,6 +297,120 @@ function parseGenerateDllBody(body: unknown): GenerateDllInput {
       ? { promptNotes: body.promptNotes }
       : {}),
     sessions,
+  };
+}
+
+function parseDllBlueprint(raw: unknown): DllLessonBlueprint | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isRecord(raw) || !Array.isArray(raw.sessions) || raw.sessions.length !== 5) {
+    throw new HttpError(
+      400,
+      "blueprint must be an object containing all 5 Sessions.",
+    );
+  }
+
+  const parsedSessions = raw.sessions.map((entry, idx): DllSessionBlueprint => {
+    if (!isRecord(entry)) {
+      throw new HttpError(400, "Each blueprint session must be an object.");
+    }
+    const rawNum = Number(entry.sessionNumber);
+    const sessionNumber = SESSION_NUMBERS.includes(rawNum as SessionNumber)
+      ? (rawNum as SessionNumber)
+      : SESSION_NUMBERS[idx]!;
+    const mode =
+      entry.mode === "non-instructional" ? "non-instructional" : "instructional";
+    const activityOptions: BlueprintActivityOption[] = Array.isArray(
+      entry.activityOptions,
+    )
+      ? entry.activityOptions
+          .filter(isRecord)
+          .map((opt) => ({
+            id: typeof opt.id === "string" ? opt.id : "",
+            title: typeof opt.title === "string" ? opt.title : "",
+            summary: typeof opt.summary === "string" ? opt.summary : "",
+            ...(opt.source === "bow" || opt.source === "authentic"
+              ? { source: opt.source }
+              : {}),
+            recommended: opt.recommended === true,
+          }))
+      : [];
+    const assessmentOptions: BlueprintAssessmentOption[] = Array.isArray(
+      entry.assessmentOptions,
+    )
+      ? entry.assessmentOptions
+          .filter(isRecord)
+          .filter(
+            (opt) =>
+              typeof opt.type === "string" &&
+              FORMATIVE_ASSESSMENT_TYPES.includes(
+                opt.type as FormativeAssessmentType,
+              ),
+          )
+          .map((opt) => ({
+            type: opt.type as FormativeAssessmentType,
+            label: typeof opt.label === "string" ? opt.label : "",
+            preview: typeof opt.preview === "string" ? opt.preview : "",
+            recommended: opt.recommended === true,
+          }))
+      : [];
+    const selectedAssessmentType =
+      typeof entry.selectedAssessmentType === "string" &&
+      FORMATIVE_ASSESSMENT_TYPES.includes(
+        entry.selectedAssessmentType as FormativeAssessmentType,
+      )
+        ? (entry.selectedAssessmentType as FormativeAssessmentType)
+        : undefined;
+
+    return {
+      sessionNumber,
+      mode,
+      competencyIds: Array.isArray(entry.competencyIds)
+        ? entry.competencyIds.filter((s): s is string => typeof s === "string")
+        : [],
+      components: Array.isArray(entry.components)
+        ? entry.components.filter(
+            (c): c is TleComponent =>
+              typeof c === "string" &&
+              TLE_COMPONENTS.includes(c as TleComponent),
+          )
+        : [],
+      ...(typeof entry.nonInstructionalReason === "string"
+        ? { nonInstructionalReason: entry.nonInstructionalReason }
+        : {}),
+      progressionFocus:
+        typeof entry.progressionFocus === "string"
+          ? entry.progressionFocus
+          : "",
+      learningObjectives:
+        typeof entry.learningObjectives === "string"
+          ? entry.learningObjectives
+          : "",
+      activityOptions,
+      selectedActivityId:
+        typeof entry.selectedActivityId === "string"
+          ? entry.selectedActivityId
+          : "",
+      assessmentOptions,
+      ...(selectedAssessmentType ? { selectedAssessmentType } : {}),
+    };
+  }) as DllLessonBlueprint["sessions"];
+
+  return {
+    lessonTitle: typeof raw.lessonTitle === "string" ? raw.lessonTitle : "",
+    references: typeof raw.references === "string" ? raw.references : "",
+    sessions: parsedSessions,
+  };
+}
+
+function parseGenerateDllBody(body: unknown): GenerateDllInput {
+  if (!isRecord(body)) {
+    throw new HttpError(400, "DLL generation payload must be a JSON object.");
+  }
+  const base = parsePlanDllBody(body);
+  const blueprint = parseDllBlueprint(body.blueprint);
+  return {
+    ...base,
+    ...(blueprint ? { blueprint } : {}),
   };
 }
 
@@ -525,6 +647,12 @@ export function createGuroMateMiddleware(
 
       if (req.method === "GET" && urlPath === "/api/dlls") {
         sendJson(res, 200, await engine.listDlls());
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/api/dlls/plan") {
+        const input = parsePlanDllBody(await readJsonBody(req));
+        sendJson(res, 200, await engine.planDll(input));
         return;
       }
 

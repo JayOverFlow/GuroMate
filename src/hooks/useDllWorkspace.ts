@@ -16,7 +16,9 @@ import {
   type DailyLessonPlan,
   type DeliveryModality,
   type DllIntentions,
+  type DllLessonBlueprint,
   type DllSessionConfig,
+  type FormativeAssessmentType,
   type SessionNumber,
   type TleComponent,
 } from "../engine/types";
@@ -176,6 +178,8 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
   const [sessionConfigs, setSessionConfigs] = useState<DllSessionConfig[]>(
     createInitialDllSessionConfigs,
   );
+  const [blueprint, setBlueprint] = useState<DllLessonBlueprint | null>(null);
+  const [planning, setPlanning] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [pickedCompetencyId, setPickedCompetencyId] = useState("");
   const [fieldErrors, setFieldErrors] = useState<
@@ -212,6 +216,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setReferenceText(fresh.referenceText);
     setPromptNotes(fresh.promptNotes);
     setSessionConfigs(fresh.sessionConfigs);
+    setBlueprint(null);
     setPickedCompetencyId(fresh.pickedCompetencyId);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
@@ -267,6 +272,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     setSelectedDllId("");
     setViewMode("edit");
     setSessionConfigs((prev) => applyDllLaunchTarget(prev, initialLaunchTarget));
+    setBlueprint(null);
     interactedFieldsRef.current.clear();
     setFieldErrors({});
     const trimmed = initialLaunchTarget.competencyId.trim();
@@ -564,8 +570,7 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     );
   }
 
-  async function handleGenerate(event: FormEvent) {
-    event.preventDefault();
+  function validateBuilderBeforeRequest(): boolean {
     for (const field of DLL_BUILDER_FIELDS) {
       interactedFieldsRef.current.add(field);
     }
@@ -586,43 +591,135 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
           seq: (prev?.seq ?? 0) + 1,
         }));
       }
-      return;
+      return false;
     }
-
     interactedFieldsRef.current.clear();
     setFieldErrors({});
+    return true;
+  }
+
+  function buildPlanRequestPayload() {
+    const resolvedPeriod =
+      parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
+    return {
+      lessonTitle,
+      gradeAndSection,
+      references,
+      classroomContext: {
+        ...classroomContext,
+        periodMinutes: resolvedPeriod,
+      },
+      ...(referenceText.trim()
+        ? {
+            referenceMaterial: {
+              ...(referenceSourceLabel.trim()
+                ? { sourceLabel: referenceSourceLabel.trim() }
+                : {}),
+              text: referenceText,
+            },
+          }
+        : {}),
+      promptNotes,
+      sessions: sessionConfigs,
+    };
+  }
+
+  async function handlePlanLesson(event?: FormEvent) {
+    event?.preventDefault();
+    if (!validateBuilderBeforeRequest()) return;
+
+    setStatus(null);
+    setPlanning(true);
+    try {
+      const res = await fetch("/api/dlls/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPlanRequestPayload()),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const planned = (await res.json()) as DllLessonBlueprint;
+      setBlueprint(planned);
+      setStatus({
+        tone: "success",
+        text: "Lesson Blueprint ready. Review or tweak objectives, activities, and formative assessments, then click Approve & Generate DLL.",
+      });
+    } catch (err) {
+      setStatus({
+        tone: "error",
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  function updateBlueprintTitle(title: string) {
+    setBlueprint((prev) => (prev ? { ...prev, lessonTitle: title } : prev));
+  }
+
+  function updateBlueprintSessionObjectives(
+    sessionNumber: SessionNumber,
+    learningObjectives: string,
+  ) {
+    setBlueprint((prev) => {
+      if (!prev) return prev;
+      const nextSessions = prev.sessions.map((session) =>
+        session.sessionNumber === sessionNumber
+          ? { ...session, learningObjectives }
+          : session,
+      ) as DllLessonBlueprint["sessions"];
+      return { ...prev, sessions: nextSessions };
+    });
+  }
+
+  function selectBlueprintActivity(
+    sessionNumber: SessionNumber,
+    activityId: string,
+  ) {
+    setBlueprint((prev) => {
+      if (!prev) return prev;
+      const nextSessions = prev.sessions.map((session) =>
+        session.sessionNumber === sessionNumber
+          ? { ...session, selectedActivityId: activityId }
+          : session,
+      ) as DllLessonBlueprint["sessions"];
+      return { ...prev, sessions: nextSessions };
+    });
+  }
+
+  function selectBlueprintAssessment(
+    sessionNumber: SessionNumber,
+    assessmentType: FormativeAssessmentType,
+  ) {
+    setBlueprint((prev) => {
+      if (!prev) return prev;
+      const nextSessions = prev.sessions.map((session) =>
+        session.sessionNumber === sessionNumber
+          ? { ...session, selectedAssessmentType: assessmentType }
+          : session,
+      ) as DllLessonBlueprint["sessions"];
+      return { ...prev, sessions: nextSessions };
+    });
+  }
+
+  async function handleApproveAndGenerate() {
+    if (!validateBuilderBeforeRequest()) return;
+
     setStatus(null);
     setGenerating(true);
     try {
-      const resolvedPeriod =
-        parsePeriodMinutes(periodDraft) ?? classroomContext.periodMinutes;
+      const payload = buildPlanRequestPayload();
       const res = await fetch("/api/dlls/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lessonTitle,
-          gradeAndSection,
-          references,
-          classroomContext: {
-            ...classroomContext,
-            periodMinutes: resolvedPeriod,
-          },
-          ...(referenceText.trim()
-            ? {
-                referenceMaterial: {
-                  ...(referenceSourceLabel.trim()
-                    ? { sourceLabel: referenceSourceLabel.trim() }
-                    : {}),
-                  text: referenceText,
-                },
-              }
-            : {}),
-          promptNotes,
-          sessions: sessionConfigs,
+          ...payload,
+          ...(blueprint ? { blueprint } : {}),
         }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const created = (await res.json()) as DailyLessonLog;
+      setBlueprint(null);
       setDlls((prev) => [created, ...prev]);
       setSelectedDllId(created.id);
       setViewMode("edit");
@@ -780,6 +877,8 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     promptNotes,
     setPromptNotes,
     sessionConfigs,
+    blueprint,
+    planning,
     generating,
     pickedCompetencyId,
     setPickedCompetencyId,
@@ -789,7 +888,12 @@ export function useDllWorkspace(options: UseDllWorkspaceOptions = {}) {
     removeCompetencyFromSession,
     updateSessionMode,
     updateNonInstructionalReason,
-    handleGenerate,
+    handlePlanLesson,
+    updateBlueprintTitle,
+    updateBlueprintSessionObjectives,
+    selectBlueprintActivity,
+    selectBlueprintAssessment,
+    handleApproveAndGenerate,
     updateDraftHeader,
     updateDraftSessionField,
     handleSaveEdits,

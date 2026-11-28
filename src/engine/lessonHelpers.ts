@@ -2,14 +2,18 @@ import { AI_PROVIDER_MAP } from "./providers";
 import {
   CLASSROOM_FACILITIES,
   DELIVERY_MODALITIES,
+  FORMATIVE_ASSESSMENT_TYPES,
   MAX_PERIOD_MINUTES,
   MIN_PERIOD_MINUTES,
   type AiProviderSettings,
+  type BlueprintActivityOption,
+  type BlueprintAssessmentOption,
   type BudgetOfWorkInfo,
   type ClassroomContext,
   type ClassroomFacility,
   type CurriculumCompetency,
   type DeliveryModality,
+  type FormativeAssessmentType,
   type ReferenceMaterial,
   type TeacherProfileSettings,
   type TleComponent,
@@ -37,6 +41,239 @@ export const DELIVERY_MODALITY_LABELS: Record<DeliveryModality, string> = {
   blended: "Blended",
   "modular-offline": "Modular / Offline",
 };
+
+export const FORMATIVE_ASSESSMENT_LABELS: Record<
+  FormativeAssessmentType,
+  string
+> = {
+  "exit-ticket": "Exit Ticket",
+  checklist: "Observation / Skill Checklist",
+  "demo-rubric": "Performance / Demo Rubric",
+  worksheet: "Activity Worksheet",
+  "short-quiz": "Short Quiz",
+};
+
+const FORMATIVE_ASSESSMENT_DEFAULT_PREVIEWS: Record<
+  FormativeAssessmentType,
+  (topic: string) => string
+> = {
+  "exit-ticket": (topic) =>
+    `Quick 3-prompt check on key takeaways and questions about ${topic}.`,
+  checklist: (topic) =>
+    `Teacher and peer observation checklist verifying safe, accurate steps for ${topic}.`,
+  "demo-rubric": (topic) =>
+    `3-criterion rubric scoring hands-on execution, accuracy, and safety on ${topic}.`,
+  worksheet: (topic) =>
+    `Structured practice sheet applying ${topic} concepts to a Philippine classroom scenario.`,
+  "short-quiz": (topic) =>
+    `Brief objective check (3–5 items) verifying mastery of core ${topic} concepts.`,
+};
+
+/** Removes accidental Cognitive:/Psychomotor:/Affective: domain prefixes from bulleted objectives. */
+export function cleanObjectiveBullets(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return "";
+      const withoutBullet = trimmed.replace(/^(?:[•\-*]\s*|\d+[.)]\s*)/, "");
+      const withoutPrefix = withoutBullet.replace(
+        /^(?:cognitive|psychomotor|affective)\s*(?:domain)?\s*[:\-–—]\s*/i,
+        "",
+      );
+      return `• ${withoutPrefix.trim()}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeSingleLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+export interface RawBlueprintActivityOption {
+  id?: unknown;
+  title?: unknown;
+  summary?: unknown;
+  source?: unknown;
+  recommended?: unknown;
+}
+
+export interface RawBlueprintAssessmentOption {
+  type?: unknown;
+  label?: unknown;
+  preview?: unknown;
+  recommended?: unknown;
+}
+
+/** Normalizes 2–3 concrete Lesson Blueprint activity options and guarantees exactly one recommended pick. */
+export function normalizeBlueprintActivityOptions(params: {
+  rawOptions: unknown;
+  idPrefix: string;
+  competencies: CurriculumCompetency[];
+}): { options: BlueprintActivityOption[]; selectedActivityId: string } {
+  const parsed: BlueprintActivityOption[] = [];
+  const usedIds = new Set<string>();
+
+  if (Array.isArray(params.rawOptions)) {
+    for (const item of params.rawOptions) {
+      if (parsed.length >= 3) break;
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const raw = item as RawBlueprintActivityOption;
+      const title =
+        typeof raw.title === "string" ? normalizeSingleLine(raw.title) : "";
+      if (!title) continue;
+      const summary =
+        typeof raw.summary === "string" ? normalizeSingleLine(raw.summary) : "";
+      const rawId =
+        typeof raw.id === "string" ? normalizeSingleLine(raw.id) : "";
+      const baseId = rawId || `${params.idPrefix}-act-${parsed.length + 1}`;
+      const id = usedIds.has(baseId)
+        ? `${params.idPrefix}-act-${parsed.length + 1}`
+        : baseId;
+      usedIds.add(id);
+      const source =
+        raw.source === "bow" || raw.source === "authentic"
+          ? raw.source
+          : undefined;
+      parsed.push({
+        id,
+        title,
+        summary: summary || `Collaborative guided task applying ${title}.`,
+        ...(source ? { source } : {}),
+        recommended: raw.recommended === true,
+      });
+    }
+  }
+
+  const primaryComp = params.competencies[0];
+  const topic = primaryComp?.contentTopic.trim() || "the target competency";
+  const bowSuggested =
+    primaryComp?.budgetOfWork?.suggestedActivities.trim() ?? "";
+
+  const fallbacks: Array<Omit<BlueprintActivityOption, "id" | "recommended">> = [
+    bowSuggested
+      ? {
+          title: `Adapted BoW Activity: ${topic}`,
+          summary: normalizeSingleLine(bowSuggested).slice(0, 180),
+          source: "bow",
+        }
+      : {
+          title: `Guided Concept & Case Exploration: ${topic}`,
+          summary: `Small-group Philippine workplace scenario unpacking core concepts and tools for ${topic}.`,
+          source: "authentic",
+        },
+    {
+      title: `Hands-On Guided Practice: ${topic}`,
+      summary: `Step-by-step teacher modeling followed by collaborative station practice applying ${topic}.`,
+      source: "authentic",
+    },
+  ];
+
+  for (const fallback of fallbacks) {
+    if (parsed.length >= 2) break;
+    const id = `${params.idPrefix}-act-${parsed.length + 1}`;
+    if (usedIds.has(id)) continue;
+    usedIds.add(id);
+    parsed.push({
+      id,
+      ...fallback,
+      recommended: false,
+    });
+  }
+
+  let recIndex = parsed.findIndex((opt) => opt.recommended);
+  if (recIndex === -1) recIndex = 0;
+
+  const options = parsed.map((opt, idx) => ({
+    ...opt,
+    recommended: idx === recIndex,
+  }));
+
+  return {
+    options,
+    selectedActivityId: options[recIndex]?.id ?? "",
+  };
+}
+
+/** Normalizes all 5 Formative Assessment options in canonical order and guarantees exactly one recommended pick. */
+export function normalizeBlueprintAssessmentOptions(params: {
+  rawOptions: unknown;
+  recommendedTypeHint?: unknown;
+  competencies: CurriculumCompetency[];
+  defaultRecommended?: FormativeAssessmentType;
+}): {
+  options: BlueprintAssessmentOption[];
+  selectedAssessmentType: FormativeAssessmentType;
+} {
+  const byType = new Map<
+    FormativeAssessmentType,
+    { preview: string; recommended: boolean }
+  >();
+  let firstRecommended: FormativeAssessmentType | undefined;
+
+  if (Array.isArray(params.rawOptions)) {
+    for (const item of params.rawOptions) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const raw = item as RawBlueprintAssessmentOption;
+      if (
+        typeof raw.type !== "string" ||
+        !FORMATIVE_ASSESSMENT_TYPES.includes(
+          raw.type as FormativeAssessmentType,
+        )
+      ) {
+        continue;
+      }
+      const type = raw.type as FormativeAssessmentType;
+      const preview =
+        typeof raw.preview === "string"
+          ? normalizeSingleLine(raw.preview)
+          : "";
+      const recommended = raw.recommended === true;
+      if (recommended && !firstRecommended) {
+        firstRecommended = type;
+      }
+      if (!byType.has(type)) {
+        byType.set(type, { preview, recommended });
+      }
+    }
+  }
+
+  if (
+    !firstRecommended &&
+    typeof params.recommendedTypeHint === "string" &&
+    FORMATIVE_ASSESSMENT_TYPES.includes(
+      params.recommendedTypeHint as FormativeAssessmentType,
+    )
+  ) {
+    firstRecommended = params.recommendedTypeHint as FormativeAssessmentType;
+  }
+
+  const chosenRecommended: FormativeAssessmentType =
+    firstRecommended ?? params.defaultRecommended ?? "exit-ticket";
+  const topic =
+    params.competencies[0]?.contentTopic.trim() || "the session objectives";
+
+  const options: BlueprintAssessmentOption[] = FORMATIVE_ASSESSMENT_TYPES.map(
+    (type) => {
+      const existing = byType.get(type);
+      return {
+        type,
+        label: FORMATIVE_ASSESSMENT_LABELS[type],
+        preview:
+          existing?.preview ||
+          FORMATIVE_ASSESSMENT_DEFAULT_PREVIEWS[type](topic),
+        recommended: type === chosenRecommended,
+      };
+    },
+  );
+
+  return {
+    options,
+    selectedAssessmentType: chosenRecommended,
+  };
+}
 
 export function formatPeriodDuration(minutes: number): string {
   if (minutes === 120) return "120 minutes (2 hrs)";

@@ -202,11 +202,62 @@ export interface ReferenceMaterialExtractResult {
   maxLength: number;
 }
 
+export const FORMATIVE_ASSESSMENT_TYPES = [
+  "exit-ticket",
+  "checklist",
+  "demo-rubric",
+  "worksheet",
+  "short-quiz",
+] as const;
+export type FormativeAssessmentType =
+  (typeof FORMATIVE_ASSESSMENT_TYPES)[number];
+
+export interface BlueprintActivityOption {
+  id: string;
+  title: string;
+  summary: string;
+  source?: "bow" | "authentic";
+  recommended: boolean;
+}
+
+export interface BlueprintAssessmentOption {
+  type: FormativeAssessmentType;
+  label: string;
+  preview: string;
+  recommended: boolean;
+}
+
 export interface DllSessionConfig {
   sessionNumber: SessionNumber;
   mode: "instructional" | "non-instructional";
   competencyIds: string[];
   nonInstructionalReason?: string;
+}
+
+export interface DllSessionBlueprint {
+  sessionNumber: SessionNumber;
+  mode: "instructional" | "non-instructional";
+  competencyIds: string[];
+  components: TleComponent[];
+  nonInstructionalReason?: string;
+  progressionFocus: string;
+  learningObjectives: string;
+  activityOptions: BlueprintActivityOption[];
+  selectedActivityId: string;
+  assessmentOptions: BlueprintAssessmentOption[];
+  selectedAssessmentType?: FormativeAssessmentType;
+}
+
+export interface DllLessonBlueprint {
+  lessonTitle: string;
+  references: string;
+  sessions: [
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+    DllSessionBlueprint,
+  ];
 }
 
 export interface DllSessionPlan {
@@ -215,6 +266,11 @@ export interface DllSessionPlan {
   competencyIds: string[];
   components: TleComponent[];
   nonInstructionalReason?: string;
+  progressionFocus?: string;
+  selectedActivityTitle?: string;
+  selectedActivitySummary?: string;
+  selectedAssessmentType?: FormativeAssessmentType;
+  selectedAssessmentPreview?: string;
   learningObjectives: string;
   preLesson: string;
   lessonFlow: string;
@@ -254,7 +310,7 @@ export interface DailyLessonLog {
   ];
 }
 
-export interface GenerateDllInput {
+export interface PlanDllInput {
   lessonTitle?: string;
   gradeAndSection: string;
   references?: string;
@@ -262,6 +318,10 @@ export interface GenerateDllInput {
   referenceMaterial?: ReferenceMaterial;
   promptNotes?: string;
   sessions: DllSessionConfig[];
+}
+
+export interface GenerateDllInput extends PlanDllInput {
+  blueprint?: DllLessonBlueprint;
 }
 
 export interface DocxExport {
@@ -432,6 +492,7 @@ export interface GuroMateEngine {
   ): Promise<ReferenceMaterialExtractResult>;
   listDlls(): Promise<DailyLessonLog[]>;
   getDll(id: string): Promise<DailyLessonLog>;
+  planDll(input: PlanDllInput): Promise<DllLessonBlueprint>;
   generateDll(input: GenerateDllInput): Promise<DailyLessonLog>;
   saveDll(dll: DailyLessonLog): Promise<DailyLessonLog>;
   deleteDll(id: string): Promise<void>;
